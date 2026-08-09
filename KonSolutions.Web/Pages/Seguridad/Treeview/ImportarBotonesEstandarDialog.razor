@@ -1,0 +1,89 @@
+@*
+    ImportarBotonesEstandarDialog.razor
+    --------------------------------------------------------------------------
+    Lista los botones estándar que aún NO están asignados a la opción
+    seleccionada (los ya asignados se filtran antes de llegar aquí) y deja
+    marcar con checkbox cuáles importar.
+*@
+@inject IJSRuntime JS
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">
+            Seleccione los botones estándar que desea importar a esta opción.
+        </MudText>
+
+        <div class="d-flex align-center gap-2 mb-2">
+            <MudCheckBox T="bool" Value="@TodosSeleccionados" ValueChanged="ToggleTodos" Color="Color.Primary" />
+            <MudText Typo="Typo.caption" Style="opacity:.6;">
+                Seleccionar todos (@_seleccionados.Count de @Disponibles.Count)
+            </MudText>
+        </div>
+
+        <MudPaper Elevation="0" Style="border:1px solid var(--line);max-height:360px;overflow-y:auto;">
+            @foreach (var b in Disponibles)
+            {
+                var item = b;
+                <div class="d-flex align-center gap-2 px-2"
+                     style="border-bottom:1px solid var(--line);cursor:pointer;"
+                     @onclick="@(() => Toggle(item))">
+                    <MudCheckBox T="bool" Value="@_seleccionados.Contains(item.COD_BOTON_OPCION_ESTANDAR ?? "")"
+                                 ValueChanged="@(_ => Toggle(item))" Color="Color.Primary" />
+                    @if (item.IMG_ICONO is { Length: > 0 })
+                    {
+                        <img src="data:image/png;base64,@Convert.ToBase64String(item.IMG_ICONO)"
+                             style="width:18px;height:18px;object-fit:contain;flex-shrink:0;" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.SmartButton" Style="font-size:.95rem;opacity:.4;flex-shrink:0;" />
+                    }
+                    <span style="font-size:.85rem;padding:6px 0;">
+                        @(string.IsNullOrWhiteSpace(item.DES_BOTON_OPCION_ESTANDAR) ? item.COD_BOTON_OPCION_ESTANDAR : item.DES_BOTON_OPCION_ESTANDAR)
+                    </span>
+                </div>
+            }
+        </MudPaper>
+
+        <div class="d-flex justify-end gap-2 mt-4 dialog-acciones-fijas">
+            <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel" OnClick="@(async () => { try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { } MudDialog.Cancel(); })"
+                       Style="background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cancelar</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.FileDownload"
+                       Style="background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));"
+                       Disabled="@(!_seleccionados.Any())"
+                       OnClick="Confirmar">
+                Importar (@_seleccionados.Count)
+            </MudButton>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public List<KONSolutions.Shared.Models.Seguridad.BotonEstandar> Disponibles { get; set; } = new();
+
+    private readonly HashSet<string> _seleccionados = new();
+
+    private bool TodosSeleccionados => Disponibles.Any() && _seleccionados.Count == Disponibles.Count;
+
+    private void Toggle(KONSolutions.Shared.Models.Seguridad.BotonEstandar item)
+    {
+        var cod = item.COD_BOTON_OPCION_ESTANDAR ?? "";
+        if (!_seleccionados.Remove(cod)) _seleccionados.Add(cod);
+    }
+
+    private void ToggleTodos(bool marcarTodos)
+    {
+        _seleccionados.Clear();
+        if (marcarTodos)
+            foreach (var b in Disponibles)
+                _seleccionados.Add(b.COD_BOTON_OPCION_ESTANDAR ?? "");
+    }
+
+    private void Confirmar()
+    {
+        var elegidos = Disponibles.Where(b => _seleccionados.Contains(b.COD_BOTON_OPCION_ESTANDAR ?? "")).ToList();
+        MudDialog.Close(DialogResult.Ok(elegidos));
+    }
+}

@@ -1,0 +1,75 @@
+@using KONSolutions.Shared.Models.Entorno
+@inject CatalogoService<BancoColor, BancoColorDto> Service
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(480px,95vw);">
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            @if (_isEdit || _readonly)
+            {
+                <MudTextField Value="@_model.COD_BANCO_COLOR.ToString()" Label="Código" Variant="Variant.Outlined"
+                              Disabled="true" Class="mb-3" />
+            }
+            <CampoTexto Tabla="ENTORNO.BANCO_COLORES" Columna="DES_BANCO_COLOR"
+                        @bind-Value="_model.DES_BANCO_COLOR" Disabled="_readonly" />
+
+            <MudText Typo="Typo.caption" Class="mono mb-1 mt-2" Style="opacity:.55;">COLOR</MudText>
+            <ColorConSwatch @bind-Text="_model.DES_CODIGO_COLOR" Label="Color" Class="mb-3" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public BancoColor? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private BancoColorDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(BancoColor m)
+    {
+        _model.COD_BANCO_COLOR  = m.COD_BANCO_COLOR;
+        _model.DES_BANCO_COLOR  = m.DES_BANCO_COLOR;
+        _model.DES_CODIGO_COLOR = m.DES_CODIGO_COLOR;
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_BANCO_COLOR.ToString());
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Modo != CrudModo.Create && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.COD_BANCO_COLOR.ToString());
+            _saving = false;
+            if (okd) { Snackbar.Add("Color eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(BancoColorDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Color actualizado." : "Color creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(BancoColorDialog));
+    }
+}

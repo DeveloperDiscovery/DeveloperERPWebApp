@@ -1,0 +1,209 @@
+@page "/entorno/banco-colores"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Entorno
+@inject CatalogoService<BancoColor, BancoColorDto> Service
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject ConfigService ConfigSvc
+@implements IDisposable
+
+<PageTitle>Banco de Colores · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Banco de Colores" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ENTORNO · @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTerm" OnSearch="HandleSearch" Placeholder="Buscar color..." DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Banco de Colores" Headers="@_printHeaders" Rows="@PrintRows()" />
+        <AccionesBotones CodAplicacion="@CodAplicacion"
+                         CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header"
+                         OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="banco-colores" style="position:relative;">
+    <MudDataGrid T="BancoColor" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Title="Color" Sortable="false" Width="@Limites.ColWidth("ENTORNO.BANCO_COLORES","DES_CODIGO_COLOR",70,90)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <div style="@($"width:24px;height:24px;border-radius:4px;border:1px solid var(--line);background:{context.Item.DES_CODIGO_COLOR};margin:0 auto;")"></div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Código" Width="@Limites.ColWidth("ENTORNO.BANCO_COLORES","COD_BANCO_COLOR",60,150)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_BANCO_COLOR" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="BancoColor" ItemsBase="@BaseSinEstaColumna(0)"
+                                            ValorDe="@(x => x.COD_BANCO_COLOR.ToString())"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_BANCO_COLOR</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("ENTORNO.BANCO_COLORES","DES_BANCO_COLOR",120,350)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_BANCO_COLOR" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="BancoColor" ItemsBase="@BaseSinEstaColumna(1)"
+                                            ValorDe="@(x => x.DES_BANCO_COLOR ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_BANCO_COLOR</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Código de color" Width="@Limites.ColWidth("ENTORNO.BANCO_COLORES","DES_CODIGO_COLOR",100,150)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_CODIGO_COLOR" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="BancoColor" ItemsBase="@BaseSinEstaColumna(2)"
+                                            ValorDe="@(x => x.DES_CODIGO_COLOR ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(2, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.DES_CODIGO_COLOR</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion"
+                                     CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                     OnAccion="@(b => OnAccionGrilla(item, b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin colores en el banco.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="BancoColor" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<BancoColor> _items = new();
+    private string _searchTerm = string.Empty;
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<BancoColor> Ordenar(List<BancoColor> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_BANCO_COLOR).ToList() : items.OrderByDescending(x => x.COD_BANCO_COLOR).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_BANCO_COLOR).ToList() : items.OrderByDescending(x => x.DES_BANCO_COLOR).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_CODIGO_COLOR).ToList() : items.OrderByDescending(x => x.DES_CODIGO_COLOR).ToList(),
+        _ => items
+    };
+
+    private List<BancoColor> _visibles => Ordenar(AplicarTodos(_items, -1));
+    private List<BancoColor> BaseSinEstaColumna(int col) => AplicarTodos(_items, col);
+
+    private List<BancoColor> AplicarTodos(List<BancoColor> origen, int excluir)
+    {
+        IEnumerable<BancoColor> q = origen;
+        foreach (var (col, vals) in _filtros)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.COD_BANCO_COLOR.ToString())),
+                1 => q.Where(x => vals.Contains(x.DES_BANCO_COLOR ?? "")),
+                2 => q.Where(x => vals.Contains(x.DES_CODIGO_COLOR ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltro(int col, HashSet<string>? vals) { _filtros[col] = vals; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private readonly List<string> _printHeaders = new() { "Código", "Descripción", "Código de color" };
+    private List<List<string>> PrintRows() => _items.Select(b => new List<string>
+    {
+        b.COD_BANCO_COLOR.ToString(), b.DES_BANCO_COLOR ?? "", b.DES_CODIGO_COLOR ?? ""
+    }).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ENTORNO", "BancoColores");
+        await Load();
+        Cambios.Suscribir("ENTORNO.BANCO_COLORES", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Open(null));
+
+    private async Task Load() => _items = await Service.GetAllAsync();
+
+    private async Task HandleSearch()
+    {
+        _items = string.IsNullOrWhiteSpace(_searchTerm)
+            ? await Service.GetAllAsync()
+            : await Service.SearchAsync(_searchTerm);
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Open(null);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(BancoColor item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Ver(item);
+        if (b.FLG_ACCION_PUT    == true) return Open(item);
+        if (b.FLG_ACCION_DELETE == true) return Delete(item);
+        return Task.CompletedTask;
+    }
+
+    private async Task Ver(BancoColor item)    => await AbrirDialog(item, CrudModo.Read);
+    private async Task Open(BancoColor? b)     => await AbrirDialog(b, b is null ? CrudModo.Create : CrudModo.Update);
+    private async Task Delete(BancoColor b)    => await AbrirDialog(b, CrudModo.Delete);
+
+    private async Task AbrirDialog(BancoColor? b, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo color",
+            CrudModo.Read   => $"Ver · {b?.COD_BANCO_COLOR}",
+            CrudModo.Update => $"Editar · {b?.COD_BANCO_COLOR}",
+            CrudModo.Delete => $"Eliminar · {b?.COD_BANCO_COLOR}",
+            _ => "Color"
+        };
+        var parameters = new DialogParameters { ["Item"] = b, ["Modo"] = modo };
+        var dlg = await DialogService.ShowAsync<BancoColorDialog>(titulo, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ENTORNO.BANCO_COLORES", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

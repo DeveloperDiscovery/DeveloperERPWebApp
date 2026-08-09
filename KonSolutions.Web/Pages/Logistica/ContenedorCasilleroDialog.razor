@@ -1,0 +1,204 @@
+@using CasilleroModel = KONSolutions.Shared.Models.Logistica.ContenedoresAlmacenajeCasilleros
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_CASILLERO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+            <MudGrid Spacing="2">
+                @* El código lo genera el SP al crear: la columna se muestra sólo cuando ya existe. *@
+                @if (!_esNuevo)
+                {
+                    <MudItem xs="12" sm="3">
+                        <CampoTexto Tabla="LOGISTICA.CONTENEDORES_ALMACENAJE_CASILLEROS" Columna="COD_CASILLERO"
+                                    @bind-Value="_model.COD_CASILLERO" Disabled="true"
+                                    Margin="Margin.Dense" Class="mb-3" />
+                    </MudItem>
+                }
+                <MudItem xs="12" sm="@(_esNuevo ? 12 : 9)">
+                    <MudTextField T="string" Value="@_desContenedor" Label="Contenedor" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" ReadOnly="true" Disabled="true" Class="mb-3" />
+                </MudItem>
+
+                <MudItem xs="12">
+                    <CampoTexto Tabla="LOGISTICA.CONTENEDORES_ALMACENAJE_CASILLEROS" Columna="DES_CASILLERO"
+                                @bind-Value="_model.DES_CASILLERO" Label="Casillero"
+                                Disabled="_readonly" Obligatorio="true"
+                                Margin="Margin.Dense" Class="mb-3" />
+                </MudItem>
+
+                @* Fila = nivel (altura), columna = posición a lo largo. De estos dos números
+                   sale la posición del casillero dentro del polígono del contenedor. *@
+                <MudItem xs="6" sm="3">
+                    <MudNumericField T="int?" @bind-Value="_model.NUM_FILA" Label="Fila (nivel)"
+                                     Min="1" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="6" sm="3">
+                    <MudNumericField T="int?" @bind-Value="_model.NUM_COLUMNA" Label="Columna"
+                                     Min="1" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+
+                @* El almacén no se elige acá: es el del contenedor. Cambiarlo por casillero
+                   dejaría casilleros del mismo mueble direccionando a almacenes distintos. *@
+                <MudItem xs="12" sm="6">
+                    <MudTextField T="string" Value="@_desAlmacen" Label="Almacén" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" ReadOnly="true" Disabled="true" Class="mb-3" />
+                </MudItem>
+
+                <MudItem xs="12">
+                    @* Ubicaciones del almacén del contenedor: es la dirección a la que
+                       apuntarán stocks y movimientos de este casillero. *@
+                    <AriaCombo TItem="ComboboxItem" Items="_ubicaciones"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               @bind-Value="_model.COD_UBICACION_ALMACEN"
+                               Label="Ubicación del almacén"
+                               Disabled="@(_readonly || string.IsNullOrWhiteSpace(CodAlmacen))" Class="mb-3" />
+                </MudItem>
+
+                <MudItem xs="12">
+                    <div class="d-flex align-center gap-2 mb-3" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Polyline"
+                                 Color="@(Poligono.TienePoligono(_model.DES_POLIGONO_CONTENEDORES_ALMACENAJE) ? Color.Success : Color.Default)"
+                                 Style="@(Poligono.TienePoligono(_model.DES_POLIGONO_CONTENEDORES_ALMACENAJE) ? "" : "opacity:.3;")" />
+                        <MudText Typo="Typo.body2" Style="opacity:.7;">
+                            @(Poligono.TienePoligono(_model.DES_POLIGONO_CONTENEDORES_ALMACENAJE)
+                                ? "La geometría se deriva del polígono del contenedor"
+                                : "El contenedor todavía no está dibujado en el plano")
+                        </MudText>
+                    </div>
+                </MudItem>
+            </MudGrid>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    @* Esta tabla sólo guarda auditoría de registro: no tiene columnas de
+                       actualización, así que el panel muestra únicamente el alta. *@
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public CasilleroModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    /// <summary>Contenedor padre — obligatorio: la PK es compuesta y el SP filtra por él.</summary>
+    [Parameter] public string CodContenedor { get; set; } = "";
+    [Parameter] public string DesContenedor { get; set; } = "";
+    /// <summary>Almacén del contenedor: fija de qué almacén se listan las ubicaciones.</summary>
+    [Parameter] public string CodAlmacen { get; set; } = "";
+    [Parameter] public string DesAlmacen { get; set; } = "";
+
+    private CasilleroModel _model = new();
+    private List<ComboboxItem> _ubicaciones = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private string _desContenedor => string.IsNullOrWhiteSpace(DesContenedor) ? CodContenedor : $"{CodContenedor} · {DesContenedor}";
+    private string _desAlmacen => string.IsNullOrWhiteSpace(CodAlmacen)
+        ? "El contenedor no tiene almacén asignado"
+        : string.IsNullOrWhiteSpace(DesAlmacen) ? CodAlmacen : $"{CodAlmacen} · {DesAlmacen}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        _model.COD_CONTENEDOR = CodContenedor;
+        // El almacén viene del contenedor y no se edita: se fija siempre, también al crear.
+        _model.COD_ALMACEN = CodAlmacen;
+
+        await CargarUbicacionesAsync();
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    /// <summary>Ubicaciones del almacén del contenedor. El SP SHOWALL exige @COD_ALMACEN, así
+    /// que sin almacén el combo queda vacío en vez de traer las de todos los almacenes.</summary>
+    private async Task CargarUbicacionesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(CodAlmacen)) { _ubicaciones = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<KONSolutions.Shared.Models.Logistica.AlmacenesUbicacionesAlmacen>>>(
+                $"{ApiRoutes.Logistica.AlmacenesUbicaciones}/{Uri.EscapeDataString(CodAlmacen)}");
+            _ubicaciones = (r?.Data ?? new())
+                .Select(u => new ComboboxItem { Id = u.COD_UBICACION_ALMACEN, Texto = u.DES_UBICACION_ALMACEN ?? "" })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(ContenedorCasilleroDialog), nameof(CargarUbicacionesAsync));
+            _ubicaciones = new();
+        }
+    }
+
+    private void MapearDesdeModelo(CasilleroModel m)
+    {
+        _model = new CasilleroModel
+        {
+            COD_CONTENEDOR        = m.COD_CONTENEDOR,
+            COD_CASILLERO         = m.COD_CASILLERO,
+            DES_CASILLERO         = m.DES_CASILLERO,
+            NUM_FILA              = m.NUM_FILA,
+            NUM_COLUMNA           = m.NUM_COLUMNA,
+            COD_ALMACEN           = m.COD_ALMACEN,
+            COD_UBICACION_ALMACEN = m.COD_UBICACION_ALMACEN,
+            // Se arrastra el polígono del CONTENEDOR: es del que se deriva la
+            // geometría del casillero, y es lo que informa el pie del diálogo.
+            DES_POLIGONO_CONTENEDORES_ALMACENAJE = m.DES_POLIGONO_CONTENEDORES_ALMACENAJE
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID — evita mostrar datos desactualizados
+    /// de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<CasilleroModel>(
+            $"{ApiRoutes.Logistica.ContenedoresCasilleros}/{Uri.EscapeDataString(_model.COD_CONTENEDOR)}/{Uri.EscapeDataString(_model.COD_CASILLERO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    private async Task OnInvalidSubmit(EditContext ctx)
+    {
+        var errores = string.Join(" · ", ctx.GetValidationMessages());
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"]  = "Faltan datos obligatorios",
+                ["Mensaje"] = string.IsNullOrWhiteSpace(errores) ? "Hay campos obligatorios sin completar." : errores
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Logistica.ContenedoresCasilleros;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_CONTENEDOR)}/{Uri.EscapeDataString(_model.COD_CASILLERO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(ContenedorCasilleroDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        // El SP INSERT hace upsert por (contenedor, casillero): Crear y Modificar usan el mismo POST.
+        var resp = await Http.PostAsJsonAsync(ruta, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ContenedorCasilleroDialog), nameof(Submit));
+    }
+}

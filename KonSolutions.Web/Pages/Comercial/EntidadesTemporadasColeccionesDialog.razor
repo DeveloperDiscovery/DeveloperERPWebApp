@@ -1,0 +1,112 @@
+@using ColeccionModel = KONSolutions.Shared.Models.Comercial.EntidadesTemporadasColecciones
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_COLECCION" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            <MudTextField T="string" Label="Temporada" Value="@(Item?.DES_TEMPORADA ?? "")"
+                          ValueChanged="@((string _) => { })" Variant="Variant.Outlined" Disabled="true" Class="mb-3" ReadOnly="true" />
+
+            @if (!_esNuevo)
+            {
+                <MudTextField Value="@_model.NUM_COLECCION?.ToString()" Label="Código" Variant="Variant.Outlined"
+                              Disabled="true" Class="mb-3" />
+            }
+            <CampoTexto Tabla="COMERCIAL.ENTIDADES_TEMPORADAS_COLECCIONES" Columna="DES_COLECCION"
+                        @bind-Value="_model.DES_COLECCION"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            <EstadoCombo DesTabla="COMERCIAL.ENTIDADES_TEMPORADAS_COLECCIONES"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public decimal CodEntidad { get; set; }
+    [Parameter] public int NumTemporada { get; set; }
+    [Parameter] public ColeccionModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private ColeccionModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        _model.COD_ENTIDAD = CodEntidad;
+        _model.NUM_TEMPORADA = NumTemporada;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de SHOWBYID) hacia _model.</summary>
+    private void MapearDesdeModelo(ColeccionModel m)
+    {
+        _model.COD_ENTIDAD = m.COD_ENTIDAD ?? CodEntidad;
+        _model.NUM_TEMPORADA = m.NUM_TEMPORADA ?? NumTemporada;
+        _model.NUM_COLECCION = m.NUM_COLECCION;
+        _model.DES_COLECCION = m.DES_COLECCION;
+        _model.COD_TIPO_ESTADO = m.COD_TIPO_ESTADO;
+        _model.COD_ESTADO = m.COD_ESTADO;
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID (clave compuesta) — se usa al abrir el
+    /// diálogo (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<ColeccionModel>(
+            $"{ComercialRoute.EntidadesTemporadasColecciones}/{_model.COD_ENTIDAD}/{_model.NUM_TEMPORADA}/{_model.NUM_COLECCION}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ComercialRoute.EntidadesTemporadasColecciones;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_ENTIDAD}/{_model.NUM_TEMPORADA}/{_model.NUM_COLECCION}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(EntidadesTemporadasColeccionesDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // PROC_COMERCIAL_ENTIDADES_TEMPORADAS_COLECCIONES_INSERT es upsert — siempre POST.
+        var dto = new { _model.COD_ENTIDAD, _model.NUM_TEMPORADA, _model.NUM_COLECCION, _model.DES_COLECCION,
+                        _model.COD_TIPO_ESTADO, _model.COD_ESTADO };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EntidadesTemporadasColeccionesDialog), nameof(Submit));
+    }
+}

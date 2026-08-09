@@ -1,0 +1,134 @@
+@using KONSolutions.Shared.Models.Estandar
+@using KONSolutions.Shared.Common
+@using System.Net.Http.Json
+@inject CatalogoService<TablaTipoEstado, TablaTipoEstadoDto> Service
+@inject CatalogoService<TipoEstado, TipoEstadoDto> TiposEstadoSvc
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+
+<MudDialog Style="width:min(560px,95vw);">
+    <DialogContent>
+        @if (_error is not null)
+        {
+            <ErrorSqlBox Titulo="@_error.Titulo" Mensaje="@_error.Mensaje" Origen="@_error.Origen"
+                         ErrorNumber="@_error.ErrorNumber" ErrorProcedure="@_error.ErrorProcedure"
+                         ErrorLine="@_error.ErrorLine" SqlSentence="@_error.SqlSentence" Pagina="@_error.Pagina"
+                         OnClose="@(() => _error = null)" />
+        }
+
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="SubmitInvalido">
+            <DataAnnotationsValidator />
+
+            @if (_isEdit || _readonly)
+            {
+                <MudTextField Value="@_model.DES_TABLA" Label="Tabla" Variant="Variant.Outlined"
+                              Disabled="true" Class="mb-3" />
+            }
+            else
+            {
+                <AriaCombo TItem="TablaDisponible"
+                           Items="_tablasDisponibles"
+                           TextFunc="@(t => t.NombreTabla)"
+                           ValueFunc="@(t => t.NombreTabla)"
+                           @bind-Value="_model.DES_TABLA"
+                           Label="Tabla (solo las aún no configuradas)" />
+            }
+
+            <AriaCombo TItem="TipoEstado"
+                       Items="_tiposEstado"
+                       TextFunc="@(t => t.DES_TIPO_ESTADO ?? "")"
+                       ValueFunc="@(t => t.COD_TIPO_ESTADO.ToString())"
+                       @bind-Value="_codTipoEstadoTexto"
+                       Label="Tipo de estado" Disabled="_readonly" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TablaTipoEstado? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TablaTipoEstadoDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+    private List<TipoEstado> _tiposEstado = new();
+    private List<TablaDisponible> _tablasDisponibles = new();
+
+    private record ErrorMostrado(string Titulo, string Mensaje, OrigenError Origen, string Pagina,
+        int? ErrorNumber = null, string? ErrorProcedure = null, int? ErrorLine = null, string? SqlSentence = null);
+    private ErrorMostrado? _error;
+
+    private string? _codTipoEstadoTexto
+    {
+        get => _model.COD_TIPO_ESTADO?.ToString();
+        set => _model.COD_TIPO_ESTADO = int.TryParse(value, out var v) ? v : null;
+    }
+
+    private bool _esNuevo;
+
+    private void MapearDesdeModelo(TablaTipoEstado m) =>
+        _model = new TablaTipoEstadoDto
+        {
+            DES_TABLA       = m.DES_TABLA,
+            COD_TIPO_ESTADO = m.COD_TIPO_ESTADO
+        };
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.DES_TABLA);
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        _tiposEstado = await TiposEstadoSvc.GetAllAsync();
+
+        if (Modo == CrudModo.Create)
+        {
+            try
+            {
+                var r = await Http.GetFromJsonAsync<ApiResponse<List<TablaDisponible>>>(ApiRoutes.Estandar.TablasTiposEstadoDisponibles);
+                _tablasDisponibles = r?.Data ?? new();
+            }
+            catch (Exception ex) { await ErrorLog.LogAsync(ex, nameof(TablaTipoEstadoDialog), "TablasDisponibles"); }
+        }
+    }
+
+    private Task SubmitInvalido()
+    {
+        _error = new("No se pudo completar la acción", "Revisa los campos marcados: hay datos obligatorios sin completar.",
+            OrigenError.WEB, nameof(TablaTipoEstadoDialog));
+        return Task.CompletedTask;
+    }
+
+    private async Task Submit()
+    {
+        _error = null;
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Service.EliminarDetalladoAsync(_model.DES_TABLA);
+            _saving = false;
+            if (rd.Ok) { Snackbar.Add("Tabla eliminada.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else _error = new("No se pudo eliminar el registro", rd.Msg,
+                rd.ErrorNumber.HasValue ? OrigenError.SQL : OrigenError.API, nameof(TablaTipoEstadoDialog),
+                rd.ErrorNumber, rd.ErrorProcedure, rd.ErrorLine, rd.SqlSentence);
+            return;
+        }
+        var r = await Service.GuardarDetalladoAsync(_model);
+        _saving = false;
+        if (r.Ok) { Snackbar.Add(_isEdit ? "Tabla actualizada." : "Tabla configurada.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else _error = new("No se pudo guardar el registro", r.Msg,
+            r.ErrorNumber.HasValue ? OrigenError.SQL : OrigenError.API, nameof(TablaTipoEstadoDialog),
+            r.ErrorNumber, r.ErrorProcedure, r.ErrorLine, r.SqlSentence);
+    }
+}

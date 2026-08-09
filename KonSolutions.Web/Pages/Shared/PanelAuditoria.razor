@@ -1,0 +1,65 @@
+@*
+    PanelAuditoria.razor
+    --------------------------------------------------------------------------
+    Botón de auditoría: muestra usuario/estación/fecha de creación y de
+    última modificación en un diálogo aparte (sin recortes ni scroll feo).
+    Solo visible si el perfil del usuario logueado tiene FLG_SEGURIDAD = 1.
+
+    Recibe los 6 campos que devuelven los SP _SHOWBYID.
+*@
+@inject SeguridadContextService SeguridadCtx
+@inject IDialogService DialogService
+
+@if (_visible && TieneDatos)
+{
+    <MudTooltip Text="Auditoría del registro">
+        <MudIconButton Icon="@Icons.Material.Filled.FactCheck" Color="Color.Default" Size="Size.Small"
+                       Class="@Class" OnClick="AbrirAuditoria" />
+    </MudTooltip>
+}
+
+@code {
+    // "mt-3 mb-1" por defecto: alinea con los botones de CrudDialogActions (uso original).
+    // Se puede pisar (ej. Class="") cuando el botón va en una fila propia (flex) y no
+    // necesita ese margen — como en cada ítem de la pestaña Especificaciones Técnicas.
+    [Parameter] public string Class { get; set; } = "mt-3 mb-1";
+
+    // Campos de creación
+    [Parameter] public string? CodUsuarioRegistro { get; set; }
+    [Parameter] public string? CodEstacionRegistro { get; set; }
+    [Parameter] public DateTime? FecRegistro { get; set; }
+    // Campos de modificación
+    [Parameter] public string? CodUsuarioActualizacion { get; set; }
+    [Parameter] public string? CodEstacionActualizacion { get; set; }
+    [Parameter] public DateTime? FecActualizacion { get; set; }
+
+    private bool _visible;
+
+    private bool TieneDatos =>
+        !string.IsNullOrWhiteSpace(CodUsuarioRegistro) || FecRegistro.HasValue
+        || !string.IsNullOrWhiteSpace(CodUsuarioActualizacion) || FecActualizacion.HasValue;
+
+    /// <summary>Solo visible para perfiles de Seguridad (FLG_SEGURIDAD = 1).</summary>
+    protected override async Task OnInitializedAsync()
+        => _visible = await SeguridadCtx.EsPerfilSeguridadAsync();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_visible) _visible = await SeguridadCtx.EsPerfilSeguridadAsync();
+    }
+
+    private async Task AbrirAuditoria()
+    {
+        var parametros = new DialogParameters
+        {
+            ["CodUsuarioRegistro"] = CodUsuarioRegistro,
+            ["CodEstacionRegistro"] = CodEstacionRegistro,
+            ["FecRegistro"] = FecRegistro,
+            ["CodUsuarioActualizacion"] = CodUsuarioActualizacion,
+            ["CodEstacionActualizacion"] = CodEstacionActualizacion,
+            ["FecActualizacion"] = FecActualizacion
+        };
+        await DialogService.ShowAsync<AuditoriaDialog>("Auditoría del registro", parametros,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+}

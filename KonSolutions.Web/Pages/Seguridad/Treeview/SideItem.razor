@@ -1,0 +1,88 @@
+@using KONSolutions.Shared.Models.Seguridad
+
+@* Ítem del panel lateral colapsable — estilo imagen 1. *@
+
+<div>
+    <div class="side-item @(EsActivo ? "activo" : "")"
+         style="padding-left:@(8 + Nivel * 16)px;"
+         @onclick="Toggle">
+
+        @* Flecha collapse *@
+        @if (Nodo.Hijos.Any())
+        {
+            <MudIcon Icon="@(_expandido ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowRight)"
+                     Style="font-size:1rem;flex-shrink:0;opacity:.6;" />
+        }
+        else
+        {
+            <span style="width:20px;flex-shrink:0;"></span>
+        }
+
+        @* Icono tipo *@
+        <MudIcon Icon="@IconoPorTipo(Nodo.COD_TIPO)"
+                 Style="@($"font-size:.95rem;flex-shrink:0;color:{(EsActivo ? "inherit" : ColorPorTipo(Nodo.COD_TIPO))};")"/>
+
+        @* Texto *@
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;font-size:.82rem;">
+            @(string.IsNullOrWhiteSpace(Nodo.DES_OPCION) ? Nodo.COD_CHILDREN : Nodo.DES_OPCION)
+        </span>
+
+        @* Badge hijos *@
+        @if (Nodo.Hijos.Any() && !_expandido)
+        {
+            <span style="font-size:.65rem;background:rgba(0,0,0,.12);border-radius:8px;padding:1px 5px;flex-shrink:0;">
+                @Nodo.Hijos.Count
+            </span>
+        }
+    </div>
+
+    @* Hijos recursivos *@
+    @if (_expandido)
+    {
+        @foreach (var hijo in Nodo.Hijos)
+        {
+            <SideItem Nodo="hijo"
+                      Nivel="@(Nivel + 1)"
+                      NodoActivo="NodoActivo"
+                      OnSeleccionar="OnSeleccionar" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public NodoOpcion  Nodo         { get; set; } = null!;
+    [Parameter] public int         Nivel        { get; set; } = 0;
+    [Parameter] public NodoOpcion? NodoActivo   { get; set; }
+    [Parameter] public EventCallback<NodoOpcion> OnSeleccionar { get; set; }
+
+    private bool _expandido;
+    private bool EsActivo => NodoActivo?.COD_CHILDREN == Nodo.COD_CHILDREN;
+
+    private void Toggle()
+    {
+        if (Nodo.Hijos.Any()) _expandido = !_expandido;
+        OnSeleccionar.InvokeAsync(Nodo);
+    }
+
+    private static string IconoPorTipo(string tipo) => tipo switch
+    {
+        "ROT" => Icons.Material.Filled.AccountTree,
+        "APP" => Icons.Material.Filled.AppsOutage,
+        "CRP" => Icons.Material.Filled.Folder,
+        "MDL" => Icons.Material.Filled.ViewModule,
+        "SMD" => Icons.Material.Filled.ViewQuilt,
+        "BTN" => Icons.Material.Filled.SmartButton,
+        _     => Icons.Material.Filled.Circle
+    };
+
+    private static string ColorPorTipo(string tipo) => tipo switch
+    {
+        "ROT" => "#16130f",
+        "APP" => "#b8472d",
+        "CRP" => "#e6921a",
+        "MDL" => "#2b6cb0",
+        "SMD" => "#6b46c1",
+        "BTN" => "#2f855a",
+        _     => "#888"
+    };
+}

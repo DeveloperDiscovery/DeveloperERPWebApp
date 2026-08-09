@@ -1,0 +1,525 @@
+@page "/comercial/incoterms"
+@attribute [Authorize]
+@using IncotermsModel = KONSolutions.Shared.Models.Comercial.Incoterms
+@using IncotermsFasesModel = KONSolutions.Shared.Models.Comercial.IncotermsFases
+@using IncotermsTiposTransporteModel = KONSolutions.Shared.Models.Comercial.IncotermsTiposTransporte
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject MenuService MenuSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<style>
+    .incoterms-tabs .mud-tabs-panels { padding-top: 0 !important; }
+    .incoterms-tabs .mud-tab-panel-content { padding-top: 4px !important; }
+</style>
+
+<PageTitle>Incoterms · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Incoterms" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema COMERCIAL · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar incoterm..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@_codApIncoterm" CodOpcionAplicacion="@_codOpIncoterm"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+@* ── MAESTRO: Incoterms ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="mb-4">
+    <div data-resizable-grid="incoterms-maestro" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="IncotermsModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre"
+                 RowClick="OnRowClick" RowClassFunc="FilaSeleccionada">
+        <Columns>
+            <TemplateColumn Title="Imagen" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    @if (context.Item.IMG_ICONO is { Length: > 0 } img)
+                    {
+                        <img src="@($"data:image/png;base64,{Convert.ToBase64String(img)}")" style="width:26px;height:26px;object-fit:contain;" alt="" />
+                    }
+                    else { <MudText Typo="Typo.caption" Style="opacity:.25;">—</MudText> }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Código"
+                            Width="@Limites.ColWidth("COMERCIAL.INCOTERMS","COD_INCOTERM",60,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_INCOTERM" Activo="@(_ordenColumnaMaestro == 0)" Ascendente="_ordenAscendenteMaestro" OnClick="@(() => ToggleOrdenMaestro(0))" />
+                        <FiltroExcelColumna T="IncotermsModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_INCOTERM)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_INCOTERM</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción"
+                            Width="@Limites.ColWidth("COMERCIAL.INCOTERMS","DES_INCOTERM",150,400)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_INCOTERM" Activo="@(_ordenColumnaMaestro == 1)" Ascendente="_ordenAscendenteMaestro" OnClick="@(() => ToggleOrdenMaestro(1))" />
+                        <FiltroExcelColumna T="IncotermsModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_INCOTERM)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_INCOTERM</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Orden" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1 justify-center"><EncabezadoOrdenable Campo="NUM_ORDEN_PRESENTACION" Activo="@(_ordenColumnaMaestro == 2)" Ascendente="_ordenAscendenteMaestro" OnClick="@(() => ToggleOrdenMaestro(2))" />
+                        <FiltroExcelColumna T="IncotermsModel" ItemsBase="@Base(2)" ValorDe="@(x=>x.NUM_ORDEN_PRESENTACION?.ToString() ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.NUM_ORDEN_PRESENTACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@_codApIncoterm" CodOpcionAplicacion="@_codOpIncoterm"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="IncotermsModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@* ── DETALLE: Fases / Tipos de Transporte del incoterm seleccionado ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div class="pa-3" style="border-bottom:1px solid var(--line);">
+        <MudText Typo="Typo.h4">Detalle</MudText>
+        <MudText Class="mono" Style="opacity:.5;font-size:.78rem;color:var(--subtitulo-color,#6b6358);">
+            @if (_sel is not null) { <text>Incoterm: @_sel.DES_INCOTERM (@_sel.COD_INCOTERM)</text> }
+            else { <text>Seleccione un incoterm arriba</text> }
+        </MudText>
+    </div>
+
+    @if (_sel is null)
+    {
+        <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione un incoterm para ver sus fases y tipos de transporte.</MudText>
+    }
+    else
+    {
+        <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true" Class="incoterms-tabs" PanelClass="px-3 pb-3">
+            <MudTabPanel Text="@($"Fases ({_fases.Count})")">
+                <div class="d-flex justify-end mb-1">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => AbrirFase(null, CrudModo.Create))">Nueva fase</MudButton>
+                </div>
+                <div data-resizable-grid="incoterms-fases-hija" style="position:relative;">
+                <MudDataGrid T="IncotermsFasesModel" Items="_fasesVisibles" Dense="true" Hover="true" Striped="true"
+                             Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+                    <Columns>
+                        <TemplateColumn Sortable="false" Title="Fase">
+                            <HeaderTemplate>
+                                <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_FASE_INCOTERM" Activo="@(_ordenColumnaFases == 0)" Ascendente="_ordenAscendenteFases" OnClick="@(() => ToggleOrdenFases(0))" />
+                                    <FiltroExcelColumna T="IncotermsFasesModel" ItemsBase="@BaseFases(0)" ValorDe="@(x=>x.DES_FASE_INCOTERM ?? x.COD_FASE_INCOTERM ?? "")"
+                                                        ValoresActivos="_filtrosFases.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroFase(0,v))" />
+                                </div>
+                            </HeaderTemplate>
+                            <CellTemplate>@(context.Item.DES_FASE_INCOTERM ?? context.Item.COD_FASE_INCOTERM)</CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="Orden" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                            <HeaderTemplate>
+                                <div class="d-flex align-center gap-1 justify-center"><EncabezadoOrdenable Campo="NUM_ORDEN_PRESENTACION" Activo="@(_ordenColumnaFases == 1)" Ascendente="_ordenAscendenteFases" OnClick="@(() => ToggleOrdenFases(1))" />
+                                    <FiltroExcelColumna T="IncotermsFasesModel" ItemsBase="@BaseFases(1)" ValorDe="@(x=>x.NUM_ORDEN_PRESENTACION?.ToString() ?? "")"
+                                                        ValoresActivos="_filtrosFases.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroFase(1,v))" />
+                                </div>
+                            </HeaderTemplate>
+                            <CellTemplate>@context.Item.NUM_ORDEN_PRESENTACION</CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Title="Vendedor" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                            <CellTemplate>
+                                <MudTooltip Text="A cargo del vendedor">
+                                    <MudIcon Icon="@Icons.Material.Filled.Person" Color="@(context.Item.FLG_VENDEDOR == true ? Color.Success : Color.Error)"
+                                             Style="@(context.Item.FLG_VENDEDOR == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                                </MudTooltip>
+                            </CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Title="Acciones" Sortable="false">
+                            <CellTemplate>
+                                @{ var f = context.Item; }
+                                <AccionesBotones CodAplicacion="@_codApFases" CodOpcionAplicacion="@_codOpFases"
+                                                 Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaFase(f,b))" />
+                            </CellTemplate>
+                        </TemplateColumn>
+                    </Columns>
+                    <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;">Este incoterm no tiene fases aún.</MudText></NoRecordsContent>
+                    <PagerContent><MudDataGridPager T="IncotermsFasesModel" /></PagerContent>
+                </MudDataGrid>
+                <div class="grid-resize-handle"></div>
+                </div>
+            </MudTabPanel>
+            <MudTabPanel Text="@($"Tipos de Transporte ({_tiposTransporte.Count})")">
+                <div class="d-flex justify-end mb-1">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => AbrirTransporte(null, CrudModo.Create))">Nuevo tipo de transporte</MudButton>
+                </div>
+                <div data-resizable-grid="incoterms-transporte-hija" style="position:relative;">
+                <MudDataGrid T="IncotermsTiposTransporteModel" Items="_tiposTransporteVisibles" Dense="true" Hover="true" Striped="true"
+                             Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+                    <Columns>
+                        <TemplateColumn Sortable="false" Title="Tipo de transporte">
+                            <HeaderTemplate>
+                                <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_TRANSPORTE" Activo="@(_ordenColumnaTransporte == 0)" Ascendente="_ordenAscendenteTransporte" OnClick="@(() => ToggleOrdenTransporte(0))" />
+                                    <FiltroExcelColumna T="IncotermsTiposTransporteModel" ItemsBase="@BaseTransporte(0)" ValorDe="@(x=>x.DES_TIPO_TRANSPORTE ?? x.COD_TIPO_TRANSPORTE ?? "")"
+                                                        ValoresActivos="_filtrosTransporte.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroTransporte(0,v))" />
+                                </div>
+                            </HeaderTemplate>
+                            <CellTemplate>@(context.Item.DES_TIPO_TRANSPORTE ?? context.Item.COD_TIPO_TRANSPORTE)</CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Title="Acciones" Sortable="false">
+                            <CellTemplate>
+                                @{ var t = context.Item; }
+                                <AccionesBotones CodAplicacion="@_codApTransporte" CodOpcionAplicacion="@_codOpTransporte"
+                                                 Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaTransporte(t,b))" />
+                            </CellTemplate>
+                        </TemplateColumn>
+                    </Columns>
+                    <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;">Este incoterm no tiene tipos de transporte asignados.</MudText></NoRecordsContent>
+                    <PagerContent><MudDataGridPager T="IncotermsTiposTransporteModel" /></PagerContent>
+                </MudDataGrid>
+                <div class="grid-resize-handle"></div>
+                </div>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    // ── Códigos de seguridad por nivel (ver ClasesOperacion.razor para el detalle) ──
+    private string _codApIncoterm = "", _codOpIncoterm = "";
+    private string _codApFases = "", _codOpFases = "";
+    private string _codApTransporte = "", _codOpTransporte = "";
+
+    private void ResolverCodigosPorSeccion()
+    {
+        (_codApIncoterm, _codOpIncoterm)     = ResolverCod("Comercial/Incoterms.razor");
+        (_codApFases, _codOpFases)           = ResolverCod("Comercial/IncotermsFases.razor");
+        (_codApTransporte, _codOpTransporte) = ResolverCod("Comercial/IncotermsTiposTransporte.razor");
+    }
+
+    private (string App, string Opcion) ResolverCod(string formulario)
+    {
+        var r = MenuSvc.BuscarCodigosPorFormulario(formulario);
+        return r is null ? (CodAplicacion, CodOpcionAplicacion) : (r.Value.CodAplicacion, r.Value.CodOpcionAplicacion);
+    }
+
+    private List<IncotermsModel> _items = new();
+    private IncotermsModel? _sel;
+    private List<IncotermsTiposTransporteModel> _todosTransporte = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumnaMaestro;
+    private bool _ordenAscendenteMaestro = true;
+    private void ToggleOrdenMaestro(int columna)
+    {
+        if (_ordenColumnaMaestro == columna) _ordenAscendenteMaestro = !_ordenAscendenteMaestro;
+        else { _ordenColumnaMaestro = columna; _ordenAscendenteMaestro = true; }
+        StateHasChanged();
+    }
+    private List<IncotermsModel> OrdenarMaestro(List<IncotermsModel> items) => _ordenColumnaMaestro switch
+    {
+        0 => _ordenAscendenteMaestro ? items.OrderBy(x => x.COD_INCOTERM).ToList() : items.OrderByDescending(x => x.COD_INCOTERM).ToList(),
+        1 => _ordenAscendenteMaestro ? items.OrderBy(x => x.DES_INCOTERM).ToList() : items.OrderByDescending(x => x.DES_INCOTERM).ToList(),
+        2 => _ordenAscendenteMaestro ? items.OrderBy(x => x.NUM_ORDEN_PRESENTACION).ToList() : items.OrderByDescending(x => x.NUM_ORDEN_PRESENTACION).ToList(),
+        _ => items
+    };
+    private List<IncotermsModel> _visibles => OrdenarMaestro(Aplicar(_items, -1));
+    private List<IncotermsModel> Base(int col) => Aplicar(_items, col);
+
+    private List<IncotermsFasesModel> _fases = new();
+    private List<IncotermsTiposTransporteModel> _tiposTransporte =>
+        _sel is null ? new() : _todosTransporte.Where(x => x.COD_INCOTERM == _sel.COD_INCOTERM).ToList();
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosFases = new();
+    private int? _ordenColumnaFases;
+    private bool _ordenAscendenteFases = true;
+    private void ToggleOrdenFases(int columna)
+    {
+        if (_ordenColumnaFases == columna) _ordenAscendenteFases = !_ordenAscendenteFases;
+        else { _ordenColumnaFases = columna; _ordenAscendenteFases = true; }
+        StateHasChanged();
+    }
+    private List<IncotermsFasesModel> OrdenarFases(List<IncotermsFasesModel> items) => _ordenColumnaFases switch
+    {
+        0 => _ordenAscendenteFases ? items.OrderBy(x => x.DES_FASE_INCOTERM ?? x.COD_FASE_INCOTERM).ToList() : items.OrderByDescending(x => x.DES_FASE_INCOTERM ?? x.COD_FASE_INCOTERM).ToList(),
+        1 => _ordenAscendenteFases ? items.OrderBy(x => x.NUM_ORDEN_PRESENTACION).ToList() : items.OrderByDescending(x => x.NUM_ORDEN_PRESENTACION).ToList(),
+        _ => items
+    };
+    private List<IncotermsFasesModel> _fasesVisibles => OrdenarFases(AplicarFases(_fases, -1));
+    private List<IncotermsFasesModel> BaseFases(int col) => AplicarFases(_fases, col);
+    private List<IncotermsFasesModel> AplicarFases(List<IncotermsFasesModel> src, int ex)
+    {
+        IEnumerable<IncotermsFasesModel> q = src;
+        foreach (var (c, v) in _filtrosFases)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.DES_FASE_INCOTERM ?? x.COD_FASE_INCOTERM ?? "")),
+                1 => q.Where(x => v.Contains(x.NUM_ORDEN_PRESENTACION?.ToString() ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroFase(int c, HashSet<string>? v) { _filtrosFases[c] = v; StateHasChanged(); }
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosTransporte = new();
+    private int? _ordenColumnaTransporte;
+    private bool _ordenAscendenteTransporte = true;
+    private void ToggleOrdenTransporte(int columna)
+    {
+        if (_ordenColumnaTransporte == columna) _ordenAscendenteTransporte = !_ordenAscendenteTransporte;
+        else { _ordenColumnaTransporte = columna; _ordenAscendenteTransporte = true; }
+        StateHasChanged();
+    }
+    private List<IncotermsTiposTransporteModel> OrdenarTransporte(List<IncotermsTiposTransporteModel> items) => _ordenColumnaTransporte switch
+    {
+        0 => _ordenAscendenteTransporte ? items.OrderBy(x => x.DES_TIPO_TRANSPORTE ?? x.COD_TIPO_TRANSPORTE).ToList() : items.OrderByDescending(x => x.DES_TIPO_TRANSPORTE ?? x.COD_TIPO_TRANSPORTE).ToList(),
+        _ => items
+    };
+    private List<IncotermsTiposTransporteModel> _tiposTransporteVisibles => OrdenarTransporte(AplicarTransporte(_tiposTransporte, -1));
+    private List<IncotermsTiposTransporteModel> BaseTransporte(int col) => AplicarTransporte(_tiposTransporte, col);
+    private List<IncotermsTiposTransporteModel> AplicarTransporte(List<IncotermsTiposTransporteModel> src, int ex)
+    {
+        IEnumerable<IncotermsTiposTransporteModel> q = src;
+        foreach (var (c, v) in _filtrosTransporte)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.DES_TIPO_TRANSPORTE ?? x.COD_TIPO_TRANSPORTE ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroTransporte(int c, HashSet<string>? v) { _filtrosTransporte[c] = v; StateHasChanged(); }
+
+    private List<IncotermsModel> Aplicar(List<IncotermsModel> src, int ex)
+    {
+        IEnumerable<IncotermsModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_INCOTERM)),
+                1 => q.Where(x => v.Contains(x.DES_INCOTERM)),
+                2 => q.Where(x => v.Contains(x.NUM_ORDEN_PRESENTACION?.ToString() ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private async Task Buscar()
+        => _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+
+    protected override async Task OnInitializedAsync()
+    {
+        ResolverCodigosPorSeccion();
+        await AccessLog.LogNavegacionAsync("COMERCIAL", "Incoterms");
+        await Load();
+        Cambios.Suscribir("COMERCIAL.INCOTERMS", RefrescarPorCambio);
+        Cambios.Suscribir("COMERCIAL.INCOTERMS_FASES", RefrescarDetalle);
+        Cambios.Suscribir("COMERCIAL.INCOTERMS_TIPOS_TRANSPORTE", RefrescarDetalle);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load()
+    {
+        _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+        _todosTransporte = await FetchTransporte();
+        _sel = _sel is null ? null : _items.FirstOrDefault(x => x.COD_INCOTERM == _sel.COD_INCOTERM);
+        if (_sel is null && _items.Count > 0) _sel = _items.First();
+        if (_sel is not null) await CargarFases();
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+    private async Task RefrescarDetalle() => await InvokeAsync(async () =>
+    {
+        _todosTransporte = await FetchTransporte();
+        await CargarFases();
+        StateHasChanged();
+    });
+
+    private async Task OnRowClick(DataGridRowClickEventArgs<IncotermsModel> args)
+    {
+        _sel = args.Item;
+        await CargarFases();
+    }
+
+    private async Task CargarFases() => _fases = _sel is null ? new() : await FetchFases(_sel.COD_INCOTERM);
+
+    private string FilaSeleccionada(IncotermsModel item, int _)
+        => _sel is not null && item.COD_INCOTERM == _sel.COD_INCOTERM ? "fila-seleccionada" : "";
+
+    private async Task<List<IncotermsModel>> Fetch()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<IncotermsModel>>>(
+                ApiRoutes.Comercial.Incoterms);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Incoterms), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<IncotermsModel>> FetchSearch(string s)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<IncotermsModel>>>(
+                $"{ApiRoutes.Comercial.Incoterms}/search?search={Uri.EscapeDataString(s)}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Incoterms), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<IncotermsFasesModel>> FetchFases(string codIncoterm)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<IncotermsFasesModel>>>(
+                $"{ApiRoutes.Comercial.IncotermsFases}?codIncoterm={Uri.EscapeDataString(codIncoterm)}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Incoterms), nameof(FetchFases));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<IncotermsTiposTransporteModel>> FetchTransporte()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<IncotermsTiposTransporteModel>>>(
+                ApiRoutes.Comercial.IncotermsTiposTransporte);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Incoterms), nameof(FetchTransporte));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(IncotermsModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(IncotermsModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo incoterm",
+            CrudModo.Delete => $"Eliminar · {item?.DES_INCOTERM}",
+            _               => $"Editar · {item?.DES_INCOTERM}"
+        };
+        var dlg = await DialogService.ShowAsync<IncotermsDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    private Task OnAccionGrillaFase(IncotermsFasesModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return AbrirFase(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return AbrirFase(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirFase(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirFase(IncotermsFasesModel? item, CrudModo modo)
+    {
+        if (_sel is null) return;
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva fase para el incoterm",
+            CrudModo.Delete => $"Eliminar · {item?.DES_FASE_INCOTERM}",
+            _               => $"Editar · {item?.DES_FASE_INCOTERM}"
+        };
+        var dlg = await DialogService.ShowAsync<IncotermsFasesDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo, ["CodIncotermFijo"] = _sel.COD_INCOTERM },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) { await CargarFases(); StateHasChanged(); }
+    }
+
+    private Task OnAccionGrillaTransporte(IncotermsTiposTransporteModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return AbrirTransporte(item, CrudModo.Read);
+        if (b.FLG_ACCION_DELETE == true) return AbrirTransporte(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirTransporte(IncotermsTiposTransporteModel? item, CrudModo modo)
+    {
+        if (_sel is null) return;
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de transporte para el incoterm",
+            CrudModo.Delete => $"Eliminar · {item?.DES_TIPO_TRANSPORTE}",
+            _               => $"Consultar · {item?.DES_TIPO_TRANSPORTE}"
+        };
+        var dlg = await DialogService.ShowAsync<IncotermsTiposTransporteDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo, ["CodIncotermFijo"] = _sel.COD_INCOTERM },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) { _todosTransporte = await FetchTransporte(); StateHasChanged(); }
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("COMERCIAL.INCOTERMS", RefrescarPorCambio);
+        Cambios.Desuscribir("COMERCIAL.INCOTERMS_FASES", RefrescarDetalle);
+        Cambios.Desuscribir("COMERCIAL.INCOTERMS_TIPOS_TRANSPORTE", RefrescarDetalle);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

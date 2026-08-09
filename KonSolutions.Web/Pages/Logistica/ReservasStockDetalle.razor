@@ -1,0 +1,132 @@
+@page "/logistica/reservas-stock-detalle"
+@attribute [Authorize]
+@using Modelo = KONSolutions.Shared.Models.Logistica.ReservasStockDetalle
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Detalle de Reservas · @ConfigSvc.Current.NombreApp</PageTitle>
+
+@* Consulta transversal, de solo lectura. Los ítems se cargan y se editan dentro del documento;
+   esta pantalla existe para la pregunta inversa —«¿en qué documentos pedí este producto?»— y por
+   eso arranca pidiendo un reserva o un filtro. *@
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Detalle de Reservas" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema LOGISTICA · consulta de solo lectura · @_visibles.Count ítems</MudText>
+    </div>
+    <div style="width:280px;">
+        <AriaCombo TItem="ComboboxItem" Items="_documentos"
+                   TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                   Value="@_docSel" ValueChanged="OnDocumentoChanged"
+                   Label="Documento" Class="" />
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Filtrar por producto o lote..." DebounceInterval="400" MaxWidth="520px" Class="grid-header-search" />
+    <div class="grid-header-divider"></div>
+    <GridRefreshButton OnRefresh="Load" />
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="reservasstockdetalle" style="position:relative;">
+    <MudDataGrid T="Modelo" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Documento" Width="100px" CellStyle="text-align:right;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Documento" /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.NUM_RESERVA_STOCK</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Sec." Width="60px" CellStyle="text-align:right;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Sec." /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.NUM_SECUENCIA</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Código" Width="140px">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Código" /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.COD_PRODUCTO</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Producto" Width="300px">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Producto" /></HeaderTemplate>
+                <CellTemplate>@NombreProducto(context.Item.COD_PRODUCTO)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Lote" Width="120px">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Lote" /></HeaderTemplate>
+                <CellTemplate><span class="mono">@(string.IsNullOrWhiteSpace(context.Item.NUM_LOTE_CONTROL) ? "—" : context.Item.NUM_LOTE_CONTROL)</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="U.M." Width="80px" CellStyle="text-align:center;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="U.M." /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.COD_UNIDAD_MEDIDA</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Cantidad" Width="130px" CellStyle="text-align:right;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Cantidad" /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.CAN_PRODUCTO?.ToString("N6")</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Atendida" Width="130px" CellStyle="text-align:right;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Atendida" /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.CAN_PRODUCTO_ATENDIDA?.ToString("N6")</span></CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-6 mono" Style="opacity:.5;">
+                @(string.IsNullOrWhiteSpace(_docSel) ? "Elegí un documento para ver sus ítems." : "Sin ítems.")
+            </MudText>
+        </NoRecordsContent>
+        <PagerContent><MudDataGridPager T="Modelo" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<Modelo> _items = new();
+    private List<ComboboxItem> _documentos = new();
+    private Dictionary<string,string> _productos = new();
+    private string? _docSel;
+    private string _search = "";
+
+    private List<Modelo> _visibles => string.IsNullOrWhiteSpace(_search)
+        ? _items
+        : _items.Where(x => (x.COD_PRODUCTO ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase)
+                         || (x.NUM_LOTE_CONTROL ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private Task Buscar() { StateHasChanged(); return Task.CompletedTask; }
+
+    /// <summary>El procedimiento de este detalle no resuelve el nombre del producto —a diferencia
+    /// del de Requerimientos—, así que se cruza contra el maestro que la pantalla ya carga.</summary>
+    private string NombreProducto(string cod)
+        => _productos.TryGetValue(cod ?? "", out var d) ? d : cod ?? "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("LOGISTICA", "ReservasStockDetalle");
+        _documentos = (await Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Logistica.ReservasStockCombobox)) ?? new();
+
+        var prods = await Http.SafeGetAsync<List<KONSolutions.Shared.Models.Estandar.Productos>>(ApiRoutes.Estandar.Productos);
+        _productos = (prods ?? new()).GroupBy(p => p.COD_PRODUCTO).ToDictionary(g => g.Key, g => g.First().DES_PRODUCTO);
+    }
+
+    private async Task OnDocumentoChanged(string? v)
+    {
+        _docSel = v;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        if (string.IsNullOrWhiteSpace(_docSel)) { _items = new(); return; }
+        try
+        {
+            var r = await Http.SafeGetAsync<List<Modelo>>($"{ApiRoutes.Logistica.ReservasStockDetallePorDoc}/{_docSel}");
+            _items = r ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(ReservasStockDetalle), nameof(Load));
+            Snackbar.Add("No se pudo cargar el detalle. Ver el log de errores.", Severity.Error);
+            _items = new();
+        }
+    }
+}

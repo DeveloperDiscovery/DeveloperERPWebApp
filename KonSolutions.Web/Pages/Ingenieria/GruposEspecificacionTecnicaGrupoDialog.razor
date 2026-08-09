@@ -1,0 +1,93 @@
+@using GrupoModel = KONSolutions.Shared.Models.Ingenieria.GruposEspecificacionTecnicaGrupo
+@using GrupoRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_GRUPO_ESPECIFICACION_TECNICA" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            @if (!_esNuevo)
+            {
+                <MudTextField T="int" Value="_model.COD_GRUPO_ESPECIFICACION_TECNICA" Label="Código"
+                              Variant="Variant.Outlined" Class="mb-3" ReadOnly="true" Disabled="true" />
+            }
+            <CampoTexto Tabla="INGENIERIA.GRUPOS_FAMILIAS_SUB_FAMILIAS_GRUPOS_ESPECIFICACION_TECNICA" Columna="DES_GRUPO_ESPECIFICACION_TECNICA"
+                        @bind-Value="_model.DES_GRUPO_ESPECIFICACION_TECNICA"
+                        Disabled="_readonly" IgnorarModoTexto="true" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public GrupoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private GrupoModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(GrupoModel m)
+    {
+        _model = new GrupoModel
+        {
+            COD_GRUPO_ESPECIFICACION_TECNICA = m.COD_GRUPO_ESPECIFICACION_TECNICA,
+            DES_GRUPO_ESPECIFICACION_TECNICA = m.DES_GRUPO_ESPECIFICACION_TECNICA,
+        };
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<GrupoModel>>(
+                $"{GrupoRoute.GruposEspecificacionTecnicaGrupos}/{_model.COD_GRUPO_ESPECIFICACION_TECNICA}");
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = GrupoRoute.GruposEspecificacionTecnicaGrupos;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_GRUPO_ESPECIFICACION_TECNICA}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(GruposEspecificacionTecnicaGrupoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new { _model.COD_GRUPO_ESPECIFICACION_TECNICA, _model.DES_GRUPO_ESPECIFICACION_TECNICA };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(GruposEspecificacionTecnicaGrupoDialog), nameof(Submit));
+    }
+}

@@ -1,0 +1,300 @@
+@page "/seguridad/roles"
+@attribute [Authorize]
+@inject CatalogoService<Rol, RolDto> Service
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ConfigService ConfigSvc
+@implements IDisposable
+
+<PageTitle>Roles · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Roles de usuario" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema SEGURIDAD · @_itemsVisibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTerm" OnSearch="HandleSearch" Placeholder="Buscar rol..." DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros"
+                            HasFilters="@(_filtros.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Roles de usuario" Headers="@_printHeaders" Rows="@PrintRows()" />
+        <AccionesBotones CodAplicacion="@CodAplicacion"
+                         CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header"
+                         OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="roles" style="position:relative;">
+    <MudDataGrid T="Rol" Items="_itemsVisibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true"
+                 RowClassFunc="FilaRolSeleccionado" RowClick="OnRolRowClick"
+                 Filterable="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Title="Código" SortBy="x => x.COD_ROL_USUARIO" Width="@Limites.ColWidth("SEGURIDAD.ROLES_USUARIO","COD_ROL_USUARIO",60,180)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <span style="cursor:pointer;user-select:none;" @onclick="@(() => ToggleOrden(0))">
+                            Código
+                            @if (_ordenColumna == 0)
+                            {
+                                <MudIcon Icon="@(_ordenAscendente ? Icons.Material.Filled.ArrowUpward : Icons.Material.Filled.ArrowDownward)"
+                                         Style="font-size:.85rem;vertical-align:middle;" />
+                            }
+                        </span>
+                        <FiltroExcelColumna T="Rol" ItemsBase="@BaseSinEstaColumna(0)"
+                                            ValorDe="@(r => r.COD_ROL_USUARIO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_ROL_USUARIO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Descripción" SortBy="x => x.DES_ROL_USUARIO" Width="@Limites.ColWidth("SEGURIDAD.ROLES_USUARIO","DES_ROL_USUARIO")">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <span style="cursor:pointer;user-select:none;" @onclick="@(() => ToggleOrden(1))">
+                            Descripción
+                            @if (_ordenColumna == 1)
+                            {
+                                <MudIcon Icon="@(_ordenAscendente ? Icons.Material.Filled.ArrowUpward : Icons.Material.Filled.ArrowDownward)"
+                                         Style="font-size:.85rem;vertical-align:middle;" />
+                            }
+                        </span>
+                        <FiltroExcelColumna T="Rol" ItemsBase="@BaseSinEstaColumna(1)"
+                                            ValorDe="@(r => r.DES_ROL_USUARIO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_ROL_USUARIO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Estado" SortBy="x => x.DES_ESTADO">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <span style="cursor:pointer;user-select:none;" @onclick="@(() => ToggleOrden(2))">
+                            Estado
+                            @if (_ordenColumna == 2)
+                            {
+                                <MudIcon Icon="@(_ordenAscendente ? Icons.Material.Filled.ArrowUpward : Icons.Material.Filled.ArrowDownward)"
+                                         Style="font-size:.85rem;vertical-align:middle;" />
+                            }
+                        </span>
+                        <FiltroExcelColumna T="Rol" ItemsBase="@BaseSinEstaColumna(2)"
+                                            ValorDe="@(r => r.DES_ESTADO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(2, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small"
+                             Color="@(context.Item.COD_ESTADO == 1 ? Color.Success : Color.Default)">
+                        @(context.Item.DES_ESTADO ?? "—")
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion"
+                                     CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                     OnAccion="@(b => OnAccionGrilla(item, b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin roles.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="Rol" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@* ── DETALLE del rol seleccionado, en pestañas ──
+   Los tres hijos de SEGURIDAD.ROLES_USUARIO son tablas de asignación pura, así que ninguno
+   tiene diálogo de alta: todos usan el mismo par de grillas «asignados | disponibles».
+   Los tipos de movimiento no están acá arriba porque cuelgan del almacén, no del rol:
+   aparecen dentro de la pestaña Almacenes, debajo del almacén elegido. *@
+<MudPaper Elevation="0" Class="mt-3" Style="border:1px solid var(--line);">
+    <div class="px-3 pt-2" style="border-bottom:1px solid var(--line);">
+        <MudText Class="mono" Style="opacity:.5;font-size:.78rem;color:var(--subtitulo-color,#6b6358);">
+            @if (_rolSel is not null) { <text>Rol: @_rolSel.COD_ROL_USUARIO · @_rolSel.DES_ROL_USUARIO</text> }
+            else { <text>Seleccione un rol arriba</text> }
+        </MudText>
+    </div>
+
+    <MudTabs Elevation="0" ApplyEffectsToContainer="true" PanelClass="pa-0" Rounded="false" Border="false">
+        <MudTabPanel Text="Almacenes" Icon="@Icons.Material.Filled.Warehouse">
+            <RolAlmacenesTab Rol="_rolSel" SoloLectura="_rolAnulado" />
+        </MudTabPanel>
+        <MudTabPanel Text="Tipos de Operación" Icon="@Icons.Material.Filled.Rule">
+            <RolTiposOperacionTab Rol="_rolSel" SoloLectura="_rolAnulado" />
+        </MudTabPanel>
+        <MudTabPanel Text="Asientos Contables" Icon="@Icons.Material.Filled.MenuBook">
+            <RolAsientosContablesTab Rol="_rolSel" SoloLectura="_rolAnulado" />
+        </MudTabPanel>
+    </MudTabs>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<Rol> _items = new();
+    private readonly List<string> _printHeaders = new() { "Código", "Descripción", "Estado" };
+    private List<List<string>> PrintRows() => _items.Select(r => new List<string>
+    {
+        r.COD_ROL_USUARIO ?? "", r.DES_ROL_USUARIO ?? "", r.DES_ESTADO ?? ""
+    }).ToList();
+    private string _searchTerm = string.Empty;
+
+    // ── Rol seleccionado (maestro de las pestañas de abajo) ──
+    private Rol? _rolSel;
+
+    /// <summary>Un rol anulado se puede mirar pero no reasignar: los hijos entran en sólo
+    /// lectura en vez de desaparecer, así se sigue viendo qué tenía configurado.</summary>
+    private bool _rolAnulado => _rolSel is not null && _rolSel.COD_ESTADO != 1;
+
+    private string FilaRolSeleccionado(Rol item, int _)
+        => _rolSel is not null && item.COD_ROL_USUARIO == _rolSel.COD_ROL_USUARIO ? "fila-seleccionada" : "";
+
+    private void OnRolRowClick(DataGridRowClickEventArgs<Rol> args) => _rolSel = args.Item;
+
+    /// <summary>Tras recargar el maestro: mantiene el rol seleccionado si sigue existiendo y,
+    /// si no, apunta al primero para que las pestañas nunca queden huérfanas.</summary>
+    private void SincronizarRolSeleccionado()
+        => _rolSel = _rolSel is not null && _items.Any(r => r.COD_ROL_USUARIO == _rolSel.COD_ROL_USUARIO)
+            ? _items.First(r => r.COD_ROL_USUARIO == _rolSel.COD_ROL_USUARIO)
+            : _items.FirstOrDefault();
+
+    // ── Filtro Excel en cascada ──
+    // Clave = índice de columna (0=Código, 1=Descripción, 2=Estado).
+    // Valor = conjunto de valores permitidos para esa columna, o null si no hay filtro.
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+
+    /// <summary>Items visibles tras aplicar TODOS los filtros activos (cascada final) Y el orden manual.</summary>
+    private List<Rol> _itemsVisibles => Ordenar(AplicarTodos(_items, excluirColumna: -1));
+
+    /// <summary>Items visibles aplicando todos los filtros EXCEPTO el de la columna indicada
+    /// — es lo que cada FiltroExcelColumna usa para calcular sus propios valores únicos,
+    /// logrando el efecto de cascada real (cada filtro "ve" el resultado de los demás).</summary>
+    private List<Rol> BaseSinEstaColumna(int columna) => AplicarTodos(_items, columna);
+
+    // ── Ordenamiento manual (clic en el título de columna) ──
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+
+    private List<Rol> Ordenar(List<Rol> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(r => r.COD_ROL_USUARIO).ToList() : items.OrderByDescending(r => r.COD_ROL_USUARIO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(r => r.DES_ROL_USUARIO).ToList() : items.OrderByDescending(r => r.DES_ROL_USUARIO).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(r => r.DES_ESTADO).ToList() : items.OrderByDescending(r => r.DES_ESTADO).ToList(),
+        _ => items
+    };
+
+    private List<Rol> AplicarTodos(List<Rol> origen, int excluirColumna)
+    {
+        IEnumerable<Rol> q = origen;
+        foreach (var (col, valores) in _filtros)
+        {
+            if (col == excluirColumna || valores is null) continue;
+            q = col switch
+            {
+                0 => q.Where(r => valores.Contains(r.COD_ROL_USUARIO ?? "")),
+                1 => q.Where(r => valores.Contains(r.DES_ROL_USUARIO ?? "")),
+                2 => q.Where(r => valores.Contains(r.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltro(int columna, HashSet<string>? valores)
+    {
+        _filtros[columna] = valores;
+        StateHasChanged();
+    }
+
+    private void LimpiarFiltros()
+    {
+        foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null;
+        StateHasChanged();
+    }
+
+    private async Task HandleSearch()
+    {
+        _items = string.IsNullOrWhiteSpace(_searchTerm)
+            ? await Service.GetAllAsync()
+            : await Service.SearchAsync(_searchTerm);
+        SincronizarRolSeleccionado();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("SEGURIDAD", "Roles");
+        await Load();
+        Cambios.Suscribir("SEGURIDAD.ROLES_USUARIO", RefrescarPorCambio);
+    }
+
+    // ── Seguridad dinámica ──────────────────────────────────────────────────
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Open(null);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(Rol item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Ver(item);
+        if (b.FLG_ACCION_PUT    == true) return Open(item);
+        if (b.FLG_ACCION_DELETE == true) return Delete(item);
+        return Task.CompletedTask;
+    }
+
+    // ── Acciones ────────────────────────────────────────────────────────────
+    private async Task Ver(Rol item) => await AbrirDialog(item, CrudModo.Read);
+
+    private async Task Load()
+    {
+        _items = await Service.GetAllAsync();
+        SincronizarRolSeleccionado();
+    }
+
+    private async Task Open(Rol? r) => await AbrirDialog(r, r is null ? CrudModo.Create : CrudModo.Update);
+
+    private async Task Delete(Rol r) => await AbrirDialog(r, CrudModo.Delete);
+
+    private async Task AbrirDialog(Rol? r, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo rol",
+            CrudModo.Read   => $"Ver · {r?.COD_ROL_USUARIO}",
+            CrudModo.Update => $"Editar · {r?.COD_ROL_USUARIO}",
+            CrudModo.Delete => $"Eliminar · {r?.COD_ROL_USUARIO}",
+            _ => "Rol"
+        };
+        var parameters = new DialogParameters { ["Rol"] = r, ["Modo"] = modo };
+        var dlg = await DialogService.ShowAsync<RolDialog>(titulo, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var result = await dlg.Result;
+        if (result is not null && !result.Canceled) await Load();
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+
+    public void Dispose() => Cambios.Desuscribir("SEGURIDAD.ROLES_USUARIO", RefrescarPorCambio);
+}

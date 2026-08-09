@@ -1,0 +1,276 @@
+@page "/externo/snippets"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Externo
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject LimitesService Limites
+@inject ErrorLogService ErrorLog
+@implements IDisposable
+
+<PageTitle>Snippets · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Snippets" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema EXTERNO · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Filtrar" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="@(() => Open(null, CrudModo.Create))" Size="Size.Small">
+            Nuevo
+        </MudButton>
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="externo-snippets" style="position:relative;">
+    <MudDataGrid T="Snippet" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Cód" Width="@Limites.ColWidth("EXTERNO.SNIPPETS","COD_SNIPPET",60,100)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_SNIPPET" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="Snippet" ItemsBase="@Base(0)"
+                                            ValorDe="@(x=>x.COD_SNIPPET?.ToString()??"")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_SNIPPET</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("EXTERNO.SNIPPETS","DES_SNIPPET",150,350)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_SNIPPET" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="Snippet" ItemsBase="@Base(1)"
+                                            ValorDe="@(x=>x.DES_SNIPPET??"")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_SNIPPET</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="URL" Width="@Limites.ColWidth("EXTERNO.SNIPPETS","URL_SNIPPET",200,500)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="URL_SNIPPET" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="Snippet" ItemsBase="@Base(2)"
+                                            ValorDe="@(x=>x.URL_SNIPPET??"")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)"
+                                            ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <a href="@context.Item.URL_SNIPPET" target="_blank"
+                       style="color:var(--mud-palette-primary);text-decoration:none;font-family:monospace;font-size:.8rem;"
+                       @onclick:stopPropagation="true">
+                        @context.Item.URL_SNIPPET
+                    </a>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Aplicación" Width="@Limites.ColWidth("EXTERNO.SNIPPETS","DES_APLICACION",120,220)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_APLICACION" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="Snippet" ItemsBase="@Base(4)"
+                                            ValorDe="@(x=>x.DES_APLICACION??"")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(4)"
+                                            ValoresActivosChanged="@(v=>Filtro(4,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_APLICACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Opción" Width="@Limites.ColWidth("EXTERNO.SNIPPETS","DES_OPCION_APLICACION",120,220)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_OPCION_APLICACION" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="Snippet" ItemsBase="@Base(5)"
+                                            ValorDe="@(x=>x.DES_OPCION_APLICACION??"")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(5)"
+                                            ValoresActivosChanged="@(v=>Filtro(5,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_OPCION_APLICACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Botón" Width="@Limites.ColWidth("EXTERNO.SNIPPETS","DES_BOTON_OPCION",100,180)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_BOTON_OPCION" Activo="@(_ordenColumna == 6)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(6))" />
+                        <FiltroExcelColumna T="Snippet" ItemsBase="@Base(6)"
+                                            ValorDe="@(x=>x.DES_BOTON_OPCION??"")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(6)"
+                                            ValoresActivosChanged="@(v=>Filtro(6,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_BOTON_OPCION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Tipo" SortBy="x=>x.FLG_FREE_PAY" Width="80" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    @if (context.Item.FLG_FREE_PAY)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" Label="true">FREE</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled" Label="true">PAY</MudChip>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Estado" Width="@Limites.ColWidth("EXTERNO.SNIPPETS","DES_ESTADO",80,160)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="Snippet" ItemsBase="@Base(3)"
+                                            ValorDe="@(x=>x.DES_ESTADO??"")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)"
+                                            ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrEmpty(context.Item.DES_ESTADO))
+                    {
+                        <MudChip T="string" Size="Size.Small" Label="true"
+                                 Style="@($"background:{context.Item.DES_BACKCOLOR ?? "#e2e8f0"};color:{context.Item.DES_FORECOLOR ?? "#1a202c"};")">
+                            @context.Item.DES_ESTADO
+                        </MudChip>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false" Width="120" CellStyle="text-align:center;">
+                <CellTemplate>
+                    @{ var s = context.Item; }
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                                   OnClick="@(() => Open(s, CrudModo.Update))" Title="Editar" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => Delete(s))" Title="Eliminar" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin snippets registrados.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="Snippet" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<Snippet> _items = new();
+    private string _search = string.Empty;
+
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<Snippet> Ordenar(List<Snippet> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_SNIPPET).ToList() : items.OrderByDescending(x => x.COD_SNIPPET).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_SNIPPET).ToList() : items.OrderByDescending(x => x.DES_SNIPPET).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.URL_SNIPPET).ToList() : items.OrderByDescending(x => x.URL_SNIPPET).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_APLICACION).ToList() : items.OrderByDescending(x => x.DES_APLICACION).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_OPCION_APLICACION).ToList() : items.OrderByDescending(x => x.DES_OPCION_APLICACION).ToList(),
+        6 => _ordenAscendente ? items.OrderBy(x => x.DES_BOTON_OPCION).ToList() : items.OrderByDescending(x => x.DES_BOTON_OPCION).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+    private List<Snippet> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<Snippet> Base(int col) => Aplicar(_items, col);
+
+    private List<Snippet> Aplicar(List<Snippet> src, int excluir)
+    {
+        IEnumerable<Snippet> q = src;
+        foreach (var (col, vals) in _filtros)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.COD_SNIPPET?.ToString() ?? "")),
+                1 => q.Where(x => vals.Contains(x.DES_SNIPPET ?? "")),
+                2 => q.Where(x => vals.Contains(x.URL_SNIPPET ?? "")),
+                3 => q.Where(x => vals.Contains(x.DES_ESTADO ?? "")),
+                4 => q.Where(x => vals.Contains(x.DES_APLICACION ?? "")),
+                5 => q.Where(x => vals.Contains(x.DES_OPCION_APLICACION ?? "")),
+                6 => q.Where(x => vals.Contains(x.DES_BOTON_OPCION ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int col, HashSet<string>? vals) { _filtros[col] = vals; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; _search = ""; StateHasChanged(); }
+    private async Task Filtrar()
+    {
+        if (string.IsNullOrWhiteSpace(_search))
+            await Load();
+        else
+            await Buscar();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("EXTERNO", "Snippets");
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<Snippet>>>(
+                ApiRoutes.Externo.Snippets,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            _items = r?.Data ?? new();
+        }
+        catch { _items = new(); }
+        StateHasChanged();
+    }
+
+    private async Task Buscar()
+    {
+        try
+        {
+            var url = $"{ApiRoutes.Externo.Snippets}/search?q={Uri.EscapeDataString(_search)}";
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<Snippet>>>(
+                url,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            _items = r?.Data ?? new();
+        }
+        catch { _items = new(); }
+        StateHasChanged();
+    }
+
+    private async Task Open(Snippet? item, CrudModo modo)
+    {
+        var titulo = modo == CrudModo.Create ? "Nuevo snippet" : $"Editar · {item?.DES_SNIPPET}";
+        var dlg = await DialogService.ShowAsync<SnippetsDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var r = await dlg.Result;
+        if (r is not null && !r.Canceled) await Load();
+    }
+
+    private async Task Delete(Snippet s)
+    {
+        var confirm = await DialogService.ShowMessageBox("Confirmar",
+            $"¿Eliminar el snippet '{s.DES_SNIPPET}'?", yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirm == true && s.COD_SNIPPET is not null)
+        {
+            var resp = await Http.DeleteAsync($"{ApiRoutes.Externo.Snippets}/{s.COD_SNIPPET}");
+            if (resp.IsSuccessStatusCode) { Snackbar.Add("Snippet eliminado.", Severity.Success); await Load(); }
+            else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(Snippets), nameof(Delete), "No se pudo eliminar el registro");
+        }
+    }
+
+    public void Dispose() { }
+}

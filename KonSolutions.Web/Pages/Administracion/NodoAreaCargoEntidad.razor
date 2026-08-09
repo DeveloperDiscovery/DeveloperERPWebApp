@@ -1,0 +1,93 @@
+@using KONSolutions.Shared.Models.Administracion
+@using Microsoft.AspNetCore.Components.Web
+
+@* Nodo recursivo del árbol Área > Cargo > Entidad asignada.
+   COD_TIPO: 'A' = Área (solo agrupa), 'C' = Cargo (permite "Asignar" por clic derecho),
+   'P' = Entidad/Persona asignada (permite "Desasignar" por clic derecho).
+   El menú contextual vive en la página padre (AreasCargosEntidades.razor) y decide
+   sus opciones únicamente por Nodo.COD_TIPO, sin depender de la configuración de
+   botones/permisos de la grilla. *@
+
+<div>
+    <div class="tl-row-spec @(EsActual ? "tl-row-seleccionada" : "")"
+         style="cursor:pointer;user-select:none;grid-template-columns:1fr auto;"
+         @onclick="ToggleYSeleccionar"
+         @oncontextmenu="OnRightClick"
+         @oncontextmenu:preventDefault="true"
+         @oncontextmenu:stopPropagation="true">
+
+        <div class="d-flex align-center gap-1" style="@($"padding-left:{8 + Nivel * 18}px;")">
+            @if (Nodo.Hijos.Any())
+            {
+                <MudIcon Icon="@(_expandido ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                         Style="font-size:1rem;opacity:.6;flex-shrink:0;" />
+            }
+            else
+            {
+                <span style="width:20px;flex-shrink:0;"></span>
+            }
+
+            <MudIcon Icon="@IconoNodo(Nodo)" Style="font-size:.95rem;opacity:.7;flex-shrink:0;" />
+
+            <span style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                @Nodo.DES_NODO
+            </span>
+        </div>
+    </div>
+
+    @if (_expandido && Nodo.Hijos.Any())
+    {
+        @foreach (var hijo in Nodo.Hijos)
+        {
+            <NodoAreaCargoEntidad Nodo="hijo"
+                                  Nivel="@(Nivel + 1)"
+                                  NodoActual="NodoActual"
+                                  ForzarExpandido="ForzarExpandido"
+                                  OnSeleccionar="OnSeleccionar"
+                                  OnContextMenu="OnContextMenu" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public AreaCargoEntidadNodo Nodo { get; set; } = null!;
+    [Parameter] public int Nivel { get; set; } = 0;
+    [Parameter] public AreaCargoEntidadNodo? NodoActual { get; set; }
+    [Parameter] public EventCallback<AreaCargoEntidadNodo> OnSeleccionar { get; set; }
+    [Parameter] public EventCallback<(AreaCargoEntidadNodo Nodo, double X, double Y)> OnContextMenu { get; set; }
+    [Parameter] public bool? ForzarExpandido { get; set; }
+
+    private bool _expandido = true;
+    private bool? _ultimoForzado;
+
+    private static string IconoNodo(AreaCargoEntidadNodo n) => n.COD_TIPO switch
+    {
+        "A" => Icons.Material.Filled.CorporateFare,
+        "C" => Icons.Material.Filled.Badge,
+        "P" => Icons.Material.Filled.Person,
+        _   => Icons.Material.Filled.Circle
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (ForzarExpandido.HasValue && ForzarExpandido != _ultimoForzado)
+        {
+            _expandido = ForzarExpandido.Value;
+            _ultimoForzado = ForzarExpandido;
+        }
+    }
+
+    private bool EsActual => NodoActual?.COD_NODO == Nodo.COD_NODO && NodoActual?.COD_TIPO == Nodo.COD_TIPO;
+
+    private void ToggleYSeleccionar()
+    {
+        if (Nodo.Hijos.Any()) _expandido = !_expandido;
+        OnSeleccionar.InvokeAsync(Nodo);
+    }
+
+    private Task OnRightClick(MouseEventArgs e)
+    {
+        OnSeleccionar.InvokeAsync(Nodo);
+        return OnContextMenu.InvokeAsync((Nodo, e.ClientX, e.ClientY));
+    }
+}

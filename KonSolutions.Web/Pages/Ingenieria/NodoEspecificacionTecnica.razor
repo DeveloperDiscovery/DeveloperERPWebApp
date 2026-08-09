@@ -1,0 +1,143 @@
+@using EspecificacionesTecnicasModel = KONSolutions.Shared.Models.Ingenieria.EspecificacionesTecnicas
+@using Microsoft.AspNetCore.Components.Web
+
+@* Nodo recursivo del árbol de Especificaciones Técnicas. *@
+
+<div>
+    @* TreeList: Descripción (indentada) | Tipo | Estado | Acciones *@
+    <div class="tl-row-spec @(EsActual ? "tl-row-seleccionada" : "")"
+         style="cursor:pointer;user-select:none;"
+         @onclick="ToggleYSeleccionar"
+         @oncontextmenu="OnRightClick"
+         @oncontextmenu:preventDefault="true"
+         @oncontextmenu:stopPropagation="true">
+
+        <div class="d-flex align-center gap-1" style="@($"padding-left:{8 + Nivel * 18}px;")">
+            @if (Nodo.Hijos.Any())
+            {
+                <MudIcon Icon="@(_expandido ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                         Style="font-size:1rem;opacity:.6;flex-shrink:0;" />
+            }
+            else
+            {
+                <span style="width:20px;flex-shrink:0;"></span>
+            }
+
+            @if (Nodo.FLG_DEPENDS_ENTITY == true)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Business" Style="font-size:.95rem;opacity:.7;flex-shrink:0;" />
+            }
+            else if (Nodo.IMG_ICONO is { Length: > 0 })
+            {
+                <img src="@_iconoSrc" style="width:1rem;height:1rem;object-fit:contain;flex-shrink:0;" />
+            }
+            else
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Rule" Style="font-size:.95rem;opacity:.7;flex-shrink:0;" />
+            }
+
+            <span style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                <b>@Nodo.COD_ESPECIFICACION_TECNICA</b> — @Nodo.DES_ESPECIFICACION_TECNICA
+            </span>
+        </div>
+
+        <div style="font-size:.74rem;opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="@Nodo.COD_TIPO_ESPECIFICACION_TECNICA">
+            @(string.IsNullOrEmpty(Nodo.DES_TIPO_ESPECIFICACION_TECNICA) ? Nodo.COD_TIPO_ESPECIFICACION_TECNICA : Nodo.DES_TIPO_ESPECIFICACION_TECNICA)
+        </div>
+
+        <div class="d-flex align-center gap-1 flex-wrap">
+            @foreach (var (icono, texto) in Flags(Nodo))
+            {
+                <MudTooltip Text="@texto"><MudIcon Icon="@icono" Size="Size.Small" Style="opacity:.75;" /></MudTooltip>
+            }
+        </div>
+
+        <div>
+            @if (!string.IsNullOrEmpty(Nodo.DES_ESTADO))
+            {
+                <EstadoChip Estado="@Nodo.DES_ESTADO" BackColor="@Nodo.DES_BACKCOLOR" ForeColor="@Nodo.DES_FORECOLOR" />
+            }
+        </div>
+
+        <div @onclick:stopPropagation="true" style="justify-self:end;">
+            <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                             Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccion.InvokeAsync((Nodo,b)))" />
+        </div>
+    </div>
+
+    @if (_expandido && Nodo.Hijos.Any())
+    {
+        @foreach (var hijo in Nodo.Hijos)
+        {
+            <NodoEspecificacionTecnica Nodo="hijo"
+                       Nivel="@(Nivel + 1)"
+                       NodoActual="NodoActual"
+                       CodAplicacion="CodAplicacion"
+                       CodOpcionAplicacion="CodOpcionAplicacion"
+                       ForzarExpandido="ForzarExpandido"
+                       OnSeleccionar="OnSeleccionar"
+                       OnAccion="OnAccion"
+                       OnContextMenu="OnContextMenu" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public EspecificacionesTecnicasModel Nodo { get; set; } = null!;
+    [Parameter] public int Nivel { get; set; } = 0;
+    [Parameter] public EspecificacionesTecnicasModel? NodoActual { get; set; }
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+    [Parameter] public EventCallback<EspecificacionesTecnicasModel> OnSeleccionar { get; set; }
+    [Parameter] public EventCallback<(EspecificacionesTecnicasModel Nodo, BotonTreeviewItem Boton)> OnAccion { get; set; }
+    [Parameter] public EventCallback<(EspecificacionesTecnicasModel Nodo, double X, double Y)> OnContextMenu { get; set; }
+    [Parameter] public bool? ForzarExpandido { get; set; }
+
+    private bool _expandido = true;
+    private bool? _ultimoForzado;
+
+    protected override void OnParametersSet()
+    {
+        if (ForzarExpandido.HasValue && ForzarExpandido != _ultimoForzado)
+        {
+            _expandido = ForzarExpandido.Value;
+            _ultimoForzado = ForzarExpandido;
+        }
+    }
+
+    private bool EsActual => NodoActual?.COD_ESPECIFICACION_TECNICA == Nodo.COD_ESPECIFICACION_TECNICA;
+
+    private string _iconoSrc => Nodo.IMG_ICONO is { Length: > 0 }
+        ? $"data:image/png;base64,{Convert.ToBase64String(Nodo.IMG_ICONO)}"
+        : "";
+
+    /// <summary>Solo los flags en true, como íconos — mismo set que el bloque de switches del diálogo.</summary>
+    private static IEnumerable<(string Icono, string Texto)> Flags(EspecificacionesTecnicasModel n)
+    {
+        if (n.FLG_LIST == true)                 yield return (Icons.Material.Filled.List, "Lista");
+        if (n.FLG_PRODUCT_ASSEMBLY == true)      yield return (Icons.Material.Filled.Construction, "Dato de Ensamblaje");
+        if (n.FLG_RANGE == true)                 yield return (Icons.Material.Filled.Straighten, "Requiere Rango de Valores");
+        if (n.FLG_EDITABLE_ORDER_TAKING == true) yield return (Icons.Material.Filled.EditNote, "Se Edita en el momento de la Toma de Pedido");
+        if (n.FLG_OBSERVACION == true)           yield return (Icons.Material.Filled.Comment, "Requiere Observaciones");
+        if (n.FLG_QUALITY_CONTROL == true)       yield return (Icons.Material.Filled.VerifiedUser, "Control de Calidad");
+        if (n.FLG_IS_COLOR == true)              yield return (Icons.Material.Filled.Palette, "Es un Color");
+        if (n.FLG_HAS_CHILDREN == true)          yield return (Icons.Material.Filled.AccountTree, "Tiene Hijos");
+        if (n.FLG_IS_CHILDREN == true)           yield return (Icons.Material.Filled.SubdirectoryArrowRight, "Es Especificación Técnica Hija");
+        if (n.FLG_DEPENDS_ENTITY == true)        yield return (Icons.Material.Filled.Business, "Depende de Entidad");
+        if (n.FLG_MULTIPLE_CHOICE == true)       yield return (Icons.Material.Filled.Checklist, "Selección Múltiple");
+        if (n.FLG_ITEMS_WITH_VALUE == true)      yield return (Icons.Material.Filled.AttachMoney, "Es Ítem con Valor");
+    }
+
+
+    private void ToggleYSeleccionar()
+    {
+        if (Nodo.Hijos.Any()) _expandido = !_expandido;
+        OnSeleccionar.InvokeAsync(Nodo);
+    }
+
+    private Task OnRightClick(MouseEventArgs e)
+    {
+        OnSeleccionar.InvokeAsync(Nodo);
+        return OnContextMenu.InvokeAsync((Nodo, e.ClientX, e.ClientY));
+    }
+}

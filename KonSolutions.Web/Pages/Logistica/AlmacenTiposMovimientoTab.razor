@@ -1,0 +1,416 @@
+@using AsignadoModel = KONSolutions.Shared.Models.Logistica.AlmacenesTiposMovimiento
+@using LoteModel = KONSolutions.Shared.Models.Logistica.AlmacenesTiposMovimientoLote
+@using LoteResultModel = KONSolutions.Shared.Models.Logistica.AlmacenesTiposMovimientoLoteResult
+@using TipoModel = KONSolutions.Shared.Models.Logistica.TiposMovimiento
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject LimitesService Limites
+@inject ErrorLogService ErrorLog
+
+@* Asignación de tipos de movimiento a un almacén.
+   No es un CRUD: la tabla no tiene datos propios, sólo el vínculo. Por eso son dos grillas
+   —asignados y disponibles— y no un formulario. *@
+
+@if (Almacen is null)
+{
+    <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione un almacén para ver sus tipos de movimiento.</MudText>
+}
+else
+{
+    <div class="d-flex align-center justify-space-between pa-3 flex-wrap" style="border-bottom:1px solid var(--line);gap:12px;">
+        <div style="min-width:300px;">
+            @* La clase es obligatoria, no un filtro opcional: un tipo de movimiento sólo
+               existe dentro de su clase, y el SP de lectura las pide juntas. *@
+            <AriaCombo TItem="ComboboxItem" Items="_clases"
+                       TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                       Value="@_codClase" ValueChanged="OnClaseChanged"
+                       Label="Clase de movimiento" />
+        </div>
+        <div class="d-flex align-center gap-2">
+            <GridRefreshButton OnRefresh="Cargar" />
+            <MudText Class="mono" Style="opacity:.5;font-size:.75rem;">
+                @_asignados.Count asignados · @_disponibles.Count disponibles
+            </MudText>
+        </div>
+    </div>
+
+    @if (string.IsNullOrWhiteSpace(_codClase))
+    {
+        <MudText Class="pa-6 mono" Style="opacity:.4;">Elija una clase de movimiento.</MudText>
+    }
+    else if (_cargando)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else
+    {
+        <MudGrid Spacing="0">
+
+            @* ── ASIGNADOS ── *@
+            <MudItem xs="12" md="6">
+                <div style="border-right:1px solid var(--line);">
+                    <div class="d-flex align-center justify-space-between px-3 py-2"
+                         style="border-bottom:1px solid var(--line);background:var(--mud-palette-background-grey);">
+                        <div class="d-flex align-center gap-2">
+                            @SwitchMarcaTodo(EstadoMarcaAsignados, MarcarTodosAsignados, Color.Primary)
+                            <MudText Typo="Typo.subtitle2">Asignados</MudText>
+                            @if (_marcadosAsignados.Count > 0)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">@_marcadosAsignados.Count</MudChip>
+                            }
+                        </div>
+                        <MudTooltip Text="Quitar del almacén los tipos marcados">
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Error"
+                                       StartIcon="@Icons.Material.Filled.ChevronRight"
+                                       Disabled="@(_marcadosAsignados.Count == 0 || _procesando)"
+                                       OnClick="@(() => DesasignarAsync(_marcadosAsignados.ToList()))">Quitar</MudButton>
+                        </MudTooltip>
+                    </div>
+
+                    <div data-resizable-grid="almacen-tipos-movimiento-asignados" style="position:relative;">
+                    <MudDataGrid T="AsignadoModel" Items="_asignados" Dense="true" Hover="true" Striped="true"
+                                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+                        <Columns>
+                            <TemplateColumn Sortable="false" Title="" Width="60" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                                <CellTemplate>
+                                    @{ var cod = context.Item.COD_TIPO_MOVIMIENTO; }
+                                    @SwitchMarca(_marcadosAsignados.Contains(cod), v => Marcar(_marcadosAsignados, cod, v), Color.Primary)
+                                </CellTemplate>
+                            </TemplateColumn>
+                            <TemplateColumn Sortable="false" Title="Código" Width="90" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                                <HeaderTemplate><EncabezadoOrdenable Texto="Código" /></HeaderTemplate>
+                                <CellTemplate><span class="mono">@context.Item.COD_TIPO_MOVIMIENTO</span></CellTemplate>
+                            </TemplateColumn>
+                            <TemplateColumn Sortable="false" Title="Tipo de movimiento">
+                                <HeaderTemplate><EncabezadoOrdenable Texto="Tipo de movimiento" /></HeaderTemplate>
+                                <CellTemplate>
+                                    @{ var a = context.Item; }
+                                    @* El menú contextual es la acción individual; el switch es la
+                                       masiva. Dos caminos para lo mismo, sin estorbarse. *@
+                                    <MudMenu ActivationEvent="@MouseEvent.RightClick" Dense="true" FullWidth="true"
+                                             AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+                                        <ActivatorContent>
+                                            <div style="cursor:context-menu;">
+                                                <MudText Typo="Typo.body2">@a.DES_TIPO_MOVIMIENTO</MudText>
+                                                @if (!string.IsNullOrWhiteSpace(a.DES_OBSERVACION))
+                                                {
+                                                    <MudText Class="mono" Style="opacity:.5;font-size:.7rem;">@a.DES_OBSERVACION</MudText>
+                                                }
+                                            </div>
+                                        </ActivatorContent>
+                                        <ChildContent>
+                                            <MudMenuItem Icon="@Icons.Material.Filled.ChevronRight" IconColor="Color.Error"
+                                                         OnClick="@(() => DesasignarAsync(new List<string> { a.COD_TIPO_MOVIMIENTO }))">
+                                                Quitar del almacén
+                                            </MudMenuItem>
+                                        </ChildContent>
+                                    </MudMenu>
+                                </CellTemplate>
+                            </TemplateColumn>
+                        </Columns>
+                        <NoRecordsContent>
+                            <MudText Class="pa-4 mono" Style="opacity:.5;">Este almacén no tiene tipos de movimiento de esta clase.</MudText>
+                        </NoRecordsContent>
+                        <PagerContent><MudDataGridPager T="AsignadoModel" /></PagerContent>
+                    </MudDataGrid>
+                    <div class="grid-resize-handle"></div>
+                    </div>
+                </div>
+            </MudItem>
+
+            @* ── DISPONIBLES ── *@
+            <MudItem xs="12" md="6">
+                <div>
+                    <div class="d-flex align-center justify-space-between px-3 py-2"
+                         style="border-bottom:1px solid var(--line);background:var(--mud-palette-background-grey);">
+                        <MudTooltip Text="Agregar al almacén los tipos marcados">
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success"
+                                       StartIcon="@Icons.Material.Filled.ChevronLeft"
+                                       Disabled="@(_marcadosDisponibles.Count == 0 || _procesando)"
+                                       OnClick="@(() => AsignarAsync(_marcadosDisponibles.ToList()))">Asignar</MudButton>
+                        </MudTooltip>
+                        <div class="d-flex align-center gap-2">
+                            @if (_marcadosDisponibles.Count > 0)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">@_marcadosDisponibles.Count</MudChip>
+                            }
+                            <MudText Typo="Typo.subtitle2">Disponibles</MudText>
+                            @SwitchMarcaTodo(EstadoMarcaDisponibles, MarcarTodosDisponibles, Color.Success)
+                        </div>
+                    </div>
+
+                    <div data-resizable-grid="almacen-tipos-movimiento-disponibles" style="position:relative;">
+                    <MudDataGrid T="TipoModel" Items="_disponibles" Dense="true" Hover="true" Striped="true"
+                                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+                        <Columns>
+                            <TemplateColumn Sortable="false" Title="" Width="60" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                                <CellTemplate>
+                                    @{ var cod = context.Item.COD_TIPO_MOVIMIENTO; }
+                                    @SwitchMarca(_marcadosDisponibles.Contains(cod), v => Marcar(_marcadosDisponibles, cod, v), Color.Success)
+                                </CellTemplate>
+                            </TemplateColumn>
+                            <TemplateColumn Sortable="false" Title="Código" Width="90" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                                <HeaderTemplate><EncabezadoOrdenable Texto="Código" /></HeaderTemplate>
+                                <CellTemplate><span class="mono">@context.Item.COD_TIPO_MOVIMIENTO</span></CellTemplate>
+                            </TemplateColumn>
+                            <TemplateColumn Sortable="false" Title="Tipo de movimiento">
+                                <HeaderTemplate><EncabezadoOrdenable Texto="Tipo de movimiento" /></HeaderTemplate>
+                                <CellTemplate>
+                                    @{ var t = context.Item; }
+                                    <MudMenu ActivationEvent="@MouseEvent.RightClick" Dense="true" FullWidth="true"
+                                             AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+                                        <ActivatorContent>
+                                            <div style="cursor:context-menu;">
+                                                <MudText Typo="Typo.body2">@t.DES_TIPO_MOVIMIENTO</MudText>
+                                            </div>
+                                        </ActivatorContent>
+                                        <ChildContent>
+                                            <MudMenuItem Icon="@Icons.Material.Filled.ChevronLeft" IconColor="Color.Success"
+                                                         OnClick="@(() => AsignarAsync(new List<string> { t.COD_TIPO_MOVIMIENTO }))">
+                                                Asignar al almacén
+                                            </MudMenuItem>
+                                        </ChildContent>
+                                    </MudMenu>
+                                </CellTemplate>
+                            </TemplateColumn>
+                        </Columns>
+                        <NoRecordsContent>
+                            <MudText Class="pa-4 mono" Style="opacity:.5;">Todos los tipos de esta clase ya están asignados.</MudText>
+                        </NoRecordsContent>
+                        <PagerContent><MudDataGridPager T="TipoModel" /></PagerContent>
+                    </MudDataGrid>
+                    <div class="grid-resize-handle"></div>
+                    </div>
+                </div>
+            </MudItem>
+        </MudGrid>
+    }
+}
+
+@code {
+    /// <summary>Almacén sobre el que se asigna. Null = ninguno seleccionado arriba.</summary>
+    [Parameter] public KONSolutions.Shared.Models.Logistica.Almacenes? Almacen { get; set; }
+    /// <summary>Bloquea las acciones cuando el almacén está anulado o el rol no permite modificar.</summary>
+    [Parameter] public bool SoloLectura { get; set; }
+
+    private List<ComboboxItem> _clases = new();
+    private string _codClase = "";
+    private List<AsignadoModel> _asignados = new();
+    private List<TipoModel> _disponibles = new();
+
+    private readonly HashSet<string> _marcadosAsignados = new();
+    private readonly HashSet<string> _marcadosDisponibles = new();
+
+    private bool _cargando, _procesando;
+    private string? _almacenCargado;
+
+    /// <summary>Switch de marcado de una fila. Se centraliza acá para que las dos grillas usen
+    /// exactamente el mismo control: si mañana cambia, cambia en las dos.</summary>
+    private RenderFragment SwitchMarca(bool marcado, Action<bool> alCambiar, Color color) => __builder =>
+    {
+        <MudSwitch T="bool" Value="marcado" ValueChanged="@(new EventCallback<bool>(this, alCambiar))"
+                   Color="@color" Size="Size.Small" Disabled="@(SoloLectura || _procesando)" />
+    };
+
+    /// <summary>Switch del encabezado. Tri-estado: en «algunos marcados» se muestra apagado
+    /// pero con color, porque un switch no tiene un estado intermedio propio como el check.</summary>
+    private RenderFragment SwitchMarcaTodo(bool? estado, Action<bool> alCambiar, Color color) => __builder =>
+    {
+        <MudTooltip Text="@(estado == true ? "Desmarcar todos" : "Marcar todos")">
+            <MudSwitch T="bool" Value="@(estado == true)" ValueChanged="@(new EventCallback<bool>(this, alCambiar))"
+                       Color="@(estado is null ? Color.Warning : color)" Size="Size.Small"
+                       Disabled="@(SoloLectura || _procesando)" />
+        </MudTooltip>
+    };
+
+    protected override async Task OnInitializedAsync()
+        => _clases = await CargarCombo(ApiRoutes.Logistica.ClasesMovimientoCombobox);
+
+    /// <summary>Al cambiar de almacén se recarga. Se compara contra el último cargado porque
+    /// OnParametersSet corre en cada render del padre, y recargar en cada uno dispararía
+    /// llamadas de más y perdería las marcas mientras el usuario elige.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        var cod = Almacen?.COD_ALMACEN;
+        if (cod == _almacenCargado) return;
+        _almacenCargado = cod;
+        LimpiarMarcas();
+        await Cargar();
+    }
+
+    private async Task OnClaseChanged(string? val)
+    {
+        _codClase = val ?? "";
+        LimpiarMarcas();
+        await Cargar();
+    }
+
+    private void LimpiarMarcas()
+    {
+        _marcadosAsignados.Clear();
+        _marcadosDisponibles.Clear();
+    }
+
+    private void Marcar(HashSet<string> destino, string cod, bool marcado)
+    {
+        if (marcado) destino.Add(cod); else destino.Remove(cod);
+    }
+
+    // null = algunos marcados. Deja ver de un vistazo si la selección es parcial.
+    private bool? EstadoMarcaAsignados =>
+        _marcadosAsignados.Count == 0 ? false
+        : _marcadosAsignados.Count == _asignados.Count ? true : null;
+
+    private bool? EstadoMarcaDisponibles =>
+        _marcadosDisponibles.Count == 0 ? false
+        : _marcadosDisponibles.Count == _disponibles.Count ? true : null;
+
+    private void MarcarTodosAsignados(bool valor)
+    {
+        _marcadosAsignados.Clear();
+        if (!valor) return;
+        foreach (var a in _asignados) _marcadosAsignados.Add(a.COD_TIPO_MOVIMIENTO);
+    }
+
+    private void MarcarTodosDisponibles(bool valor)
+    {
+        _marcadosDisponibles.Clear();
+        if (!valor) return;
+        foreach (var t in _disponibles) _marcadosDisponibles.Add(t.COD_TIPO_MOVIMIENTO);
+    }
+
+    /// <summary>Trae los asignados del almacén y todos los tipos de la clase; los disponibles
+    /// son la diferencia. Se calcula acá y no en la base porque no hay un SP que devuelva
+    /// "los que faltan", y pedir dos listas ya resueltas es una llamada de más.</summary>
+    private async Task Cargar()
+    {
+        if (Almacen is null || string.IsNullOrWhiteSpace(_codClase))
+        {
+            _asignados = new();
+            _disponibles = new();
+            return;
+        }
+
+        _cargando = true;
+        try
+        {
+            var ra = await Http.GetFromJsonAsync<ApiResponse<List<AsignadoModel>>>(
+                $"{ApiRoutes.Logistica.AlmacenesTiposMovimiento}/{Uri.EscapeDataString(Almacen.COD_ALMACEN)}/{Uri.EscapeDataString(_codClase)}");
+            _asignados = (ra?.Data ?? new()).OrderBy(a => a.DES_TIPO_MOVIMIENTO).ToList();
+
+            var rt = await Http.GetFromJsonAsync<ApiResponse<List<TipoModel>>>(
+                $"{ApiRoutes.Logistica.TiposMovimiento}?codClaseMovimiento={Uri.EscapeDataString(_codClase)}");
+            var asignadosCod = _asignados.Select(a => a.COD_TIPO_MOVIMIENTO).ToHashSet();
+            _disponibles = (rt?.Data ?? new())
+                .Where(t => !asignadosCod.Contains(t.COD_TIPO_MOVIMIENTO))
+                .OrderBy(t => t.DES_TIPO_MOVIMIENTO)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(AlmacenTiposMovimientoTab), nameof(Cargar));
+            await MostrarErrorAsync("No se pudieron cargar los tipos de movimiento.");
+            _asignados = new();
+            _disponibles = new();
+        }
+        _cargando = false;
+    }
+
+    private async Task AsignarAsync(List<string> tipos)
+    {
+        if (!await PuedeOperarAsync(tipos)) return;
+        await EnviarLoteAsync(ApiRoutes.Logistica.AlmacenesTiposMovimientoAsignar, tipos, "asignar");
+    }
+
+    private async Task DesasignarAsync(List<string> tipos)
+    {
+        if (!await PuedeOperarAsync(tipos)) return;
+        await EnviarLoteAsync(ApiRoutes.Logistica.AlmacenesTiposMovimientoDesasignar, tipos, "quitar");
+    }
+
+    private async Task<bool> PuedeOperarAsync(List<string> tipos)
+    {
+        if (SoloLectura)
+        {
+            await MostrarAvisoAsync("Sólo lectura",
+                "No tiene permiso para modificar los tipos de movimiento de este almacén.");
+            return false;
+        }
+        return Almacen is not null && tipos.Count > 0 && !_procesando;
+    }
+
+    /// <summary>Manda el lote completo en una sola llamada. La respuesta puede ser parcial:
+    /// el servidor sigue con los demás si uno falla, así que se informa cuántos entraron y
+    /// cuáles quedaron afuera en vez de decir sólo "listo" o "error".</summary>
+    private async Task EnviarLoteAsync(string ruta, List<string> tipos, string verbo)
+    {
+        _procesando = true;
+        try
+        {
+            var dto = new LoteModel
+            {
+                COD_ALMACEN = Almacen!.COD_ALMACEN,
+                COD_CLASE_MOVIMIENTO = _codClase,
+                Tipos = tipos
+            };
+            var resp = await Http.PostAsJsonAsync(ruta, dto);
+            if (!resp.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService,
+                    nameof(AlmacenTiposMovimientoTab), nameof(EnviarLoteAsync), $"No se pudo {verbo}");
+                return;
+            }
+
+            var r = await resp.Content.ReadFromJsonAsync<ApiResponse<LoteResultModel>>();
+            var res = r?.Data;
+            LimpiarMarcas();
+            await Cargar();
+
+            if (res is null) { Snackbar.Add("Operación completada.", Severity.Success); return; }
+
+            if (res.Fallidos.Any())
+            {
+                // Al quitar, lo habitual es que el rechazo venga del SP porque el tipo ya está
+                // en uso: se muestra el motivo real en vez de un "no se pudo" genérico.
+                await MostrarAvisoAsync($"No se pudo {verbo} todo",
+                    $"Se procesaron {res.Procesados}. Quedaron afuera: {string.Join(", ", res.Fallidos)}." +
+                    (string.IsNullOrWhiteSpace(res.DesError) ? "" : $" Motivo: {res.DesError}"));
+            }
+            else
+            {
+                Snackbar.Add($"{res.Procesados} tipo(s) de movimiento actualizados.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(AlmacenTiposMovimientoTab), nameof(EnviarLoteAsync));
+            await MostrarErrorAsync($"No se pudo {verbo} los tipos de movimiento.");
+        }
+        finally { _procesando = false; }
+    }
+
+    private async Task<List<ComboboxItem>> CargarCombo(string ruta)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>(ruta);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(AlmacenTiposMovimientoTab), nameof(CargarCombo));
+            return new();
+        }
+    }
+
+    private Task MostrarErrorAsync(string mensaje)
+        => MostrarAvisoAsync("No se pudo completar la operación", $"{mensaje} Ver detalle en el log de errores.");
+
+    private async Task MostrarAvisoAsync(string titulo, string mensaje)
+        => await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters { ["Titulo"] = titulo, ["Mensaje"] = mensaje },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+}

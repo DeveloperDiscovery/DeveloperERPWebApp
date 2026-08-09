@@ -1,0 +1,81 @@
+@using TiposSolicitudComercialModel = KONSolutions.Shared.Models.Comercial.TiposSolicitudComercial
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_SOLICITUD_COMERICAL" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="COMERCIAL.TIPOS_SOLICITUD_COMERCIAL" Columna="COD_TIPO_SOLICITUD_COMERICAL"
+                        @bind-Value="_model.COD_TIPO_SOLICITUD_COMERICAL"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="true" />
+            <CampoTexto Tabla="COMERCIAL.TIPOS_SOLICITUD_COMERCIAL" Columna="DES_TIPO_SOLICITUD_COMERICAL"
+                        @bind-Value="_model.DES_TIPO_SOLICITUD_COMERICAL"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposSolicitudComercialModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private KONSolutions.Shared.Models.Comercial.TiposSolicitudComercialDto _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(TiposSolicitudComercialModel m)
+    {
+        _model = new KONSolutions.Shared.Models.Comercial.TiposSolicitudComercialDto
+        {
+            COD_TIPO_SOLICITUD_COMERICAL = m.COD_TIPO_SOLICITUD_COMERICAL,
+            DES_TIPO_SOLICITUD_COMERICAL = m.DES_TIPO_SOLICITUD_COMERICAL ?? "",
+        };
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposSolicitudComercialModel>($"{ComercialRoute.TiposSolicitudComercial}/{Uri.EscapeDataString(_model.COD_TIPO_SOLICITUD_COMERICAL)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ComercialRoute.TiposSolicitudComercial}/{Uri.EscapeDataString(_model.COD_TIPO_SOLICITUD_COMERICAL)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposSolicitudComercialDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // PROC_COMERCIAL_TIPOS_SOLICITUD_COMERCIAL_INSERT es upsert — siempre POST.
+        var resp = await Http.PostAsJsonAsync(ComercialRoute.TiposSolicitudComercial, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposSolicitudComercialDialog), nameof(Submit));
+    }
+}

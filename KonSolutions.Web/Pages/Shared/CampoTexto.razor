@@ -1,0 +1,185 @@
+@*
+    CampoTexto.razor
+    --------------------------------------------------------------------------
+    Textbox que aplica automáticamente el MaxLength real de la columna en la BD.
+    Lee el límite desde LimitesService usando Tabla ("SCHEMA.TABLA") y Columna.
+    Uso:
+      <CampoTexto Tabla="SEGURIDAD.USUARIOS" Columna="COD_USUARIO"
+                  Label="Usuario" @bind-Value="_model.COD_USUARIO" Disabled="_readonly" />
+
+    Validación "obligatorio" (v4): se autovalida contra el EditContext cascingado por el
+    <EditForm> contenedor — no depende de que el modelo tenga [Required] en ese campo.
+    Al fallar el submit (OnValidationRequested), si Obligatorio es true y el valor está
+    vacío, muestra el mensaje de error inline (Error/ErrorText de MudTextField) y agrega
+    la clase "campo-invalido" para que el foco/scroll automático (ver validationFocus.js)
+    lo encuentre. No requiere ningún cambio en los diálogos que ya usan Obligatorio="true"
+    (o que lo detectan solo desde la BD vía Limites.EsObligatorio).
+*@
+@inject LimitesService Limites
+@inject ConfigService ConfigSvc
+@inject EtiquetasService EtiquetasSvc
+@implements IDisposable
+
+<div @onfocusin="@(() => _hasFocus = true)" @onfocusout="@(() => _hasFocus = false)" style="display:contents;">
+<MudTextField T="string" Value="_val" ValueChanged="OnChanged" Label="@LabelEfectivo"
+              Variant="Variant.Outlined" Disabled="Disabled" Class="@ClaseCombinada"
+              Style="@($"font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);{EstiloTransformacion}")"
+              MaxLength="@_maxLength" Immediate="@Immediate" InputType="@InputType" Margin="Margin"
+              Lines="@Lines"
+              Required="@Obligatorio" RequiredError="Este campo es obligatorio"
+              Error="@_invalido" ErrorText="@(_invalido ? "Este campo es obligatorio." : null)"
+              Clearable="@(!Disabled)" ClearIcon="@Icons.Material.Filled.DeleteOutline" OnClearButtonClick="Limpiar" />
+</div>
+
+@code {
+    [Parameter] public string Tabla { get; set; } = "";       // "SCHEMA.TABLA"
+    [Parameter] public string Columna { get; set; } = "";     // Nombre de la columna
+    [Parameter] public string? Label { get; set; }            // Etiqueta visible
+    [Parameter] public string? Value { get; set; }            // Valor enlazado
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }            // Solo lectura
+    [Parameter] public bool Obligatorio { get; set; }         // v3: campo requerido (backcolor configurable)
+    [Parameter] public bool Immediate { get; set; } = true;   // Actualiza al teclear
+    [Parameter] public string Class { get; set; } = "mb-3";   // Clases CSS
+    [Parameter] public InputType InputType { get; set; } = InputType.Text; // Texto/Password/etc.
+    [Parameter] public Margin Margin { get; set; } = Margin.Normal;
+    /// <summary>Cantidad de líneas visibles — > 1 lo vuelve un textarea (ej. campos DES_OBSERVACION/
+    /// DES_OBSERVACIONES, para ver los saltos de línea en vez de una sola fila con scroll horizontal).</summary>
+    [Parameter] public int Lines { get; set; } = 1;
+    [Parameter] public bool IgnorarModoTexto { get; set; } = false;
+    /// <summary>Oculta la etiqueta flotante — para usarlo dentro de una grilla editable
+    /// donde el encabezado de columna ya cumple ese rol (evita la etiqueta duplicada).</summary>
+    [Parameter] public bool MostrarLabel { get; set; } = true;
+
+    [CascadingParameter] private EditContext? CascadedEditContext { get; set; }
+
+    /// <summary>Si no se pasó Label explícito, usa el Diccionario de Etiquetas
+    /// (ENTORNO.DICCIONARIO_ETIQUETAS) por nombre de Columna — Label explícito siempre gana.</summary>
+    private string? LabelEfectivo => !MostrarLabel ? null
+        : string.IsNullOrWhiteSpace(Label)
+        ? EtiquetasSvc.Obtener(Columna, Columna)
+        : Label;
+
+    // MaxLength a aplicar (int.MaxValue = sin límite si la columna no se encontró)
+    private int _maxLength = int.MaxValue;
+
+    // Campo local en vez de leer/escribir directo el parámetro Value — evita que MudBlazor
+    // pierda la posición del cursor al reemplazar texto a mitad de la cadena.
+    private string? _val;
+
+    /// <summary>Mientras el campo tiene el foco, _val NUNCA se resincroniza desde afuera
+    /// (ver OnParametersSet) — ni siquiera con el valor YA TRANSFORMADO (MAYÚSCULAS/
+    /// minúsculas) que rebota de vuelta desde el padre tras cada ValueChanged. Si no fuera
+    /// así, cada tecla dispararía: _val (crudo, lo que el usuario tecleó) → ValueChanged
+    /// manda la versión transformada al padre → el padre re-renderiza este componente con
+    /// Value=transformado → OnParametersSet reemplazaría _val por ese valor "distinto" →
+    /// MudBlazor reescribe el &lt;input&gt; real del DOM → el navegador manda el cursor al
+    /// final. Justo el bug reportado: con el teclado virtual en MAYÚSCULAS no pasaba
+    /// (tecleado y transformado coinciden, no hay "cambio" real que forzar), pero con
+    /// minúsculas sí, porque ahí el mismatch era real en cada tecla. La transformación
+    /// real solo se aplica al valor que se ENVÍA (ValueChanged); localmente el campo se
+    /// deja como el usuario lo escribió — la presentación en MAYÚSCULAS/minúsculas la
+    /// resuelve EstiloTransformacion (CSS text-transform, mismo criterio que
+    /// BarraBusqueda.razor), sin tocar nunca el .value real mientras se edita.</summary>
+    private bool _hasFocus;
+
+    /// <summary>Ver comentario de _hasFocus/OnChanged — CSS text-transform no lo heredan
+    /// los &lt;input&gt; desde este wrapper (son "replaced elements"), por eso se fija como
+    /// variable CSS (esas sí atraviesan esa barrera) — ver ".campo-texto-mt input" en app.css.</summary>
+    private string EstiloTransformacion => IgnorarModoTexto ? "" : ConfigSvc.Current.ModoTexto switch
+    {
+        "upper" => "--campo-texto-transform:uppercase;",
+        "lower" => "--campo-texto-transform:lowercase;",
+        _ => "--campo-texto-transform:none;"
+    };
+
+    private ValidationMessageStore? _messageStore;
+    private FieldIdentifier _field;
+    private bool _invalido;
+    private EventHandler<ValidationRequestedEventArgs>? _onValidationRequested;
+
+    private string ClaseCombinada => string.Join(" ", new[]
+    {
+        Class,
+        "campo-texto-mt",
+        Obligatorio ? "campo-obligatorio" : null,
+        _invalido ? "campo-invalido" : null,
+        string.IsNullOrEmpty(_val) ? "campo-vacio" : null
+    }.Where(c => !string.IsNullOrEmpty(c)));
+
+    protected override void OnParametersSet()
+    {
+        if (!_hasFocus && _val != Value) _val = Value;
+    }
+
+    /// <summary>Al iniciar: busca el MaxLength real de la columna en la BD.</summary>
+    protected override void OnInitialized()
+    {
+        var max = Limites.MaxLength(Tabla, Columna);
+        if (max is > 0) _maxLength = max.Value;
+
+        // v3: si no se marcó manualmente, detectar si la columna es NOT NULL (obligatoria)
+        if (!Obligatorio && !string.IsNullOrWhiteSpace(Tabla) && !string.IsNullOrWhiteSpace(Columna))
+            Obligatorio = Limites.EsObligatorio(Tabla, Columna);
+
+        if (CascadedEditContext is not null)
+        {
+            _field = new FieldIdentifier(this, nameof(Value));
+            _messageStore = new ValidationMessageStore(CascadedEditContext);
+            _onValidationRequested = (s, e) => Validar();
+            CascadedEditContext.OnValidationRequested += _onValidationRequested;
+        }
+    }
+
+    private void Validar()
+    {
+        _messageStore?.Clear(_field);
+        _invalido = Obligatorio && string.IsNullOrWhiteSpace(_val);
+        if (_invalido) _messageStore?.Add(_field, "Este campo es obligatorio.");
+        CascadedEditContext?.NotifyValidationStateChanged();
+    }
+
+    /// <summary>
+    /// Propaga el cambio aplicando el modo de texto configurado
+    /// (MAYÚSCULAS / minúsculas / normal) según la configuración de la app.
+    /// </summary>
+    private async Task OnChanged(string? v)
+    {
+        _val = v;
+        if (_invalido && !string.IsNullOrWhiteSpace(_val))
+        {
+            _invalido = false;
+            _messageStore?.Clear(_field);
+            CascadedEditContext?.NotifyValidationStateChanged();
+        }
+        await ValueChanged.InvokeAsync(AplicarModoTexto(v));
+    }
+
+    /// <summary>Botón de papelera (Clearable) — limpia el campo sin tener que seleccionar
+    /// y borrar el texto a mano. La validación "obligatorio" no se dispara acá (mismo
+    /// criterio que al escribir): solo se marca inválido al intentar guardar, vía
+    /// OnValidationRequested/Validar().</summary>
+    private async Task Limpiar()
+    {
+        _val = null;
+        await ValueChanged.InvokeAsync(null);
+    }
+
+    /// <summary>Transforma el texto según el modo definido en Configuración.</summary>
+    private string? AplicarModoTexto(string? v)
+    {
+        if (string.IsNullOrEmpty(v) || IgnorarModoTexto) return v;
+        return ConfigSvc.Current.ModoTexto switch
+        {
+            "upper" => v.ToUpperInvariant(),
+            "lower" => v.ToLowerInvariant(),
+            _ => v
+        };
+    }
+
+    public void Dispose()
+    {
+        if (CascadedEditContext is not null && _onValidationRequested is not null)
+            CascadedEditContext.OnValidationRequested -= _onValidationRequested;
+    }
+}

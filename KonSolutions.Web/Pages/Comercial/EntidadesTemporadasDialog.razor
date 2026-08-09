@@ -1,0 +1,158 @@
+@using TemporadaModel = KONSolutions.Shared.Models.Comercial.EntidadesTemporadas
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using EstandarRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TEMPORADA" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            @if (!_esNuevo)
+            {
+                <MudTextField Value="@_model.NUM_TEMPORADA?.ToString()" Label="Código" Variant="Variant.Outlined"
+                              Disabled="true" Class="mb-3" />
+            }
+            <CampoTexto Tabla="COMERCIAL.ENTIDADES_TEMPORADAS" Columna="DES_TEMPORADA"
+                        @bind-Value="_model.DES_TEMPORADA"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="4">
+                    <AriaCombo TItem="ComboboxItem" Items="_anos"
+                               TextFunc="@(a => $"{a.Id} - {a.Texto}")" ValueFunc="@(a => a.Id)"
+                               Value="@(_model.NUM_ANO?.ToString())"
+                               ValueChanged="@(v => _model.NUM_ANO = int.TryParse(v, out var n) ? n : null)"
+                               Label="Año" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <AriaCombo TItem="ComboboxItem" Items="_meses"
+                               TextFunc="@(m => $"{m.Id} - {m.Texto}")" ValueFunc="@(m => m.Id)"
+                               Value="@(_model.NUM_MES?.ToString())"
+                               ValueChanged="@(v => _model.NUM_MES = int.TryParse(v, out var n) ? n : null)"
+                               Label="Mes" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <AriaCombo TItem="ComboboxItem" Items="_meses"
+                               TextFunc="@(m => $"{m.Id} - {m.Texto}")" ValueFunc="@(m => m.Id)"
+                               Value="@(_model.MES_FINAL?.ToString())"
+                               ValueChanged="@(v => _model.MES_FINAL = int.TryParse(v, out var n) ? n : null)"
+                               Label="Mes Final" Disabled="_readonly" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="4">
+                    <MudNumericField T="int?" @bind-Value="_model.NUM_ORDEN_PRESENTACION" Label="Orden de Presentación"
+                                      Variant="Variant.Outlined" Disabled="_readonly" Class="mb-3" Min="0" />
+                </MudItem>
+            </MudGrid>
+
+            <EstadoCombo DesTabla="COMERCIAL.ENTIDADES_TEMPORADAS"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public decimal CodEntidad { get; set; }
+    [Parameter] public TemporadaModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TemporadaModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+    private List<ComboboxItem> _anos = new();
+    private List<ComboboxItem> _meses = new();
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        _model.COD_ENTIDAD = CodEntidad;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de SHOWBYID) hacia _model.</summary>
+    private void MapearDesdeModelo(TemporadaModel m)
+    {
+        _model.COD_ENTIDAD = m.COD_ENTIDAD ?? CodEntidad;
+        _model.NUM_TEMPORADA = m.NUM_TEMPORADA;
+        _model.DES_TEMPORADA = m.DES_TEMPORADA;
+        _model.NUM_ANO = m.NUM_ANO;
+        _model.NUM_MES = m.NUM_MES;
+        _model.MES_FINAL = m.MES_FINAL;
+        _model.NUM_ORDEN_PRESENTACION = m.NUM_ORDEN_PRESENTACION;
+        _model.COD_TIPO_ESTADO = m.COD_TIPO_ESTADO;
+        _model.COD_ESTADO = m.COD_ESTADO;
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID (clave compuesta) — se usa al abrir el
+    /// diálogo (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TemporadaModel>(
+            $"{ComercialRoute.EntidadesTemporadas}/{_model.COD_ENTIDAD}/{_model.NUM_TEMPORADA}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>($"{EstandarRoute.Anos}/combobox");
+            _anos = r?.Data ?? new();
+        }
+        catch { _anos = new(); }
+
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>($"{EstandarRoute.Meses}/combobox");
+            _meses = r?.Data ?? new();
+        }
+        catch { _meses = new(); }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ComercialRoute.EntidadesTemporadas;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_ENTIDAD}/{_model.NUM_TEMPORADA}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(EntidadesTemporadasDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // PROC_COMERCIAL_ENTIDADES_TEMPORADAS_INSERT es upsert — siempre POST.
+        var dto = new { _model.COD_ENTIDAD, _model.NUM_TEMPORADA, _model.DES_TEMPORADA, _model.NUM_ANO, _model.NUM_MES, _model.MES_FINAL,
+                        _model.NUM_ORDEN_PRESENTACION, _model.COD_TIPO_ESTADO, _model.COD_ESTADO };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EntidadesTemporadasDialog), nameof(Submit));
+    }
+}

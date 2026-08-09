@@ -1,0 +1,74 @@
+@* Botón con menú para imprimir/exportar una grilla a PDF, Excel o impresora.
+   Omite la columna de Acciones. Uso:
+   <GridPrintButton Titulo="Usuarios" Headers="_headers" Rows="_rows" />
+   Mismo color configurable (Configuración General → Botones de Diálogo y Acciones
+   de Cabecera) que el botón de confirmación de los diálogos, para que se vean
+   consistentes en toda la app. *@
+@inject IJSRuntime JS
+
+<MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+    <ActivatorContent>
+        <MudTooltip Text="Imprimir">
+            <MudIconButton Icon="@Icons.Material.Filled.Print"
+                           Class="grid-header-btn"
+                           Style="background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));border-radius:10px;" />
+        </MudTooltip>
+    </ActivatorContent>
+    <ChildContent>
+        <MudMenuItem Icon="@Icons.Material.Filled.PictureAsPdf" OnClick="ExportarPdf">PDF</MudMenuItem>
+        <MudMenuItem Icon="@Icons.Material.Filled.GridOn" OnClick="ExportarExcel">Excel (CSV)</MudMenuItem>
+        <MudMenuItem Icon="@Icons.Material.Filled.Print" OnClick="Imprimir">Impresora</MudMenuItem>
+    </ChildContent>
+</MudMenu>
+
+@code {
+    [Parameter] public string Titulo { get; set; } = "Reporte";
+    [Parameter] public List<string> Headers { get; set; } = new();
+    [Parameter] public List<List<string>> Rows { get; set; } = new();
+
+    private string BuildHtml()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("<html><head><meta charset='utf-8'><title>").Append(Titulo).Append("</title>");
+        sb.Append("<style>body{font-family:Arial,sans-serif;padding:20px;}h2{margin-bottom:12px;}");
+        sb.Append("table{border-collapse:collapse;width:100%;}th,td{border:1px solid #999;padding:6px 10px;text-align:left;font-size:12px;}");
+        sb.Append("th{background:#16130f;color:#fff;}tr:nth-child(even){background:#f3f0ea;}</style></head><body>");
+        sb.Append("<h2>").Append(Titulo).Append("</h2><table><thead><tr>");
+        foreach (var h in Headers) sb.Append("<th>").Append(System.Net.WebUtility.HtmlEncode(h)).Append("</th>");
+        sb.Append("</tr></thead><tbody>");
+        foreach (var row in Rows)
+        {
+            sb.Append("<tr>");
+            foreach (var cell in row) sb.Append("<td>").Append(System.Net.WebUtility.HtmlEncode(cell ?? "")).Append("</td>");
+            sb.Append("</tr>");
+        }
+        sb.Append("</tbody></table></body></html>");
+        return sb.ToString();
+    }
+
+    private string BuildCsv()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(string.Join(";", Headers.Select(EscCsv)));
+        foreach (var row in Rows) sb.AppendLine(string.Join(";", row.Select(c => EscCsv(c ?? ""))));
+        return sb.ToString();
+    }
+
+    private static string EscCsv(string s)
+    {
+        if (s.Contains(';') || s.Contains('"')) return "\"" + s.Replace("\"", "\"\"") + "\"";
+        return s;
+    }
+
+    private async Task Imprimir() => await JS.InvokeVoidAsync("gridExport.print", BuildHtml());
+
+    private async Task ExportarPdf() => await JS.InvokeVoidAsync("gridExport.print", BuildHtml());
+
+    private async Task ExportarExcel()
+    {
+        var csv = BuildCsv();
+        var bytes = System.Text.Encoding.UTF8.GetBytes("\uFEFF" + csv);
+        var b64 = Convert.ToBase64String(bytes);
+        await JS.InvokeVoidAsync("gridExport.downloadCsv", $"{Titulo}.csv", b64);
+    }
+}

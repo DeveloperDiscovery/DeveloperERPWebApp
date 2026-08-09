@@ -1,0 +1,113 @@
+@using KONSolutions.Shared.Models.Administracion
+@using Microsoft.AspNetCore.Components.Web
+
+@* Nodo recursivo del árbol de Áreas. *@
+
+<div>
+    <div class="tl-row-spec @(EsActual ? "tl-row-seleccionada" : "")"
+         style="cursor:pointer;user-select:none;"
+         @onclick="ToggleYSeleccionar"
+         @oncontextmenu="OnRightClick"
+         @oncontextmenu:preventDefault="true"
+         @oncontextmenu:stopPropagation="true">
+
+        <div class="d-flex align-center gap-1" style="@($"padding-left:{8 + Nivel * 18}px;")">
+            @if (Nodo.Hijos.Any())
+            {
+                <MudIcon Icon="@(_expandido ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                         Style="font-size:1rem;opacity:.6;flex-shrink:0;" />
+            }
+            else
+            {
+                <span style="width:20px;flex-shrink:0;"></span>
+            }
+
+            <MudIcon Icon="@IconoNivel(Nodo)"
+                     Style="font-size:.95rem;opacity:.7;flex-shrink:0;" />
+
+            <span style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                <b>@Nodo.COD_AREA</b> — @Nodo.DES_AREA
+            </span>
+        </div>
+
+        <div class="mono" style="font-size:.74rem;opacity:.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            @Nodo.DES_SUCURSAL
+        </div>
+
+        <div>
+            @if (!string.IsNullOrEmpty(Nodo.DES_ESTADO))
+            {
+                <EstadoChip Estado="@Nodo.DES_ESTADO" BackColor="@Nodo.DES_BACKCOLOR" ForeColor="@Nodo.DES_FORECOLOR" />
+            }
+        </div>
+
+        <div @onclick:stopPropagation="true" style="justify-self:end;">
+            <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                             Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b => OnAccion.InvokeAsync((Nodo, b)))" />
+        </div>
+    </div>
+
+    @if (_expandido && Nodo.Hijos.Any())
+    {
+        @foreach (var hijo in Nodo.Hijos)
+        {
+            <NodoArea Nodo="hijo"
+                      Nivel="@(Nivel + 1)"
+                      NodoActual="NodoActual"
+                      CodAplicacion="CodAplicacion"
+                      CodOpcionAplicacion="CodOpcionAplicacion"
+                      ForzarExpandido="ForzarExpandido"
+                      OnSeleccionar="OnSeleccionar"
+                      OnAccion="OnAccion"
+                      OnContextMenu="OnContextMenu" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public Area Nodo { get; set; } = null!;
+    [Parameter] public int Nivel { get; set; } = 0;
+    [Parameter] public Area? NodoActual { get; set; }
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+    [Parameter] public EventCallback<Area> OnSeleccionar { get; set; }
+    [Parameter] public EventCallback<(Area Nodo, BotonTreeviewItem Boton)> OnAccion { get; set; }
+    [Parameter] public EventCallback<(Area Nodo, double X, double Y)> OnContextMenu { get; set; }
+    [Parameter] public bool? ForzarExpandido { get; set; }
+
+    private bool _expandido = true;
+    private bool? _ultimoForzado;
+
+    private static string IconoNivel(Area n) => n switch
+    {
+        { FLG_GERENCIA: true }    => Icons.Material.Filled.AccountBalance,
+        { FLG_SUB_GERENCIA: true } => Icons.Material.Filled.AccountTree,
+        { FLG_JEFATURA: true }    => Icons.Material.Filled.Badge,
+        { FLG_SUBJEFATURA: true } => Icons.Material.Filled.Badge,
+        { FLG_SUPERVISOR: true }  => Icons.Material.Filled.SupervisorAccount,
+        _                          => Icons.Material.Filled.CorporateFare
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (ForzarExpandido.HasValue && ForzarExpandido != _ultimoForzado)
+        {
+            _expandido = ForzarExpandido.Value;
+            _ultimoForzado = ForzarExpandido;
+        }
+    }
+
+    private bool EsActual => NodoActual?.COD_AREA == Nodo.COD_AREA;
+
+    private void ToggleYSeleccionar()
+    {
+        if (Nodo.Hijos.Any()) _expandido = !_expandido;
+        OnSeleccionar.InvokeAsync(Nodo);
+    }
+
+    private Task OnRightClick(MouseEventArgs e)
+    {
+        OnSeleccionar.InvokeAsync(Nodo);
+        return OnContextMenu.InvokeAsync((Nodo, e.ClientX, e.ClientY));
+    }
+}

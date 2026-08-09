@@ -1,0 +1,96 @@
+@* Botones estandarizados para diálogos CRUD según el modo:
+   Create → [Cancelar] [Crear]   Read → [Regresar]
+   Update → [Cancelar] [Modificar]   Delete → [Cancelar] [Eliminar]
+   Uso:
+   <CrudDialogActions Modo="CrudModo.Create" Saving="_saving" OnConfirm="Submit" OnCancel="Cancelar" /> *@
+@inject IJSRuntime JS
+@inject ConfigService ConfigSvc
+
+<div class="d-flex align-center gap-2 mt-4 dialog-acciones-fijas">
+    @if (LeftContent is not null) { @LeftContent }
+    <MudSpacer />
+    @if (Modo == CrudModo.Read)
+    {
+        <MudButton OnClick="Cancelar" Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.ArrowBack" Style="@EstiloBotonConfirmar">Regresar</MudButton>
+    }
+    else if (ConfigSvc.Current.EsZurdo)
+    {
+        @* Usuario zurdo: botón principal (confirmar) primero, Cancelar al final —
+           así queda más cerca de la mano izquierda al usar el mouse. *@
+        <MudButton OnClick="Confirmar" ButtonType="@(SubmitButton ? ButtonType.Submit : ButtonType.Button)"
+                   Variant="Variant.Filled" Color="@ConfirmColor" Disabled="Saving"
+                   StartIcon="@ConfirmIcon" Style="@EstiloBotonConfirmar">
+            @ConfirmText
+        </MudButton>
+        <MudButton OnClick="Cancelar" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel"
+                   Style="@EstiloBotonCancelar">Cancelar</MudButton>
+    }
+    else
+    {
+        <MudButton OnClick="Cancelar" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel"
+                   Style="@EstiloBotonCancelar">Cancelar</MudButton>
+        <MudButton OnClick="Confirmar" ButtonType="@(SubmitButton ? ButtonType.Submit : ButtonType.Button)"
+                   Variant="Variant.Filled" Color="@ConfirmColor" Disabled="Saving"
+                   StartIcon="@ConfirmIcon" Style="@EstiloBotonConfirmar">
+            @ConfirmText
+        </MudButton>
+    }
+</div>
+
+@code {
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public bool Saving { get; set; }
+    [Parameter] public bool SubmitButton { get; set; } = true;
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public RenderFragment? LeftContent { get; set; }
+
+    // Cancelar siempre cierra: se anima la salida y luego se invoca el cierre real.
+    private async Task Cancelar()
+    {
+        try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { }
+        await OnCancel.InvokeAsync();
+    }
+
+    // Confirmar puede NO cerrar (ej. falla de validación) — se anima igual al hacer clic,
+    // pero si el diálogo sigue en pantalla tras invocar la acción, se deshace la animación.
+    private async Task Confirmar()
+    {
+        try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { }
+        await OnConfirm.InvokeAsync();
+        try { await JS.InvokeVoidAsync("dialogAnim.deshacer"); } catch { }
+    }
+
+    private string ConfirmText => Modo switch
+    {
+        CrudModo.Create => "Crear",
+        CrudModo.Update => "Modificar",
+        CrudModo.Delete => "Eliminar",
+        _ => "Aceptar"
+    };
+
+    private string ConfirmIcon => Modo switch
+    {
+        CrudModo.Create => Icons.Material.Filled.NoteAdd,
+        CrudModo.Update => Icons.Material.Filled.Save,
+        CrudModo.Delete => Icons.Material.Filled.DeleteForever,
+        _ => Icons.Material.Filled.Check
+    };
+
+    private Color ConfirmColor => Modo == CrudModo.Delete ? Color.Error : Color.Primary;
+
+    // Eliminar siempre se mantiene en rojo (color de peligro) — no toma el color
+    // configurable de ESTANDAR.CONFIGURACION_GENERAL (DES_BUTTON_BACKCOLOR/FORECOLOR).
+    // Los demás usan el color configurado, con --ink/--paper como respaldo real (no
+    // "unset") para que el botón nunca quede transparente/invisible si falta configurar
+    // alguno de los dos campos.
+    private string EstiloBotonConfirmar => Modo == CrudModo.Delete
+        ? "font-weight:700;"
+        : "font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));";
+
+    // Cancelar usa los mismos colores pero invertidos (fondo↔texto), para que siempre
+    // contraste con el botón de confirmación sin importar qué colores se configuren.
+    private const string EstiloBotonCancelar =
+        "font-weight:700;background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));";
+}

@@ -1,0 +1,161 @@
+@page "/estandar/sexos"
+@attribute [Authorize]
+@using SexoRow = KONSolutions.Shared.Models.Estandar.Sexo
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Sexos · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Sexos" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Filtrar" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Sexos" Headers="@(new List<string>{"Código","Descripción"})" Rows="@(_items.Select(x=>new List<string>{x.COD_SEXO,x.DES_SEXO}).ToList())" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="sexos" style="position:relative;">
+    <MudDataGrid T="SexoRow" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="@Limites.ColWidth("ESTANDAR.SEXOS","COD_SEXO",60,150)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_SEXO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="SexoRow" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_SEXO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_SEXO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("ESTANDAR.SEXOS","DES_SEXO",120,400)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_SEXO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="SexoRow" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_SEXO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_SEXO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="SexoRow" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<SexoRow> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int,HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<SexoRow> Ordenar(List<SexoRow> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_SEXO).ToList() : items.OrderByDescending(x => x.COD_SEXO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_SEXO).ToList() : items.OrderByDescending(x => x.DES_SEXO).ToList(),
+        _ => items
+    };
+    private List<SexoRow> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<SexoRow> Base(int col) => Aplicar(_items, col);
+
+    private List<SexoRow> Aplicar(List<SexoRow> src, int ex)
+    {
+        IEnumerable<SexoRow> q = src;
+        foreach (var (c,v) in _filtros) { if (c==ex||v is null) continue;
+            q = c switch { 0=>q.Where(x=>v.Contains(x.COD_SEXO)), 1=>q.Where(x=>v.Contains(x.DES_SEXO)), _=>q }; }
+        return q.ToList();
+    }
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c]=v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach(var k in _filtros.Keys.ToList()) _filtros[k]=null; StateHasChanged(); }
+    private async Task Filtrar() => _items = string.IsNullOrWhiteSpace(_search)
+        ? await Fetch() : await FetchSearch(_search);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ESTANDAR","Sexos");
+        await Load();
+        Cambios.Suscribir("ESTANDAR.SEXOS", async()=>await InvokeAsync(async()=>{await Load();StateHasChanged();}));
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load() { _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search); }
+    private async Task<List<SexoRow>> Fetch()
+    {
+        try { var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<SexoRow>>>(ApiRoutes.Estandar.Sexos); return r?.Data ?? new(); }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Sexos), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+    private async Task<List<SexoRow>> FetchSearch(string s)
+    {
+        try { var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<SexoRow>>>($"{ApiRoutes.Estandar.Sexos}/search?search={Uri.EscapeDataString(s)}"); return r?.Data ?? new(); }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Sexos), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b) { if(b.FLG_ACCION_POST==true) return Abrir(null, CrudModo.Create); return Task.CompletedTask; }
+    private Task OnAccionGrilla(SexoRow item, BotonTreeviewItem b)
+    {
+        if(b.FLG_ACCION_PUT==true)    return Abrir(item, CrudModo.Update);
+        if(b.FLG_ACCION_DELETE==true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(SexoRow? item, CrudModo modo)
+    {
+        var titulo = modo switch { CrudModo.Create=>"Nuevo sexo", CrudModo.Delete=>$"Eliminar · {item?.DES_SEXO}", _=>$"Editar · {item?.DES_SEXO}" };
+        var dlg = await DialogService.ShowAsync<SexosDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth=MaxWidth.Small, FullWidth=true, BackdropClick = false, CloseOnEscapeKey = false });
+        if((await dlg.Result) is {Canceled:false}) await Load();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ESTANDAR.SEXOS", ()=>Task.CompletedTask);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

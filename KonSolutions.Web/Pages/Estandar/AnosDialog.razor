@@ -1,0 +1,74 @@
+@using KONSolutions.Shared.Models.Estandar
+@inject CatalogoService<Ano, AnoDto> Service
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(480px,95vw);">
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            @if (_isEdit || _readonly)
+            {
+                <MudTextField Value="@_model.NUM_ANO.ToString()" Label="Código" Variant="Variant.Outlined"
+                              Disabled="true" Class="mb-3" />
+            }
+            <CampoTexto Tabla="ESTANDAR.ANOS" Columna="DES_ANO"
+                        @bind-Value="_model.DES_ANO" Disabled="_readonly" Obligatorio="true" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Ano? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private AnoDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de GetByIdAsync) hacia _model.</summary>
+    private void MapearDesdeModelo(Ano m) =>
+        _model = new AnoDto { NUM_ANO = m.NUM_ANO, DES_ANO = m.DES_ANO ?? "" };
+
+    /// <summary>Trae el registro fresco desde GetByIdAsync — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.NUM_ANO.ToString());
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Modo != CrudModo.Create && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.NUM_ANO.ToString());
+            _saving = false;
+            if (okd) { Snackbar.Add("Año eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(AnosDialog));
+            return;
+        }
+        // PROC_ESTANDAR_ANOS_INSERT es upsert (siempre POST) — NUM_ANO queda en 0 en un alta
+        // nueva, el SP lo ignora y asigna el IDENTITY real.
+        var (ok, msg) = await Service.GuardarAsync(_model);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Año actualizado." : "Año creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(AnosDialog));
+    }
+}

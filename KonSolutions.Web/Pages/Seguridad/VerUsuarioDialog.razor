@@ -1,0 +1,40 @@
+@inject AccessLogService AccessLog
+@inject IJSRuntime JS
+
+<MudDialog>
+    <DialogContent>
+        <MudList T="string" Dense="true">
+            <MudListItem T="string"><b>Código:</b> @Usuario.COD_USUARIO</MudListItem>
+            <MudListItem T="string"><b>Nombre:</b> @Usuario.DES_USUARIO</MudListItem>
+            <MudListItem T="string"><b>Perfil:</b> @Usuario.DES_PERFIL_USUARIO</MudListItem>
+            <MudListItem T="string"><b>Correo:</b> @(Usuario.DES_CORREO_INSTITUCIONAL ?? "—")</MudListItem>
+            <MudListItem T="string"><b>Teléfono:</b> @(Usuario.NUM_TELEFONO ?? "—")</MudListItem>
+            <MudListItem T="string"><b>Estado:</b> @Usuario.DES_ESTADO</MudListItem>
+            <MudListItem T="string"><b>Intentos:</b> @(Usuario.NUM_INTENTOS ?? 0) / @(Usuario.NUM_MAXIMO_INTENTOS ?? 0)</MudListItem>
+            <MudListItem T="string"><b>Directorio Activo:</b> @(Usuario.FLG_VALIDA_DIRECTORIO_ACTIVO ? "Sí" : "No")</MudListItem>
+        </MudList>
+        <div class="d-flex align-center gap-2 mt-4 dialog-acciones-fijas">
+            <PanelAuditoria CodUsuarioRegistro="@Usuario.COD_USUARIO_REGISTRO"
+                            CodEstacionRegistro="@Usuario.COD_ESTACION_REGISTRO"
+                            FecRegistro="@Usuario.FEC_REGISTRO"
+                            CodUsuarioActualizacion="@Usuario.COD_USUARIO_ACTUALIZACION"
+                            CodEstacionActualizacion="@Usuario.COD_ESTACION_ACTUALIZACION"
+                            FecActualizacion="@Usuario.FEC_ACTUALIZACION" />
+            @* MudSpacer en vez de justify-space-between: cuando el registro es nuevo el
+               PanelAuditoria no pinta nada y, con un solo hijo, space-between dejaba los
+               botones a la izquierda. El spacer los empuja a la derecha siempre. *@
+            <MudSpacer />
+            <MudButton OnClick="@(async () => { try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { } MudDialog.Close(); })" Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.ArrowBack"
+                       Style="background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">Regresar</MudButton>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Usuario Usuario { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+        => await AccessLog.LogEventoAsync("SEGURIDAD", "Usuarios", "VER", new { Usuario.COD_USUARIO });
+}

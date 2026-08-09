@@ -1,0 +1,325 @@
+@page "/estandar/productos/{CodProducto}/ficha-tecnica"
+@attribute [Authorize]
+@layout EmptyLayout
+@using ProductosModel = KONSolutions.Shared.Models.Estandar.Productos
+@using ProductoEspecTecnicaModel = KONSolutions.Shared.Models.Estandar.ProductosEspecificacionesTecnicas
+@using ComboDependienteModel = KONSolutions.Shared.Models.Comercial.EspecificacionesItemsTecnicosComboDependiente
+@using ProductosRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@using IngenieriaRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IJSRuntime JS
+@inject NavigationManager NavManager
+
+<PageTitle>Ficha Técnica · @(_producto?.DES_PRODUCTO ?? CodProducto)</PageTitle>
+
+<style>
+    :root{
+        --paper: #efe9df; --sheet: #fffdf9; --ink: #211d17; --muted: #8a8172;
+        --line: #ddd6c7; --accent: #b8472d; --accent-soft: #f3e3dd; --ok: #3f7a4e;
+    }
+    *{box-sizing:border-box;}
+    body{ margin:0; background:var(--paper); color:var(--ink);
+        font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+    .ft-toolbar{ max-width:820px; margin:24px auto 20px; padding:0 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .ft-toolbar h1{ font-size:1rem; font-weight:700; margin:0; }
+    .ft-toolbar .sub{ color:var(--muted); font-size:.8rem; margin-top:2px; }
+    .ft-btn{ display:inline-flex; align-items:center; gap:8px; background:var(--accent); color:#fff; border:none;
+        border-radius:6px; padding:10px 18px; font-size:.85rem; font-weight:700; letter-spacing:.02em; cursor:pointer;
+        box-shadow:0 2px 6px rgba(0,0,0,.15); }
+    .ft-btn:hover{ filter:brightness(1.06); }
+    .ft-btn svg{ width:16px; height:16px; }
+    .ft-btn-outline{ background:transparent; color:var(--ink); border:1px solid var(--line); box-shadow:none; }
+    .ft-sheet{ max-width:820px; margin:0 auto 60px; background:var(--sheet); border:1px solid var(--line);
+        border-radius:2px; box-shadow:0 8px 30px rgba(0,0,0,.12); padding:44px 48px 40px; }
+    .ft-head{ display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid var(--ink);
+        padding-bottom:18px; margin-bottom:22px; }
+    .ft-brand{ display:flex; align-items:center; gap:12px; }
+    .ft-brand-mark{ width:38px; height:38px; border-radius:6px; background:var(--ink); color:var(--sheet);
+        display:flex; align-items:center; justify-content:center; font-weight:800; font-size:.8rem; flex-shrink:0; }
+    .ft-brand-name{ font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
+    .ft-doc-kind{ font-size:1.05rem; font-weight:800; letter-spacing:.02em; }
+    .ft-head-right{ text-align:right; }
+    .ft-head-right .cod{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:1.05rem; font-weight:700; }
+    .ft-head-right .fecha{ font-size:.72rem; color:var(--muted); margin-top:4px; }
+    .ft-titulo{ margin-bottom:26px; }
+    .ft-titulo h2{ font-size:1.5rem; margin:0 0 6px; font-weight:800; text-wrap:balance; line-height:1.15; }
+    .ft-chip{ display:inline-flex; align-items:center; gap:6px; font-size:.68rem; font-weight:700; letter-spacing:.05em;
+        text-transform:uppercase; padding:4px 10px; border-radius:99px; }
+    .ft-info-grid{ display:grid; grid-template-columns:repeat(3,1fr); border:1px solid var(--line); border-radius:4px;
+        overflow:hidden; margin-bottom:30px; }
+    .ft-info-cell{ padding:11px 16px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
+    .ft-info-cell:nth-child(3n){ border-right:none; }
+    .ft-info-label{ font-size:.62rem; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); margin-bottom:3px; }
+    .ft-info-value{ font-size:.86rem; font-weight:600; }
+    .ft-info-value.mono{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-weight:500; }
+    .ft-section-title{ font-size:.72rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase;
+        color:var(--accent); margin:0 0 10px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+    .ft-grupo{ margin-bottom:22px; }
+    .ft-grupo-nombre{ font-size:.78rem; font-weight:700; margin:0 0 8px; opacity:.85; }
+    table.ft-specs{ width:100%; border-collapse:collapse; font-size:.82rem; }
+    table.ft-specs th, table.ft-specs td{ text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+    table.ft-specs th{ font-size:.65rem; letter-spacing:.05em; text-transform:uppercase; color:var(--muted);
+        font-weight:700; border-bottom:1px solid var(--ink); }
+    table.ft-specs td.valor{ font-weight:600; }
+    table.ft-specs td.unidad{ color:var(--muted); font-size:.76rem; white-space:nowrap; }
+    .ft-swatch{ display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:6px; vertical-align:-1px;
+        border:1px solid rgba(0,0,0,.15); }
+    .ft-foot{ margin-top:34px; padding-top:14px; border-top:1px solid var(--line); display:flex;
+        justify-content:space-between; font-size:.68rem; color:var(--muted); }
+
+    @@media print{
+        body{ padding:0; background:#fff; }
+        .ft-toolbar{ display:none; }
+        .ft-sheet{ box-shadow:none; border:none; max-width:100%; margin:0; padding:20px 8mm; }
+    }
+</style>
+
+@if (_cargando)
+{
+    <div style="display:flex;justify-content:center;padding:60px;"><MudProgressCircular Color="Color.Primary" Indeterminate="true" /></div>
+}
+else if (_producto is null)
+{
+    <div style="max-width:820px;margin:60px auto;text-align:center;color:var(--muted);">No se encontró el producto @CodProducto.</div>
+}
+else
+{
+    <div class="ft-toolbar">
+        <div>
+            <h1>Ficha Técnica</h1>
+            <div class="sub">@_producto.DES_PRODUCTO</div>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="ft-btn ft-btn-outline" @onclick="Volver">Volver</button>
+            <button class="ft-btn" @onclick="Imprimir">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z"/></svg>
+                Generar PDF
+            </button>
+        </div>
+    </div>
+
+    <div class="ft-sheet">
+        <div class="ft-head">
+            <div class="ft-brand">
+                <div class="ft-brand-mark">KS</div>
+                <div>
+                    <div class="ft-doc-kind">Ficha Técnica de Producto</div>
+                    <div class="ft-brand-name">@ConfigSvc.Current.NombreApp · Schema Estándar</div>
+                </div>
+            </div>
+            <div class="ft-head-right">
+                <div class="cod">@_producto.COD_PRODUCTO</div>
+                <div class="fecha">Generado @DateTime.Now.ToString("dd/MM/yyyy")</div>
+            </div>
+        </div>
+
+        <div class="ft-titulo">
+            <h2>@_producto.DES_PRODUCTO</h2>
+            @if (!string.IsNullOrEmpty(_producto.DES_ESTADO))
+            {
+                <span class="ft-chip" style="background:@(_producto.DES_BACKCOLOR ?? "var(--accent-soft)");color:@(_producto.DES_FORECOLOR ?? "var(--accent)");">@_producto.DES_ESTADO</span>
+            }
+        </div>
+
+        <div class="ft-info-grid">
+            <div class="ft-info-cell">
+                <div class="ft-info-label">Sub Familia de Producto</div>
+                <div class="ft-info-value">@Vacio(_producto.DES_SUB_FAMILIA_PRODUCTO)</div>
+            </div>
+            <div class="ft-info-cell">
+                <div class="ft-info-label">Tipo de Producto</div>
+                <div class="ft-info-value">@Vacio(_producto.DES_TIPO_PRODUCTO)</div>
+            </div>
+            <div class="ft-info-cell">
+                <div class="ft-info-label">Unidad de Medida</div>
+                <div class="ft-info-value">@Vacio(_producto.DES_UNIDAD_MEDIDA)</div>
+            </div>
+            <div class="ft-info-cell">
+                <div class="ft-info-label">Descripción Detallada</div>
+                <div class="ft-info-value">@Vacio(_producto.DES_DETALLADA)</div>
+            </div>
+            <div class="ft-info-cell">
+                <div class="ft-info-label">Diseño / Versión</div>
+                <div class="ft-info-value mono">@(string.IsNullOrEmpty(_producto.COD_DISENO) ? "—" : $"{_producto.COD_DISENO} · v{_producto.NUM_VERSION}")</div>
+            </div>
+            <div class="ft-info-cell">
+                <div class="ft-info-label">Código UNSPSC</div>
+                <div class="ft-info-value mono">@Vacio(_producto.DES_CUBSO ?? _producto.COD_CUBSO)</div>
+            </div>
+        </div>
+
+        @if (_grupos.Any())
+        {
+            <div class="ft-section-title">Especificaciones Técnicas</div>
+            @foreach (var grupo in _grupos)
+            {
+                <div class="ft-grupo">
+                    <div class="ft-grupo-nombre">@grupo.DesGrupo</div>
+                    <table class="ft-specs">
+                        <thead><tr><th style="width:34%;">Especificación</th><th>Valor</th><th style="width:18%;">Unidad</th></tr></thead>
+                        <tbody>
+                            @foreach (var s in grupo.Specs)
+                            {
+                                <tr>
+                                    <td>@s.Descripcion</td>
+                                    <td class="valor">
+                                        @if (!string.IsNullOrEmpty(s.ColorHex))
+                                        {
+                                            <span class="ft-swatch" style="background:@s.ColorHex;"></span>
+                                        }
+                                        @s.ValorTexto
+                                    </td>
+                                    <td class="unidad">@s.Unidad</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+
+        <div class="ft-foot">
+            <span>Documento generado automáticamente — no requiere firma.</span>
+            <span>@ConfigSvc.Current.NombreApp</span>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string CodProducto { get; set; } = "";
+
+    private bool _cargando = true;
+    private ProductosModel? _producto;
+    private List<GrupoFicha> _grupos = new();
+
+    private class SpecFicha
+    {
+        public string Descripcion { get; set; } = "";
+        public string ValorTexto { get; set; } = "";
+        public string Unidad { get; set; } = "";
+        public string? ColorHex { get; set; }
+        public int? Orden { get; set; }
+    }
+
+    private class GrupoFicha
+    {
+        public string DesGrupo { get; set; } = "";
+        public int Orden { get; set; }
+        public List<SpecFicha> Specs { get; set; } = new();
+    }
+
+    private static string Vacio(string? v) => string.IsNullOrWhiteSpace(v) ? "—" : v;
+
+    private async Task Imprimir() => await JS.InvokeVoidAsync("print");
+
+    private void Volver() => NavManager.NavigateTo("/estandar/productos");
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var rProd = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<ProductosModel>>(
+                $"{ProductosRoute.Productos}/{Uri.EscapeDataString(CodProducto)}");
+            _producto = rProd?.Data;
+        }
+        catch { _producto = null; }
+
+        if (_producto is not null) await CargarEspecificaciones();
+        _cargando = false;
+    }
+
+    /// <summary>Solo las Especificaciones marcadas FLG_FICHA_TECNICA = true — mismo filtro que
+    /// usa el diálogo de Producto para distinguir esta ficha de los paneles de Registro
+    /// Comercial / Control de Calidad.</summary>
+    private async Task CargarEspecificaciones()
+    {
+        List<ProductoEspecTecnicaModel> filas;
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ProductoEspecTecnicaModel>>>(
+                $"{ProductosRoute.ProductosEspecificacionesTecnicas}?codProducto={Uri.EscapeDataString(CodProducto)}");
+            filas = (r?.Data ?? new()).Where(v => v.FLG_FICHA_TECNICA == true).ToList();
+        }
+        catch { filas = new(); }
+
+        var gruposPorCodigo = new Dictionary<int, GrupoFicha>();
+        foreach (var v in filas.OrderBy(v => v.NUM_ORDEN_PRESENTACION ?? int.MaxValue))
+        {
+            var codGrupo = v.COD_GRUPO_ESPECIFICACION_TECNICA ?? 0;
+            if (!gruposPorCodigo.TryGetValue(codGrupo, out var grupo))
+            {
+                grupo = new GrupoFicha { DesGrupo = v.DES_GRUPO_ESPECIFICACION_TECNICA ?? "Sin Grupo", Orden = codGrupo };
+                gruposPorCodigo[codGrupo] = grupo;
+            }
+
+            var descripcion = !string.IsNullOrWhiteSpace(v.DES_ESPECIFICACION_TECNICA_SINGULAR)
+                ? v.DES_ESPECIFICACION_TECNICA_SINGULAR!
+                : (v.DES_ESPECIFICACION_TECNICA ?? v.COD_ESPECIFICACION_TECNICA);
+
+            var unidad = string.IsNullOrEmpty(v.DES_UNIDAD_MEDIDA) ? "" : $"{v.DES_UNIDAD_MEDIDA} ({v.COD_SIMBOLO})";
+            string valorTexto = "—";
+            string? colorHex = null;
+
+            if (v.FLG_LISTA == true && v.COD_ITEM_TECNICO is not null)
+            {
+                var item = await BuscarItemListaAsync(v.COD_ESPECIFICACION_TECNICA, v.COD_ITEM_TECNICO.Value);
+                if (item is not null)
+                {
+                    valorTexto = item.DES_ITEM_TECNICO ?? "—";
+                    if (item.VAL_NUMERICO is not null)
+                    {
+                        var num = item.VAL_NUMERICO.Value.ToString("0.####");
+                        valorTexto += !string.IsNullOrEmpty(item.COD_SIMBOLO) ? $" ({num} {item.COD_SIMBOLO})" : $" ({num})";
+                    }
+                    colorHex = item.DES_COLOR;
+                }
+            }
+            else if (v.FLG_ENTERO == true || v.FLG_NUMERICO == true)
+            {
+                if (v.FLG_RANGE == true && (v.VAL_MINIMO is not null || v.VAL_MAXIMO is not null))
+                    valorTexto = $"De {v.VAL_MINIMO?.ToString("0.####") ?? "—"} a {v.VAL_MAXIMO?.ToString("0.####") ?? "—"}";
+                else if (!string.IsNullOrEmpty(v.VAL_ESPECIFICACION_TENICA))
+                    valorTexto = $"{v.DES_PREFIJO}{v.VAL_ESPECIFICACION_TENICA}{v.DES_SUFIJO}";
+            }
+            else if (v.FLG_CADENA == true)
+                valorTexto = string.IsNullOrEmpty(v.STR_ESPECIFICACION_TENICA) ? "—" : v.STR_ESPECIFICACION_TENICA;
+            else if (v.FLG_FECHA_HORA == true)
+                valorTexto = v.FEC_ESPECIFICACION_TENICA?.ToString("dd/MM/yyyy HH:mm") ?? "—";
+            else if (v.FLG_FECHA == true)
+                valorTexto = v.FEC_ESPECIFICACION_TENICA?.ToString("dd/MM/yyyy") ?? "—";
+            else if (v.FLG_HORA == true)
+                valorTexto = v.HOR_ESPECIFICACION_TENICA?.ToString(@"hh\:mm") ?? "—";
+            else if (v.FLG_LOGICO == true)
+                valorTexto = v.LOG_ESPECIFICACION_TENICA == true ? "Sí" : "No";
+            else if (v.FLG_COLOR == true)
+                valorTexto = v.STR_ESPECIFICACION_TENICA ?? "—";
+
+            grupo.Specs.Add(new SpecFicha { Descripcion = descripcion, ValorTexto = valorTexto, Unidad = unidad, ColorHex = colorHex, Orden = v.NUM_ORDEN_PRESENTACION });
+        }
+
+        _grupos = gruposPorCodigo.Values.OrderBy(g => g.Orden).ToList();
+    }
+
+    private readonly Dictionary<string, List<ComboDependienteModel>> _cacheItems = new();
+
+    /// <summary>Trae los Ítems Técnicos de una Especificación tipo Lista (una sola vez por
+    /// Especificación, cacheado) para poder resolver la descripción del Ítem elegido.</summary>
+    private async Task<ComboDependienteModel?> BuscarItemListaAsync(string codEspecificacionTecnica, int codItemTecnico)
+    {
+        if (!_cacheItems.TryGetValue(codEspecificacionTecnica, out var items))
+        {
+            try
+            {
+                var url = $"{IngenieriaRoute.EspecificacionesItemsTecnicosComboDependientes}?codEspecificacionTecnica={Uri.EscapeDataString(codEspecificacionTecnica)}";
+                if (_producto?.COD_ENTIDAD_PROPIETARIA is not null) url += $"&codEntidadDependiente={_producto.COD_ENTIDAD_PROPIETARIA}";
+                var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboDependienteModel>>>(url);
+                items = r?.Data ?? new();
+            }
+            catch { items = new(); }
+            _cacheItems[codEspecificacionTecnica] = items;
+        }
+        return items.FirstOrDefault(i => i.COD_ITEM_TECNICO == codItemTecnico);
+    }
+}

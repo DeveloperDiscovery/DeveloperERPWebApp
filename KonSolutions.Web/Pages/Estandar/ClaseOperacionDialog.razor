@@ -1,0 +1,154 @@
+@using ClaseOperacionModel = KONSolutions.Shared.Models.Estandar.ClaseOperacion
+@using ClaseOperacionRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(720px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_CLASE_OPERACION" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="ESTANDAR.CLASES_OPERACION" Columna="COD_CLASE_OPERACION"
+                        @bind-Value="_model.COD_CLASE_OPERACION"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="ESTANDAR.CLASES_OPERACION" Columna="DES_CLASE_OPERACION"
+                        @bind-Value="_model.DES_CLASE_OPERACION"
+                        Disabled="_readonly" Obligatorio="true" />
+            <AriaCombo TItem="ComboboxItem" Items="_tiposEntidad"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       @bind-Value="_model.COD_TIPO_ENTIDAD_RELACIONADA"
+                       Label="Tipo de entidad relacionada" Disabled="_readonly" />
+            <AriaCombo TItem="ComboboxItem" Items="_tiposEstado"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       Value="@(_model.COD_TIPO_ESTADO_RELACIONADO?.ToString())"
+                       ValueChanged="@(v => _model.COD_TIPO_ESTADO_RELACIONADO = int.TryParse(v, out var n) ? n : null)"
+                       Label="Tipo de estado relacionado" Disabled="_readonly" />
+            <AriaCombo TItem="ComboboxItem" Items="_tiposMotivo"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       Value="@(_model.COD_TIPO_MOTIVO_RELACIONADO?.ToString())"
+                       ValueChanged="@(v => _model.COD_TIPO_MOTIVO_RELACIONADO = int.TryParse(v, out var n) ? n : null)"
+                       Label="Tipo de motivo relacionado" Disabled="_readonly" />
+
+            <MudText Typo="Typo.caption" Class="mono mb-2" Style="opacity:.55;display:block;">CARACTERÍSTICAS</MudText>
+            <MudGrid Class="mb-3">
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_POSITIVO" Color="Color.Primary" Disabled="_readonly" Label="Positivo" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.CurrencyExchange" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_CAMBIO" Color="Color.Primary" Disabled="_readonly" Label="Cambio" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.AccountBalance" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_FINANZAS" Color="Color.Primary" Disabled="_readonly" Label="Finanzas" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.ReceiptLong" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_RENDICION" Color="Color.Primary" Disabled="_readonly" Label="Rendición" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.SwapHoriz" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_PERMUTA" Color="Color.Primary" Disabled="_readonly" Label="Permuta" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.AccountBalanceWallet" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_BANCO" Color="Color.Primary" Disabled="_readonly" Label="Banco" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.PointOfSale" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_CAJA" Color="Color.Primary" Disabled="_readonly" Label="Caja" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Gavel" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_REGIMEN_ESPECIAL" Color="Color.Primary" Disabled="_readonly" Label="Régimen especial" /></div></MudItem>
+            </MudGrid>
+
+            <EstadoCombo DesTabla="ESTANDAR.CLASES_OPERACION"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ClaseOperacionModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private ClaseOperacionModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _tiposEntidad = new();
+    private List<ComboboxItem> _tiposEstado  = new();
+    private List<ComboboxItem> _tiposMotivo  = new();
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(ClaseOperacionModel m)
+    {
+        _model = new ClaseOperacionModel
+        {
+            COD_CLASE_OPERACION           = m.COD_CLASE_OPERACION,
+            DES_CLASE_OPERACION           = m.DES_CLASE_OPERACION,
+            COD_TIPO_ENTIDAD_RELACIONADA  = m.COD_TIPO_ENTIDAD_RELACIONADA,
+            FLG_POSITIVO                  = m.FLG_POSITIVO,
+            FLG_CAMBIO                    = m.FLG_CAMBIO,
+            FLG_FINANZAS                  = m.FLG_FINANZAS,
+            FLG_RENDICION                 = m.FLG_RENDICION,
+            FLG_PERMUTA                   = m.FLG_PERMUTA,
+            FLG_BANCO                     = m.FLG_BANCO,
+            FLG_CAJA                      = m.FLG_CAJA,
+            FLG_REGIMEN_ESPECIAL          = m.FLG_REGIMEN_ESPECIAL,
+            COD_TIPO_ESTADO_RELACIONADO   = m.COD_TIPO_ESTADO_RELACIONADO,
+            COD_TIPO_MOTIVO_RELACIONADO   = m.COD_TIPO_MOTIVO_RELACIONADO,
+            COD_TIPO_ESTADO               = m.COD_TIPO_ESTADO,
+            COD_ESTADO                    = m.COD_ESTADO,
+        };
+    }
+
+    /// <summary>Trae la Clase de Operación fresca desde SHOWBYID — evita mostrar datos
+    /// desactualizados de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<ClaseOperacionModel>($"{ClaseOperacionRoute.ClasesOperacion}/{Uri.EscapeDataString(_model.COD_CLASE_OPERACION)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        var tEntidad = Http.SafeGetAsync<List<ComboboxItem>>(ClaseOperacionRoute.TiposEntidadesCombobox);
+        var tEstado  = Http.SafeGetAsync<List<ComboboxItem>>(ClaseOperacionRoute.TiposEstadosCombobox);
+        var tMotivo  = Http.SafeGetAsync<List<ComboboxItem>>(ClaseOperacionRoute.TiposMotivosCombobox);
+        await Task.WhenAll(tEntidad, tEstado, tMotivo);
+        _tiposEntidad = (await tEntidad) ?? new();
+        _tiposEstado  = (await tEstado) ?? new();
+        _tiposMotivo  = (await tMotivo) ?? new();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ClaseOperacionRoute.ClasesOperacion;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_CLASE_OPERACION)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(ClaseOperacionDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new
+        {
+            _model.COD_CLASE_OPERACION, _model.DES_CLASE_OPERACION, _model.COD_TIPO_ENTIDAD_RELACIONADA,
+            _model.FLG_POSITIVO, _model.FLG_CAMBIO, _model.FLG_FINANZAS, _model.FLG_RENDICION,
+            _model.FLG_PERMUTA, _model.FLG_BANCO, _model.FLG_CAJA, _model.FLG_REGIMEN_ESPECIAL,
+            _model.COD_TIPO_ESTADO_RELACIONADO, _model.COD_TIPO_MOTIVO_RELACIONADO,
+            _model.COD_TIPO_ESTADO, _model.COD_ESTADO
+        };
+        var resp = await Http.GuardarAsync(ruta, dto, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ClaseOperacionDialog), nameof(Submit));
+    }
+}

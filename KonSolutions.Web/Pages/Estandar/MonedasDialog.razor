@@ -1,0 +1,99 @@
+@using KONSolutions.Shared.Models.Estandar
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(820px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_MONEDA" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <div style="display:flex;gap:16px;align-items:flex-start;">
+            <div style="flex:1;min-width:0;">
+            <CampoTexto Tabla="ESTANDAR.MONEDAS" Columna="COD_MONEDA"
+                        @bind-Value="_model.COD_MONEDA"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="ESTANDAR.MONEDAS" Columna="DES_MONEDA"
+                        @bind-Value="_model.DES_MONEDA"
+                        Disabled="_readonly" Obligatorio="true" />
+            <MudNumericField T="int?" @bind-Value="_model.COD_MONEDA_SUNAT"
+                             Label="Código SUNAT" Variant="Variant.Outlined" Margin="Margin.Dense"
+                             ReadOnly="_readonly" Class="mb-3"
+                             Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+            <EstadoCombo DesTabla="ESTANDAR.MONEDAS"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+            </div>
+            <div style="flex-shrink:0;padding-left:8px;border-left:1px solid rgba(0,0,0,.1);">
+                <ImagePicker Label="Icono" Image="_model.IMG_ICONO"
+                             ImageChanged="@(v => _model.IMG_ICONO = v)"
+                             ReadOnly="_readonly" />
+            </div>
+            </div>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Moneda? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private Moneda _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(Moneda m) =>
+        _model = new Moneda
+        {
+            COD_MONEDA       = m.COD_MONEDA,
+            DES_MONEDA       = m.DES_MONEDA,
+            COD_MONEDA_SUNAT = m.COD_MONEDA_SUNAT,
+            COD_TIPO_ESTADO  = m.COD_TIPO_ESTADO,
+            COD_ESTADO       = m.COD_ESTADO,
+            IMG_ICONO        = m.IMG_ICONO,
+        };
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<Moneda>($"{ApiRoutes.Estandar.Monedas}/{Uri.EscapeDataString(_model.COD_MONEDA)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Estandar.Monedas}/{Uri.EscapeDataString(_model.COD_MONEDA)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(MonedasDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new { _model.COD_MONEDA, _model.DES_MONEDA, _model.COD_MONEDA_SUNAT,
+                        _model.COD_TIPO_ESTADO, _model.COD_ESTADO, _model.IMG_ICONO };
+        var resp = _esNuevo
+            ? await Http.PostAsJsonAsync(ApiRoutes.Estandar.Monedas, dto)
+            : await Http.PutAsJsonAsync($"{ApiRoutes.Estandar.Monedas}/{Uri.EscapeDataString(_model.COD_MONEDA)}", dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(MonedasDialog), nameof(Submit));
+    }
+}

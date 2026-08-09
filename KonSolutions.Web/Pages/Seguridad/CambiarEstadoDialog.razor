@@ -1,0 +1,132 @@
+@*
+    CambiarEstadoDialog.razor
+    --------------------------------------------------------------------------
+    Diálogo para cambiar el estado de un usuario.
+    Carga los estados disponibles a través del endpoint genérico
+    "estados-por-tabla", que ejecuta la cadena:
+      PROC_ESTANDAR_TABLAS_TIPOS_ESTADO_SHOWBYID (DES_TABLA='SEGURIDAD.USUARIOS')
+        → COD_TIPO_ESTADO
+        → PROC_ESTANDAR_ESTADOS_SHOWCOMBOX (COD_TIPO_ESTADO)
+        → lista de estados (COD_ESTADO / DES_ESTADO)
+*@
+@inject UsuarioService UsuarioService
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject IDialogService DialogService
+
+<MudDialog>
+    <DialogContent>
+        @* Encabezado: usuario y su estado actual *@
+        <MudText Class="mono mb-4" Style="opacity:.7;font-size:.85rem;">
+            Usuario: <strong>@Usuario.COD_USUARIO</strong> · Estado actual: <strong>@Usuario.DES_ESTADO</strong>
+        </MudText>
+
+        @* Combo de estados disponibles.
+           ToStringFunc traduce el código seleccionado a su descripción para que
+           el campo cerrado muestre el NOMBRE del estado y no el número. *@
+        <AriaCombo TItem="ComboboxItem"
+                     Items="_estados"
+                     TextFunc="@(e => e.Texto)"
+                     ValueFunc="@(e => e.Id)"
+                     @bind-Value="_codEstado"
+                     Label="Nuevo estado" />
+
+        <div class="d-flex align-center gap-2 mt-4 dialog-acciones-fijas">
+            <PanelAuditoria CodUsuarioRegistro="@Usuario.COD_USUARIO_REGISTRO"
+                            CodEstacionRegistro="@Usuario.COD_ESTACION_REGISTRO"
+                            FecRegistro="@Usuario.FEC_REGISTRO"
+                            CodUsuarioActualizacion="@Usuario.COD_USUARIO_ACTUALIZACION"
+                            CodEstacionActualizacion="@Usuario.COD_ESTACION_ACTUALIZACION"
+                            FecActualizacion="@Usuario.FEC_ACTUALIZACION" />
+            @* MudSpacer en vez de justify-space-between: cuando el registro es nuevo el
+               PanelAuditoria no pinta nada y, con un solo hijo, space-between dejaba los
+               botones a la izquierda. El spacer los empuja a la derecha siempre. *@
+            <MudSpacer />
+            <div class="d-flex gap-2">
+                <MudButton OnClick="@(async () => { try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { } MudDialog.Cancel(); })"
+                           Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel"
+                           Style="background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cancelar</MudButton>
+                <MudButton OnClick="Submit" Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           Disabled="_saving" Style="font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">Cambiar estado</MudButton>
+            </div>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    // Instancia del diálogo (para cerrarlo/cancelarlo)
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+
+    // Usuario sobre el que se cambia el estado (lo pasa la pantalla de Usuarios)
+    [Parameter] public Usuario Usuario { get; set; } = default!;
+
+    private string _codEstado = "1";              // Estado seleccionado (COD_ESTADO como string)
+    private bool _saving;                          // Bloquea el botón mientras guarda
+    private List<ComboboxItem> _estados = new();   // Estados disponibles para el combo
+
+    /// <summary>
+    /// Estructura que devuelve el endpoint estados-por-tabla.
+    /// Contiene el COD_TIPO_ESTADO hallado y la lista de estados (Id/Texto).
+    /// </summary>
+    private class EstadosDiag
+    {
+        public string DesTabla { get; set; } = "";
+        public int? CodTipoEstado { get; set; }
+        public int Cantidad { get; set; }
+        public string Paso { get; set; } = "";
+        public List<ComboboxItem> Estados { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Traduce el código de estado seleccionado a su descripción, para que el
+    /// MudSelect muestre el nombre del estado y no el número.
+    /// </summary>
+    private string MostrarTexto(string? cod)
+        => _estados.FirstOrDefault(e => e.Id == cod)?.Texto ?? cod ?? "";
+
+    /// <summary>
+    /// Al iniciar: llama a GET /seguridad/estados-por-tabla?desTabla=SEGURIDAD.USUARIOS
+    /// y llena el combo con los estados devueltos.
+    /// </summary>
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<EstadosDiag>>(
+                $"{ApiRoutes.Seguridad.EstadosPorTabla}?desTabla={Uri.EscapeDataString("SEGURIDAD.USUARIOS")}");
+            if (r?.Data is not null)
+                _estados = r.Data.Estados ?? new();
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(CambiarEstadoDialog)); }
+
+        // Preseleccionar el estado actual del usuario
+        _codEstado = (Usuario.COD_ESTADO ?? 1).ToString();
+    }
+
+    /// <summary>
+    /// Envía el cambio de estado a la API mediante UsuarioService.CambiarEstadoAsync
+    /// (POST /seguridad/usuarios/estados).
+    /// </summary>
+    private async Task Submit()
+    {
+        _saving = true;
+        var req = new CambiarEstadoRequest
+        {
+            COD_USUARIO = Usuario.COD_USUARIO,
+            COD_ESTADO = int.TryParse(_codEstado, out var e) ? e : 1
+        };
+        var (ok, msg) = await UsuarioService.CambiarEstadoAsync(req);
+        _saving = false;
+        if (ok)
+        {
+            Snackbar.Add("Estado actualizado.", Severity.Success);
+            // Devuelve el nuevo estado (código + descripción) para que la pantalla
+            // actualice solo esta fila en memoria, sin recargar toda la lista.
+            var nuevoEstado = _estados.FirstOrDefault(x => x.Id == _codEstado);
+            MudDialog.Close(DialogResult.Ok((req.COD_ESTADO, nuevoEstado?.Texto)));
+        }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(CambiarEstadoDialog));
+    }
+}

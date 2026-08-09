@@ -1,0 +1,129 @@
+@inject CatalogoService<Aplicacion, AplicacionDto> Service
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(880px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo"
+                         Codigo="@Aplicacion?.COD_APLICACION"
+                         Descripcion="@Aplicacion?.DES_APLICACION" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <div style="display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start;">
+                <div style="min-width:0;">
+                    <CampoTexto Tabla="SEGURIDAD.APLICACIONES" Columna="COD_APLICACION"
+                                @bind-Value="_model.COD_APLICACION" Disabled="@(_isEdit || _readonly)" />
+                    <CampoTexto Tabla="SEGURIDAD.APLICACIONES" Columna="DES_APLICACION"
+                                @bind-Value="_model.DES_APLICACION" Disabled="_readonly" />
+                    <div class="d-flex align-center gap-2 mb-2"><MudIcon Icon="@Icons.Material.Filled.Smartphone" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch @bind-Value="_model.FLG_APP_MOVIL" Color="Color.Primary" Disabled="_readonly" Label="Es aplicación móvil" /></div>
+
+                    @* Colores de la aplicación (aparecen en tiles y menú circular) *@
+                    <MudGrid Spacing="2" Class="mb-3">
+                        <MudItem xs="12" md="6">
+                            <MudText Typo="Typo.caption" Class="mono mb-1" Style="opacity:.6;">Color de fondo (tile)</MudText>
+                            <ColorConSwatch @bind-Text="_model.DES_BACKCOLOR" Label="Fondo" Disabled="_readonly" />
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <MudText Typo="Typo.caption" Class="mono mb-1" Style="opacity:.6;">Color de texto</MudText>
+                            <ColorConSwatch @bind-Text="_model.DES_FORECOLOR" Label="Texto" Disabled="_readonly" />
+                        </MudItem>
+                        @if (!string.IsNullOrWhiteSpace(_model.DES_BACKCOLOR) || !string.IsNullOrWhiteSpace(_model.DES_FORECOLOR))
+                        {
+                            <MudItem xs="12">
+                                <MudText Typo="Typo.caption" Class="mono mb-1" Style="opacity:.6;">Vista previa:</MudText>
+                                <MudChip T="string" Style="@($"background-color:{_model.DES_BACKCOLOR};color:{_model.DES_FORECOLOR};")">
+                                    @(string.IsNullOrWhiteSpace(_model.DES_APLICACION) ? "Aplicación" : _model.DES_APLICACION)
+                                </MudChip>
+                            </MudItem>
+                        }
+                    </MudGrid>
+
+                    <EstadoCombo DesTabla="SEGURIDAD.APLICACIONES" @bind-Value="_model.COD_ESTADO"
+                                 CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v ?? 0)"
+                                 Disabled="_readonly" Class="mt-3 mb-3" />
+                </div>
+                <div style="padding-left:8px;border-left:1px solid rgba(0,0,0,.1);">
+                    <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)" Label="Icono de la aplicación" ReadOnly="_readonly" />
+                </div>
+            </div>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Aplicacion?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Aplicacion?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Aplicacion?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Aplicacion?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Aplicacion?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Aplicacion?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Aplicacion? Aplicacion { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private AplicacionDto _model = new() { COD_ESTADO = 1 };
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        if (Aplicacion is not null) MapearDesdeModelo(Aplicacion);
+    }
+
+    /// <summary>Copia los campos editables del modelo (Aplicacion de la grilla, o la respuesta
+    /// fresca de GetByIdAsync) hacia _model.</summary>
+    private void MapearDesdeModelo(Aplicacion m)
+    {
+        _model = new AplicacionDto
+        {
+            COD_APLICACION  = m.COD_APLICACION,
+            DES_APLICACION  = m.DES_APLICACION ?? "",
+            FLG_APP_MOVIL   = m.FLG_APP_MOVIL,
+            IMG_ICONO       = m.IMG_ICONO,
+            DES_BACKCOLOR   = m.DES_BACKCOLOR,
+            DES_FORECOLOR   = m.DES_FORECOLOR,
+            COD_TIPO_ESTADO = m.COD_TIPO_ESTADO ?? 0,
+            COD_ESTADO      = m.COD_ESTADO ?? 1
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde GetByIdAsync — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_APLICACION);
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Modo != CrudModo.Create && Aplicacion is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.COD_APLICACION);
+            _saving = false;
+            if (okd) { Snackbar.Add("Aplicación eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(AplicacionDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model, Modo == CrudModo.Create);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Aplicación actualizada." : "Aplicación creada.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(AplicacionDialog));
+    }
+}

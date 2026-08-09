@@ -1,0 +1,303 @@
+@page "/developer/logviewer"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+
+@* Visor de archivos de log del servidor. Muestra la lista de archivos, permite
+   seleccionar uno, buscarlo y ver cada línea como una ficha expandible. *@
+
+<PageTitle>Visor de Logs · @ConfigSvc.Current.NombreApp</PageTitle>
+
+@* flex:1 en vez de una altura fija en vh: así, sin importar el tamaño del header,
+   el área de columnas siempre ocupa exactamente el espacio restante hasta el borde
+   inferior real de la página, sin dejar un hueco vacío debajo. *@
+<div style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column;">
+
+<div class="d-flex align-center justify-space-between mb-4" style="flex-shrink:0;">
+    <div>
+        <TituloPagina Fallback="Visor de Logs" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+            Archivos de log del servidor · solo lectura
+        </MudText>
+    </div>
+    <MudButton Variant="Variant.Outlined" Color="Color.Default"
+               StartIcon="@Icons.Material.Filled.Refresh"
+               OnClick="CargarArchivos" Size="Size.Small">Actualizar</MudButton>
+</div>
+
+<MudGrid Style="flex:1 1 auto;min-height:0;">
+
+    @* ── Panel izquierdo: lista de archivos ── *@
+    <MudItem xs="12" md="2" Style="height:100%;">
+        <MudPaper Elevation="0" Style="border:1px solid var(--line);height:100%;overflow-y:auto;">
+            <div class="pa-3" style="border-bottom:1px solid var(--line);">
+                <MudText Typo="Typo.subtitle2" Style="font-weight:700;">Archivos disponibles</MudText>
+            </div>
+            @if (_cargandoArchivos)
+            {
+                <div class="pa-4 d-flex justify-center">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+                </div>
+            }
+            else if (!_archivos.Any())
+            {
+                <div class="pa-4">
+                    <MudText Style="opacity:.5;font-size:.85rem;">Sin archivos de log.</MudText>
+                </div>
+            }
+            else
+            {
+                <MudList T="LogFileInfo" Dense="true">
+                    @foreach (var archivo in _archivos)
+                    {
+                        <MudListItem T="LogFileInfo"
+                                     Style="@(_archivoActual?.Nombre == archivo.Nombre ? "background:var(--foco-fondo);color:var(--foco-texto);" : "")"
+                                     OnClick="@(() => SeleccionarArchivo(archivo))">
+                            <div>
+                                <div style="@($"font-weight:600;font-size:.85rem;color:{(_archivoActual?.Nombre == archivo.Nombre ? "inherit" : ColorNombreArchivo(archivo.Nombre))};")">@archivo.Nombre</div>
+                                <div class="mono" style="font-size:.72rem;opacity:.6;">
+                                    @archivo.Lineas líneas · @FormatBytes(archivo.Tamaño)
+                                </div>
+                                <div class="mono" style="font-size:.72rem;opacity:.5;">
+                                    @archivo.Fecha.ToString("dd/MM/yyyy HH:mm")
+                                </div>
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            }
+        </MudPaper>
+    </MudItem>
+
+    @* ── Panel derecho: contenido del archivo ── *@
+    <MudItem xs="12" md="10" Style="height:100%;">
+        <MudPaper Elevation="0" Style="border:1px solid var(--line);height:100%;display:flex;flex-direction:column;">
+
+            @* Barra de búsqueda y paginación *@
+            <div class="pa-3 d-flex align-center gap-3 log-viewer-search" style="border-bottom:1px solid var(--line);flex-wrap:wrap;">
+                <CampoTextoEstable @bind-Value="_busqueda" Label="Buscar en el log"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                              Style="min-width:260px;"
+                              DebounceInterval="400"
+                              OnDebounceIntervalElapsed="BuscarEnLog"
+                              Clearable="true"
+                              OnClearButtonClick="@(async () => { _busqueda = ""; await BuscarEnLog(); })"
+                              UserAttributes="@(new Dictionary<string,object>{["autocomplete"]="off"})" />
+                @if (_archivoActual is not null)
+                {
+                    <div class="mono" style="font-size:.78rem;opacity:.6;">
+                        @_totalLineas líneas · página @_pagina de @TotalPaginas
+                    </div>
+                    <MudIconButton Icon="@Icons.Material.Filled.FirstPage"
+                                   Disabled="@(_pagina <= 1)"
+                                   OnClick="PrimeraPagina" Size="Size.Small" Style="color:var(--ink);" />
+                    <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft"
+                                   Disabled="@(_pagina <= 1)"
+                                   OnClick="PaginaAnterior" Size="Size.Small" Style="color:var(--ink);" />
+                    <MudIconButton Icon="@Icons.Material.Filled.ChevronRight"
+                                   Disabled="@(_pagina >= TotalPaginas)"
+                                   OnClick="PaginaSiguiente" Size="Size.Small" Style="color:var(--ink);" />
+                    <MudIconButton Icon="@Icons.Material.Filled.LastPage"
+                                   Disabled="@(_pagina >= TotalPaginas)"
+                                   OnClick="UltimaPagina" Size="Size.Small" Style="color:var(--ink);" />
+                }
+            </div>
+
+            @* Contenido: fichas de log *@
+            <div class="pa-3" style="flex:1;overflow-y:auto;">
+                @if (_archivoActual is null)
+                {
+                    <div class="d-flex flex-column align-center justify-center py-10" style="opacity:.35;">
+                        <MudIcon Icon="@Icons.Material.Filled.Article" Style="font-size:3rem;" />
+                        <MudText Class="mt-2">Selecciona un archivo de log</MudText>
+                    </div>
+                }
+                else if (_cargandoLineas)
+                {
+                    <div class="d-flex justify-center py-6">
+                        <MudProgressCircular Indeterminate="true" />
+                    </div>
+                }
+                else if (!_lineas.Any())
+                {
+                    <div class="d-flex flex-column align-center justify-center py-10" style="opacity:.35;">
+                        <MudIcon Icon="@Icons.Material.Filled.SearchOff" Style="font-size:3rem;" />
+                        <MudText Class="mt-2">Sin resultados</MudText>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var (linea, idx) in _lineas.Select((l, i) => (l, i)))
+                    {
+                        var nivel = DetectarNivel(linea);
+                        var expandido = _expandidos.Contains(idx);
+                        <div class="mb-2" style="@($"border-left:3px solid {ColorNivel(nivel)};background:{FondoNivel(nivel)};border-radius:0 4px 4px 0;")">
+                            <div class="pa-2 d-flex align-center gap-2"
+                                 style="cursor:pointer;user-select:none;"
+                                 @onclick="@(() => ToggleExpandir(idx))">
+                                <MudIcon Icon="@IconoNivel(nivel)"
+                                         Style="@($"color:{ColorNivel(nivel)};font-size:1rem;flex-shrink:0;")" />
+                                <span class="mono" style="font-size:.78rem;flex:1;word-break:break-all;">
+                                    @(linea.Length > 180 && !expandido ? linea[..180] + "…" : linea)
+                                </span>
+                                <MudIcon Icon="@(expandido ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                         Style="font-size:1rem;opacity:.5;flex-shrink:0;" />
+                            </div>
+                            @if (expandido)
+                            {
+                                <div class="px-3 pb-3">
+                                    <MudDivider Class="mb-2" />
+                                    <div class="mono" style="font-size:.78rem;white-space:pre-wrap;word-break:break-all;opacity:.85;">@linea</div>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+
+        </MudPaper>
+    </MudItem>
+
+</MudGrid>
+
+</div>
+
+@code {
+    // Recibidos siempre por AbrirTabOpcion (MainLayout) para pantallas con botones
+    // dinámicos vía AccionesBotones — esta pantalla no los usa, pero debe aceptarlos
+    // para no romper al abrirse desde el menú.
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    // ── Modelos ──
+    record LogFileInfo(string Nombre, long Tamaño, DateTime Fecha, int Lineas);
+
+    // ── Estado ──
+    private List<LogFileInfo> _archivos     = new();
+    private LogFileInfo?      _archivoActual;
+    private List<string>      _lineas       = new();
+    private HashSet<int>      _expandidos   = new();
+    private string            _busqueda     = "";
+    private int               _pagina       = 1;
+    private int               _totalLineas  = 0;
+    private const int         PorPagina     = 80;
+    private bool              _cargandoArchivos;
+    private bool              _cargandoLineas;
+
+    private int TotalPaginas => (int)Math.Ceiling(_totalLineas / (double)PorPagina);
+
+    // ── Ciclo de vida ──
+    protected override async Task OnInitializedAsync() => await CargarArchivos();
+
+    // ── Carga de archivos ──
+    /// <summary>Carga la lista de archivos de log desde la API.</summary>
+    private async Task CargarArchivos()
+    {
+        _cargandoArchivos = true;
+        try
+        {
+            var resp = await Http.GetFromJsonAsync<ApiResp<List<LogFileInfo>>>(ApiRoutes.Developer.Logs);
+            _archivos = resp?.Data ?? new();
+            if (_archivos.Count > 0) await SeleccionarArchivo(_archivos[0]);
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(LogViewer)); }
+        finally { _cargandoArchivos = false; }
+    }
+
+    /// <summary>Selecciona un archivo y carga su primera página.</summary>
+    private async Task SeleccionarArchivo(LogFileInfo archivo)
+    {
+        _archivoActual = archivo;
+        _pagina        = 1;
+        _busqueda      = "";
+        _expandidos.Clear();
+        await CargarLineas();
+    }
+
+    /// <summary>Carga las líneas de la página actual del archivo seleccionado.</summary>
+    private async Task CargarLineas()
+    {
+        if (_archivoActual is null) return;
+        _cargandoLineas = true;
+        _expandidos.Clear();
+        try
+        {
+            var url  = $"{ApiRoutes.Developer.Logs}/{Uri.EscapeDataString(_archivoActual.Nombre)}" +
+                       $"?pagina={_pagina}&porPagina={PorPagina}" +
+                       (string.IsNullOrWhiteSpace(_busqueda) ? "" : $"&filtro={Uri.EscapeDataString(_busqueda)}");
+            var resp = await Http.GetFromJsonAsync<ApiResp<LogContent>>(url);
+            if (resp?.Data is not null)
+            {
+                _lineas      = resp.Data.Lineas ?? new();
+                _totalLineas = resp.Data.Total;
+            }
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(LogViewer)); }
+        finally { _cargandoLineas = false; }
+    }
+
+    private async Task BuscarEnLog() { _pagina = 1; await CargarLineas(); }
+    private async Task PaginaAnterior() { if (_pagina > 1) { _pagina--; await CargarLineas(); } }
+    private async Task PaginaSiguiente() { if (_pagina < TotalPaginas) { _pagina++; await CargarLineas(); } }
+    private async Task PrimeraPagina() { if (_pagina != 1) { _pagina = 1; await CargarLineas(); } }
+    private async Task UltimaPagina() { if (_pagina != TotalPaginas) { _pagina = TotalPaginas; await CargarLineas(); } }
+
+    /// <summary>Verde para trace_*.log (informativo), rojo para errors_*.log.</summary>
+    private static string ColorNombreArchivo(string nombre) =>
+        nombre.StartsWith("trace_", StringComparison.OrdinalIgnoreCase)  ? "#2f8f5b" :
+        nombre.StartsWith("errors_", StringComparison.OrdinalIgnoreCase) ? "#d0342c" :
+        "inherit";
+
+    private void ToggleExpandir(int idx)
+    {
+        if (!_expandidos.Remove(idx)) _expandidos.Add(idx);
+    }
+
+    // ── Helpers visuales ──
+    private static string DetectarNivel(string linea)
+    {
+        var l = linea.ToUpper();
+        if (l.Contains("[ERR") || l.Contains("ERROR") || l.Contains("[FAIL")) return "error";
+        if (l.Contains("[WRN") || l.Contains("WARN"))  return "warn";
+        if (l.Contains("[DBG") || l.Contains("DEBUG")) return "debug";
+        return "info";
+    }
+
+    private static string ColorNivel(string nivel) => nivel switch
+    {
+        "error" => "#b8472d",
+        "warn"  => "#e6921a",
+        "debug" => "#4a4a32",
+        _       => "#2b6cb0"
+    };
+
+    private static string FondoNivel(string nivel) => nivel switch
+    {
+        "error" => "rgba(184,71,45,.07)",
+        "warn"  => "rgba(230,146,26,.07)",
+        "debug" => "rgba(74,74,50,.05)",
+        _       => "rgba(43,108,176,.04)"
+    };
+
+    private static string IconoNivel(string nivel) => nivel switch
+    {
+        "error" => Icons.Material.Filled.Error,
+        "warn"  => Icons.Material.Filled.Warning,
+        "debug" => Icons.Material.Filled.Code,
+        _       => Icons.Material.Filled.Info
+    };
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / 1024.0 / 1024.0:F1} MB";
+    }
+
+    // ── DTOs de respuesta ──
+    private record ApiResp<T>(bool Success, T? Data, string? Message);
+    private record LogContent(int Total, int Pagina, int PorPagina, List<string>? Lineas);
+}

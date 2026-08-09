@@ -1,0 +1,206 @@
+@page "/estandar/meses"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Estandar
+@inject CatalogoService<Mes, MesDto> Service
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject ConfigService ConfigSvc
+@implements IDisposable
+
+<PageTitle>Meses · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Meses" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    @* Sin SP _SEARCH — el filtro de texto es local sobre lo ya cargado. *@
+    <BarraBusqueda @bind-Value="_searchTerm" OnSearch="Filtrar" Placeholder="Buscar mes..." MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Meses" Headers="@_printHeaders" Rows="@PrintRows()" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="meses" style="position:relative;">
+    <MudDataGrid T="Mes" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="@Limites.ColWidth("ESTANDAR.MESES","NUM_MES",60,150)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="NUM_MES" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="Mes" ItemsBase="@BaseSinEstaColumna(0)"
+                                            ValorDe="@(x => x.NUM_MES.ToString())"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.NUM_MES</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("ESTANDAR.MESES","DES_MES",120,300)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_MES" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="Mes" ItemsBase="@BaseSinEstaColumna(1)"
+                                            ValorDe="@(x => x.DES_MES ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_MES</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Días" Width="@Limites.ColWidth("ESTANDAR.MESES","NUM_DIAS",60,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="NUM_DIAS" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="Mes" ItemsBase="@BaseSinEstaColumna(2)"
+                                            ValorDe="@(x => x.NUM_DIAS?.ToString() ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(2, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.NUM_DIAS</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Afecta Bisiesto" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <MudIcon Icon="@(context.Item.FLG_AFECTA_BISIESTO == true ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.RadioButtonUnchecked)"
+                             Color="@(context.Item.FLG_AFECTA_BISIESTO == true ? Color.Success : Color.Default)" Size="Size.Small" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b => OnAccionGrilla(item, b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin meses registrados.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="Mes" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<Mes> _items = new();
+    private string _searchTerm = string.Empty;
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<Mes> Ordenar(List<Mes> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.NUM_MES).ToList() : items.OrderByDescending(x => x.NUM_MES).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_MES).ToList() : items.OrderByDescending(x => x.DES_MES).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.NUM_DIAS).ToList() : items.OrderByDescending(x => x.NUM_DIAS).ToList(),
+        _ => items
+    };
+
+    private List<Mes> _visibles => Ordenar(AplicarTodos(Filtrados(), -1));
+    private List<Mes> BaseSinEstaColumna(int col) => AplicarTodos(Filtrados(), col);
+
+    private List<Mes> Filtrados() => string.IsNullOrWhiteSpace(_searchTerm)
+        ? _items
+        : _items.Where(x => (x.DES_MES ?? "").Contains(_searchTerm, StringComparison.OrdinalIgnoreCase)
+                          || x.NUM_MES.ToString().Contains(_searchTerm)).ToList();
+
+    private List<Mes> AplicarTodos(List<Mes> origen, int excluir)
+    {
+        IEnumerable<Mes> q = origen;
+        foreach (var (col, vals) in _filtros)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.NUM_MES.ToString())),
+                1 => q.Where(x => vals.Contains(x.DES_MES ?? "")),
+                2 => q.Where(x => vals.Contains(x.NUM_DIAS?.ToString() ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltro(int col, HashSet<string>? vals) { _filtros[col] = vals; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+    private void Filtrar() => StateHasChanged();
+
+    private readonly List<string> _printHeaders = new() { "Código", "Descripción", "Días", "Afecta Bisiesto" };
+    private List<List<string>> PrintRows() => _items.Select(m => new List<string>
+    {
+        m.NUM_MES.ToString(), m.DES_MES ?? "", m.NUM_DIAS?.ToString() ?? "", m.FLG_AFECTA_BISIESTO == true ? "Sí" : "No"
+    }).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ESTANDAR", "Meses");
+        await Load();
+        Cambios.Suscribir("ESTANDAR.MESES", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Open(null));
+
+    private async Task Load() => _items = await Service.GetAllAsync();
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Open(null);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(Mes item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Ver(item);
+        if (b.FLG_ACCION_PUT    == true) return Open(item);
+        if (b.FLG_ACCION_DELETE == true) return Delete(item);
+        return Task.CompletedTask;
+    }
+
+    private async Task Ver(Mes item)  => await AbrirDialog(item, CrudModo.Read);
+    private async Task Open(Mes? m)   => await AbrirDialog(m, m is null ? CrudModo.Create : CrudModo.Update);
+    private async Task Delete(Mes m)  => await AbrirDialog(m, CrudModo.Delete);
+
+    private async Task AbrirDialog(Mes? m, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo mes",
+            CrudModo.Read   => $"Ver · {m?.DES_MES}",
+            CrudModo.Update => $"Editar · {m?.DES_MES}",
+            CrudModo.Delete => $"Eliminar · {m?.DES_MES}",
+            _ => "Mes"
+        };
+        var parameters = new DialogParameters { ["Item"] = m, ["Modo"] = modo };
+        var dlg = await DialogService.ShowAsync<MesesDialog>(titulo, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ESTANDAR.MESES", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

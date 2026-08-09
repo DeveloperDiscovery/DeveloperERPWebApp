@@ -1,0 +1,147 @@
+@using Modelo = KONSolutions.Shared.Models.Logistica.TiposLoteControl
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Codigo="@Item?.COD_TIPO_LOTE_CONTROL" Descripcion="@Item?.DES_TIPO_LOTE_CONTROL" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="4">
+                    @* El código lo escribe el usuario y es la clave primaria: solo se fija al crear. *@
+                    <CampoTexto Tabla="LOGISTICA.TIPOS_LOTE_CONTROL" Columna="COD_TIPO_LOTE_CONTROL"
+                                @bind-Value="_model.COD_TIPO_LOTE_CONTROL"
+                                Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <CampoTexto Tabla="LOGISTICA.TIPOS_LOTE_CONTROL" Columna="DES_TIPO_LOTE_CONTROL"
+                                @bind-Value="_model.DES_TIPO_LOTE_CONTROL"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+                <MudItem xs="12">
+                    @* Distingue el lote propio del que viene de un tercero. *@
+                    <div class="d-flex align-center gap-2" style="height:40px;">
+                        <MudIcon Icon="@(_model.FLG_LOCAL == true ? Icons.Material.Filled.Home : Icons.Material.Filled.LocalShipping)"
+                                 Color="@(_model.FLG_LOCAL == true ? Color.Primary : Color.Default)" />
+                        <MudSwitch T="bool?" Value="_model.FLG_LOCAL" ValueChanged="CambiarLocal"
+                                   Disabled="_readonly" Color="Color.Primary"
+                                   Label="Lote propio (no de un tercero)" />
+                    </div>
+                </MudItem>
+
+                <MudItem xs="12">
+                    @* "Interno" cuelga de "propio": un lote de un tercero no puede ser interno.
+                       Por eso se apaga y se bloquea cuando el lote deja de ser propio, en vez de
+                       dejar marcada una combinación que no significa nada. *@
+                    <div class="d-flex align-center gap-2" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Lock"
+                                 Color="@(_model.FLG_INTERNO == true ? Color.Primary : Color.Default)"
+                                 Style="@(_esLocal ? "" : "opacity:.35;")" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_INTERNO"
+                                   Disabled="@(_readonly || !_esLocal)" Color="Color.Primary"
+                                   Label="De uso interno" />
+                        @if (!_esLocal)
+                        {
+                            <MudText Class="mono" Style="font-size:.78rem;opacity:.55;">
+                                sólo aplica a lotes propios
+                            </MudText>
+                        }
+                    </div>
+                </MudItem>
+            </MudGrid>
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Modelo? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private Modelo _model = new();
+    private bool _esNuevo, _saving;
+
+    /// <summary>Es lo único que habilita la marca de interno.</summary>
+    private bool _esLocal => _model.FLG_LOCAL == true;
+
+    /// <summary>Al dejar de ser propio, "interno" pierde sentido y se apaga. Si sólo se
+    /// deshabilitara, el valor viejo seguiría viajando al grabar y la fila quedaría diciendo
+    /// que un lote de un tercero es interno.</summary>
+    private void CambiarLocal(bool? valor)
+    {
+        _model.FLG_LOCAL = valor;
+        if (valor != true) _model.FLG_INTERNO = false;
+    }
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private void MapearDesdeModelo(Modelo m)
+    {
+        _model = new Modelo
+        {
+            COD_TIPO_LOTE_CONTROL             = m.COD_TIPO_LOTE_CONTROL,
+            DES_TIPO_LOTE_CONTROL             = m.DES_TIPO_LOTE_CONTROL,
+            FLG_LOCAL                    = m.FLG_LOCAL,
+            FLG_INTERNO                  = m.FLG_INTERNO,
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID: evita editar sobre datos que la grilla
+    /// puede tener desactualizados.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<Modelo>(
+            $"{ApiRoutes.Logistica.TiposLoteControl}/{Uri.EscapeDataString(_model.COD_TIPO_LOTE_CONTROL)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    private async Task OnInvalidSubmit(EditContext ctx)
+    {
+        var errores = string.Join(" · ", ctx.GetValidationMessages());
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"]  = "Faltan datos obligatorios",
+                ["Mensaje"] = string.IsNullOrWhiteSpace(errores) ? "Hay campos obligatorios sin completar." : errores
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Logistica.TiposLoteControl;
+
+        // Red de seguridad: un registro cargado antes de esta regla puede venir marcado como
+        // interno sin ser propio. Grabarlo tal cual perpetuaría una combinación que no
+        // significa nada, así que se corrige acá y no sólo al tocar el interruptor.
+        if (_model.FLG_LOCAL != true) _model.FLG_INTERNO = false;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_TIPO_LOTE_CONTROL)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposLoteControlDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        // POST al crear, PUT al modificar: el SP de alta es estricto y rechaza la clave repetida.
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposLoteControlDialog), nameof(Submit));
+    }
+}

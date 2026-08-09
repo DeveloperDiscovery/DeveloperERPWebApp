@@ -1,0 +1,261 @@
+@page "/logistica/lotes-control"
+@attribute [Authorize]
+@using Modelo = KONSolutions.Shared.Models.Logistica.LotesControl
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Lotes de Control · @ConfigSvc.Current.NombreApp</PageTitle>
+
+@* Dos solapas que nunca están habilitadas a la vez: o se está mirando la lista, o se
+   está trabajando sobre un documento. Es lo que evita que uno navegue el listado con una
+   edición a medio hacer detrás. *@
+<MudTabs Elevation="0" ActivePanelIndex="@_tab" ActivePanelIndexChanged="@(i => _tab = i)"
+         Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4">
+
+    <MudTabPanel Text="Lotes" Icon="@Icons.Material.Filled.List" Disabled="@_enDocumento">
+        <div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+            <div class="grid-header-titulo">
+                <TituloPagina Fallback="Lotes de Control" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+                <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema LOGISTICA · @_visibles.Count de @_items.Count lotes</MudText>
+            </div>
+            <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar por número, descripción o tipo..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+            <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+            <div class="grid-header-divider"></div>
+            <div class="d-flex gap-2">
+                <GridRefreshButton OnRefresh="Load" />
+                <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                 Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+            </div>
+        </div>
+
+        <MudPaper Elevation="0" Style="border:1px solid var(--line);">
+            <div data-resizable-grid="lotes-control" style="position:relative;">
+            <MudDataGrid T="Modelo" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                         Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+                <Columns>
+                    <TemplateColumn Sortable="false" Title="N° lote" Width="150px">
+                        <HeaderTemplate><EncabezadoOrdenable Campo="N°" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" /></HeaderTemplate>
+                        <CellTemplate><span class="mono">@context.Item.NUM_LOTE_CONTROL</span></CellTemplate>
+                    </TemplateColumn>
+
+                    <TemplateColumn Sortable="false" Title="Descripción"
+                                    Width="@Limites.ColWidth("LOGISTICA.LOTES_CONTROL","DES_LOTE_CONTROL",180,340)">
+                        <HeaderTemplate>
+                            <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_LOTE_CONTROL" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                                <FiltroExcelColumna T="Modelo" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_LOTE_CONTROL)"
+                                                    ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                            </div>
+                        </HeaderTemplate>
+                        <CellTemplate>@context.Item.DES_LOTE_CONTROL</CellTemplate>
+                    </TemplateColumn>
+
+                    <TemplateColumn Sortable="false" Title="Fecha" Width="110px" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                        <HeaderTemplate><EncabezadoOrdenable Campo="Fecha" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" /></HeaderTemplate>
+                        <CellTemplate><span class="mono">@context.Item.FEC_LOTE_CONTROL?.ToString("dd/MM/yyyy")</span></CellTemplate>
+                    </TemplateColumn>
+
+                    <TemplateColumn Sortable="false" Title="Tipo" Width="160px">
+                        <HeaderTemplate>
+                            <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Tipo" />
+                                <FiltroExcelColumna T="Modelo" ItemsBase="@Base(3)" ValorDe="@(x=>x.DES_TIPO_LOTE_CONTROL)"
+                                                    ValoresActivos="_filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                            </div>
+                        </HeaderTemplate>
+                        <CellTemplate>@context.Item.DES_TIPO_LOTE_CONTROL</CellTemplate>
+                    </TemplateColumn>
+
+                    <TemplateColumn Sortable="false" Title="Vence" Width="110px" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                        <HeaderTemplate><EncabezadoOrdenable Texto="Vence" /></HeaderTemplate>
+                        <CellTemplate><span class="mono">@(context.Item.FEC_VENCIMIENTO?.ToString("dd/MM/yyyy") ?? "—")</span></CellTemplate>
+                    </TemplateColumn>
+
+                    <TemplateColumn Sortable="false" Title="Total" Width="120px" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
+                        <HeaderTemplate><EncabezadoOrdenable Texto="Total" /></HeaderTemplate>
+                        <CellTemplate><span class="mono">@context.Item.VAL_TOTAL?.ToString("N2")</span></CellTemplate>
+                    </TemplateColumn>
+
+                    <TemplateColumn Sortable="false" Title="Estado" Width="130px" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                        <HeaderTemplate>
+                            <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Estado" />
+                                <FiltroExcelColumna T="Modelo" ItemsBase="@Base(7)" ValorDe="@(x=>x.DES_ESTADO)"
+                                                    ValoresActivos="_filtros.GetValueOrDefault(7)" ValoresActivosChanged="@(v=>Filtro(7,v))" />
+                            </div>
+                        </HeaderTemplate>
+                        <CellTemplate>
+                            <EstadoChip Estado="@context.Item.DES_ESTADO"
+                                        BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                        </CellTemplate>
+                    </TemplateColumn>
+
+                    <TemplateColumn Title="Acciones" Sortable="false">
+                        <CellTemplate>
+                            @{ var item = context.Item; }
+                            <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                             Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                        </CellTemplate>
+                    </TemplateColumn>
+                </Columns>
+                <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin documentos.</MudText></NoRecordsContent>
+                <PagerContent><MudDataGridPager T="Modelo" /></PagerContent>
+            </MudDataGrid>
+            <div class="grid-resize-handle"></div>
+            </div>
+        </MudPaper>
+    </MudTabPanel>
+
+    @* Arranca deshabilitada: se enciende sólo cuando hay un documento abierto, y se apaga
+       de nuevo al volver. *@
+    <MudTabPanel Text="@_tituloDocumento" Icon="@Icons.Material.Filled.Description" Disabled="@(!_enDocumento)">
+        @if (_enDocumento)
+        {
+            <LoteDocumento Item="_docItem" Modo="_docModo" OnCerrar="CerrarDocumento" />
+        }
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<Modelo> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna = 0;
+    private bool _ordenAscendente = false;   // el documento más reciente primero
+
+
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+
+    private List<Modelo> Ordenar(List<Modelo> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.NUM_LOTE_CONTROL).ToList() : items.OrderByDescending(x => x.NUM_LOTE_CONTROL).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_LOTE_CONTROL).ToList() : items.OrderByDescending(x => x.DES_LOTE_CONTROL).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.FEC_LOTE_CONTROL).ToList() : items.OrderByDescending(x => x.FEC_LOTE_CONTROL).ToList(),
+        _ => items
+    };
+
+    private List<Modelo> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<Modelo> Base(int col) => Aplicar(_items, col);
+
+    private List<Modelo> Aplicar(List<Modelo> src, int ex)
+    {
+        IEnumerable<Modelo> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                1 => q.Where(x => v.Contains(x.DES_LOTE_CONTROL ?? "")),
+                3 => q.Where(x => v.Contains(x.DES_TIPO_LOTE_CONTROL ?? "")),
+                7 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private Task Buscar() { StateHasChanged(); return Task.CompletedTask; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("LOGISTICA", "LotesControl");
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("LOGISTICA.LOTES_CONTROL", _onCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<Modelo>>>(
+                ApiRoutes.Logistica.LotesControl);
+            var todos = r?.Data ?? new();
+            _items = string.IsNullOrWhiteSpace(_search)
+                ? todos
+                : todos.Where(x =>
+                       (x.NUM_LOTE_CONTROL ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase)
+                    || (x.DES_LOTE_CONTROL ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase)
+                    || (x.DES_TIPO_LOTE_CONTROL ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(LotesControlPagina), nameof(Load));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            _items = new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(Modelo item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private int _tab;
+    private bool _enDocumento;
+    private Modelo? _docItem;
+    private CrudModo _docModo = CrudModo.Create;
+
+    private string _tituloDocumento => !_enDocumento ? "Documento" : _docModo switch
+    {
+        CrudModo.Create => "Nuevo",
+        CrudModo.Delete => $"Eliminar {_docItem?.NUM_LOTE_CONTROL}",
+        CrudModo.Read   => $"Consultar {_docItem?.NUM_LOTE_CONTROL}",
+        _               => $"Editar {_docItem?.NUM_LOTE_CONTROL}"
+    };
+
+    /// <summary>Pasa a la solapa del documento. La lista queda deshabilitada mientras tanto.</summary>
+    private Task Abrir(Modelo? item, CrudModo modo)
+    {
+        _docItem = item;
+        _docModo = modo;
+        _enDocumento = true;
+        _tab = 1;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Vuelve a la lista y apaga la solapa del documento. Recarga sólo si se grabó
+    /// algo, que es lo que informa el componente al cerrarse.</summary>
+    private async Task CerrarDocumento(bool huboCambios)
+    {
+        _enDocumento = false;
+        _docItem = null;
+        _tab = 0;
+        if (huboCambios) await Load();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("LOGISTICA.LOTES_CONTROL", _onCambio ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

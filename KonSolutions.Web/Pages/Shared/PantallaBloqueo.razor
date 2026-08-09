@@ -1,0 +1,171 @@
+@*
+    PantallaBloqueo.razor
+    --------------------------------------------------------------------------
+    Punto 15: pantalla de bloqueo dinámica que cubre toda la app cuando hay
+    inactividad. Al hacer clic pide la contraseña; valida con el SP de login
+    (PROC_SEGURIDAD_USUARIOS_VALIDALOGIN) y desbloquea si es correcta.
+*@
+@inject IAuthService AuthService
+@inject ISnackbar Snackbar
+@inject ConfigService ConfigSvc
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+
+@if (Bloqueada)
+{
+    <div class="pantalla-bloqueo" @onclick="MostrarDesbloqueo">
+        @* Punto 16: logo rebotando estilo DVD *@
+        @if (!string.IsNullOrEmpty(_logoApp))
+        {
+            <img src="@($"data:image/png;base64,{_logoApp}")" class="logo-dvd" alt="logo" />
+        }
+        <div class="pantalla-bloqueo-reloj">
+            <MudIcon Icon="@Icons.Material.Filled.Lock" Style="font-size:4rem;" />
+            <div class="pantalla-bloqueo-hora">@_hora</div>
+            <div class="pantalla-bloqueo-fecha">@_fecha</div>
+            @if (!_pidiendoPassword)
+            {
+                <MudText Class="mt-4" Style="opacity:.7;">Sesión bloqueada · clic para desbloquear</MudText>
+            }
+        </div>
+
+        @if (_pidiendoPassword)
+        {
+            <form class="pantalla-bloqueo-form" @onclick:stopPropagation="true" @onsubmit:preventDefault="true">
+                <div class="d-flex align-center gap-2 mb-1">
+                    <MudIcon Icon="@Icons.Material.Filled.AccountCircle" />
+                    <div>
+                        <MudText Typo="Typo.h6" Style="line-height:1.1;">@_desUsuario</MudText>
+                        <MudText Typo="Typo.caption" Class="mono" Style="opacity:.6;">@_codUsuario</MudText>
+                    </div>
+                </div>
+                @* Campo de usuario oculto (visualmente, no del DOM): sin él, el navegador no
+                   tiene con qué asociar el autocompletado del campo de contraseña, y termina
+                   "adivinando" y rellenando el buscador de la pantalla activa. *@
+                <input type="text" autocomplete="username" value="@_codUsuario" readonly
+                       tabindex="-1" aria-hidden="true"
+                       style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;" />
+                <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.6;">Ingrese su contraseña para continuar</MudText>
+                <CampoTextoEstable @bind-Value="_password" Label="Contraseña" Variant="Variant.Outlined"
+                              InputType="InputType.Password" Immediate="true"
+                              UserAttributes="@(new Dictionary<string,object> { ["autocomplete"] = "current-password" })"
+                              OnKeyDown="@(e => { if (e.Key == "Enter") _ = Desbloquear(); })" Class="mb-3" />
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_error</MudAlert>
+                }
+                <MudButton OnClick="Desbloquear" Variant="Variant.Filled" Color="Color.Primary"
+                           FullWidth="true" Disabled="_validando">
+                    @if (_validando) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                    Desbloquear
+                </MudButton>
+                <div class="d-flex justify-center mt-3">
+                    <MudButton OnClick="CerrarSesion" Variant="Variant.Text" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Logout">Cerrar sesión</MudButton>
+                </div>
+            </form>
+        }
+    </div>
+}
+
+@code {
+    public bool Bloqueada { get; private set; }
+
+    private bool _pidiendoPassword, _validando;
+    private string _password = "";
+    private string _error = "";
+    private string? _logoApp;   // Punto 16: logo para la animación rebote
+    private string _codUsuario = "";
+    private string _desUsuario = "";
+    private string _hora = "", _fecha = "";
+    private System.Threading.Timer? _reloj;
+
+    /// <summary>Activa el bloqueo (llamado por el detector de inactividad).</summary>
+    public async Task Bloquear()
+    {
+        // Bug 1: leer el usuario de la sesión guardada (confiable), no de los claims del token.
+        var sesion = await AuthService.GetSesionAsync();
+        _codUsuario = sesion?.COD_USUARIO ?? "";
+        _desUsuario = sesion?.DES_USUARIO ?? _codUsuario;
+        _logoApp = ConfigSvc.Current.LogoApp;   // Punto 16: logo para la animación rebote
+        Bloqueada = true;
+        _pidiendoPassword = false;
+        _password = "";
+        ActualizarReloj(null);
+        _reloj = new System.Threading.Timer(ActualizarReloj, null, 0, 1000);
+        // Marcar el bloqueo: si el usuario da F5 estando bloqueado, será enviado al login.
+        await GuardarEstadoBloqueo(true);
+        StateHasChanged();
+    }
+
+    private Task MostrarDesbloqueo()
+    {
+        if (_pidiendoPassword) return Task.CompletedTask;
+        _pidiendoPassword = true;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void ActualizarReloj(object? _)
+    {
+        var ahora = DateTime.Now;
+        _hora = ahora.ToString("HH:mm:ss");
+        _fecha = ahora.ToString("dddd, dd 'de' MMMM yyyy");
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Valida la contraseña con el SP de login y desbloquea si es correcta.</summary>
+    private async Task Desbloquear()
+    {
+        _error = "";
+        if (string.IsNullOrWhiteSpace(_password))
+        {
+            _error = "Ingrese su contraseña.";
+            return;
+        }
+        _validando = true;
+        StateHasChanged();
+
+        // Validar con el mismo SP de login (sin tocar el token actual)
+        var (ok, error) = await AuthService.ValidarPasswordAsync(_codUsuario, _password);
+        _validando = false;
+
+        if (ok)
+        {
+            Bloqueada = false;
+            _pidiendoPassword = false;
+            _password = "";
+            _error = "";
+            _reloj?.Dispose();
+            await GuardarEstadoBloqueo(false);   // Bug 2: limpiar la marca persistida
+        }
+        else
+        {
+            _error = error ?? "Contraseña incorrecta.";
+            _password = "";
+        }
+        StateHasChanged();
+    }
+
+    /// <summary>Permite salir del sistema desde la pantalla de bloqueo (si olvidó la contraseña).</summary>
+    private async Task CerrarSesion()
+    {
+        await GuardarEstadoBloqueo(false);
+        _reloj?.Dispose();
+        Bloqueada = false;
+        await AuthService.LogoutAsync();
+        Navigation.NavigateTo("/login", forceLoad: true);
+    }
+
+    /// <summary>Guarda o limpia en localStorage la marca de "sesión bloqueada" (Bug 2: sobrevive a F5).</summary>
+    private async Task GuardarEstadoBloqueo(bool bloqueado)
+    {
+        try
+        {
+            if (bloqueado) await LocalStorage.SetItemAsync("sesionBloqueada", true);
+            else await LocalStorage.RemoveItemAsync("sesionBloqueada");
+        }
+        catch { }
+    }
+}

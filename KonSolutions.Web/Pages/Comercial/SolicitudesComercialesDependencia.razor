@@ -1,0 +1,460 @@
+@page "/comercial/solicitudes-comerciales-dependencia"
+@attribute [Authorize]
+@using SolicitudesComercialesModel = KONSolutions.Shared.Models.Comercial.SolicitudesComerciales
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject IAuthService AuthService
+@inject MenuService MenuSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+@* Módulo idéntico a Comercial/SolicitudesComercialesCliente.razor — misma grilla, mismos
+   diálogos — pero filtra por COD_ENTIDAD_DEPENDENCIA de la sesión en vez de COD_ENTIDAD,
+   para ver las solicitudes de la entidad de la que depende el usuario. *@
+
+<PageTitle>@_tituloOpcion · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <MudText Typo="Typo.h4">@_tituloOpcion</MudText>
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema COMERCIAL · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar solicitud comercial..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    @* Logo + DES_ENTIDAD_DEPENDENCIA de la sesión — entre la búsqueda y los botones.
+       El logo va antes del nombre, tal como lo pidió el usuario. *@
+    @if (_imgLogoDependenciaBase64 is not null)
+    {
+        <img src="@($"data:image/png;base64,{_imgLogoDependenciaBase64}")" alt="Logo"
+             style="height:70px;max-width:160px;object-fit:contain;border-radius:4px;" />
+    }
+    @if (!string.IsNullOrWhiteSpace(_desEntidadDependencia))
+    {
+        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text" Icon="@Icons.Material.Filled.AccountTree">
+            @_desEntidadDependencia
+        </MudChip>
+    }
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="solicitudes-comerciales-dependencia" style="position:relative;">
+    <MudDataGrid T="SolicitudesComercialesModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Nº Solicitud" Width="100">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="NUM_SOLICITUD_COMERCIAL" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="SolicitudesComercialesModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.NUM_SOLICITUD_COMERCIAL.ToString())"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.NUM_SOLICITUD_COMERCIAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_SOLICITUD_COMERCIAL" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="SolicitudesComercialesModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_SOLICITUD_COMERCIAL)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_SOLICITUD_COMERCIAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo" Width="130">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_SOLICITUD_COMERICAL" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="SolicitudesComercialesModel" ItemsBase="@Base(2)" ValorDe="@(x=>x.DES_TIPO_SOLICITUD_COMERICAL ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_SOLICITUD_COMERICAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Cliente" Width="150">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_NOMBRE_COMPLETO" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="SolicitudesComercialesModel" ItemsBase="@Base(3)" ValorDe="@(x=>x.DES_NOMBRE_COMPLETO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_NOMBRE_COMPLETO ?? context.Item.COD_ENTIDAD_CLIENTE.ToString())</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Asignado a" Width="150">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_NOMBRE_COMPLETO_RESPONSABLE" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="SolicitudesComercialesModel" ItemsBase="@Base(4)" ValorDe="@(x=>x.DES_NOMBRE_COMPLETO_RESPONSABLE ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(4)" ValoresActivosChanged="@(v=>Filtro(4,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_NOMBRE_COMPLETO_RESPONSABLE ?? "—")</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Asesor Comercial" Width="150">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">Asesor Comercial
+                        <FiltroExcelColumna T="SolicitudesComercialesModel" ItemsBase="@Base(11)" ValorDe="@(x=>x.DES_NOMBRE_COMPLETO_ASESOR_COMERCIAL ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(11)" ValoresActivosChanged="@(v=>Filtro(11,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_NOMBRE_COMPLETO_ASESOR_COMERCIAL ?? "—")</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Fecha Solicitud" Sortable="false" Width="130">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">Fecha Solicitud
+                        <FiltroExcelColumna T="SolicitudesComercialesModel" ItemsBase="@Base(6)" ValorDe="@(x=>x.FEC_SOLICITUD_COMERCIAL?.ToString("dd/MM/yyyy") ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(6)" ValoresActivosChanged="@(v=>Filtro(6,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.FEC_SOLICITUD_COMERCIAL?.ToString("dd/MM/yyyy"))</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Fecha Requerida" Sortable="false" Width="130">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">Fecha Requerida
+                        <FiltroExcelColumna T="SolicitudesComercialesModel" ItemsBase="@Base(7)" ValorDe="@(x=>x.FEC_REQUERIDA_ATENCION?.ToString("dd/MM/yyyy") ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(7)" ValoresActivosChanged="@(v=>Filtro(7,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.FEC_REQUERIDA_ATENCION?.ToString("dd/MM/yyyy"))</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Fecha de Asignación" Sortable="false" Width="130">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">Fecha de Asignación
+                        <FiltroExcelColumna T="SolicitudesComercialesModel" ItemsBase="@Base(8)" ValorDe="@(x=>x.FEC_ASIGNACION_EFECTUADA?.ToString("dd/MM/yyyy") ?? "—")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(8)" ValoresActivosChanged="@(v=>Filtro(8,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.FEC_ASIGNACION_EFECTUADA?.ToString("dd/MM/yyyy") ?? "—")</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Fecha de Atención" Sortable="false" Width="130">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">Fecha de Atención
+                        <FiltroExcelColumna T="SolicitudesComercialesModel" ItemsBase="@Base(9)" ValorDe="@(x=>x.FEC_ATENCION_EFECTUADA?.ToString("dd/MM/yyyy") ?? "—")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(9)" ValoresActivosChanged="@(v=>Filtro(9,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.FEC_ATENCION_EFECTUADA?.ToString("dd/MM/yyyy") ?? "—")</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Temporada/Colección" Sortable="false" Width="170">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">Temporada/Colección
+                        <FiltroExcelColumna T="SolicitudesComercialesModel" ItemsBase="@Base(10)" ValorDe="@(x=>TemporadaColeccionTexto(x))"
+                                            ValoresActivos="_filtros.GetValueOrDefault(10)" ValoresActivosChanged="@(v=>Filtro(10,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@TemporadaColeccionTexto(context.Item)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Estado" Width="130">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="SolicitudesComercialesModel" ItemsBase="@Base(5)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(5)" ValoresActivosChanged="@(v=>Filtro(5,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <div @onclick:stopPropagation="true">
+                        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="SolicitudesComercialesModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    // Entidad de la que depende el usuario en sesión — filtra ambos SP (SHOWALL/SEARCH)
+    // por COD_ENTIDAD_CLIENTE = COD_ENTIDAD_DEPENDENCIA.
+    private decimal? _codEntidadDependencia;
+    private string? _desEntidadDependencia;
+    private string? _imgLogoDependenciaBase64;
+
+    // Título de la pantalla: sale de DES_OPCION_APLICACION (Seguridad › Opciones de
+    // Aplicaciones) si la opción llegó configurada con CodAplicacion/CodOpcionAplicacion;
+    // si no (pantalla abierta sin esos códigos), cae al texto fijo de respaldo.
+    private string _tituloOpcion = "Solicitudes de mi Dependencia";
+
+    private List<SolicitudesComercialesModel> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<SolicitudesComercialesModel> Ordenar(List<SolicitudesComercialesModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.NUM_SOLICITUD_COMERCIAL).ToList() : items.OrderByDescending(x => x.NUM_SOLICITUD_COMERCIAL).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_SOLICITUD_COMERCIAL).ToList() : items.OrderByDescending(x => x.DES_SOLICITUD_COMERCIAL).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_SOLICITUD_COMERICAL).ToList() : items.OrderByDescending(x => x.DES_TIPO_SOLICITUD_COMERICAL).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_NOMBRE_COMPLETO).ToList() : items.OrderByDescending(x => x.DES_NOMBRE_COMPLETO).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_NOMBRE_COMPLETO_RESPONSABLE).ToList() : items.OrderByDescending(x => x.DES_NOMBRE_COMPLETO_RESPONSABLE).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+    private List<SolicitudesComercialesModel> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<SolicitudesComercialesModel> Base(int col) => Aplicar(_items, col);
+
+    private List<SolicitudesComercialesModel> Aplicar(List<SolicitudesComercialesModel> src, int ex)
+    {
+        IEnumerable<SolicitudesComercialesModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.NUM_SOLICITUD_COMERCIAL.ToString())),
+                1 => q.Where(x => v.Contains(x.DES_SOLICITUD_COMERCIAL)),
+                2 => q.Where(x => v.Contains(x.DES_TIPO_SOLICITUD_COMERICAL ?? "")),
+                3 => q.Where(x => v.Contains(x.DES_NOMBRE_COMPLETO ?? "")),
+                4 => q.Where(x => v.Contains(x.DES_NOMBRE_COMPLETO_RESPONSABLE ?? "")),
+                5 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                6 => q.Where(x => v.Contains(x.FEC_SOLICITUD_COMERCIAL?.ToString("dd/MM/yyyy") ?? "")),
+                7 => q.Where(x => v.Contains(x.FEC_REQUERIDA_ATENCION?.ToString("dd/MM/yyyy") ?? "")),
+                8 => q.Where(x => v.Contains(x.FEC_ASIGNACION_EFECTUADA?.ToString("dd/MM/yyyy") ?? "—")),
+                9 => q.Where(x => v.Contains(x.FEC_ATENCION_EFECTUADA?.ToString("dd/MM/yyyy") ?? "—")),
+                10 => q.Where(x => v.Contains(TemporadaColeccionTexto(x))),
+                11 => q.Where(x => v.Contains(x.DES_NOMBRE_COMPLETO_ASESOR_COMERCIAL ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private static string TemporadaColeccionTexto(SolicitudesComercialesModel x) =>
+        string.IsNullOrEmpty(x.DES_TEMPORADA) && string.IsNullOrEmpty(x.DES_COLECCION) ? "—" : $"{x.DES_TEMPORADA} / {x.DES_COLECCION}";
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private async Task Buscar() => _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("COMERCIAL", "SolicitudesComercialesDependencia");
+
+        _tituloOpcion = MenuSvc.DescripcionOpcion(CodAplicacion, CodOpcionAplicacion) ?? _tituloOpcion;
+
+        var sesion = await AuthService.GetSesionAsync();
+        _codEntidadDependencia = sesion?.COD_ENTIDAD_DEPENDENCIA;
+        _desEntidadDependencia = sesion?.DES_ENTIDAD_DEPENDENCIA;
+        // IMG_LOGO_DEPENDENCIA no se persiste en localStorage (ver AuthService.LoginAsync —
+        // rompía el login por exceder la cuota del navegador); se lee de memoria y solo
+        // está disponible justo después de iniciar sesión, no tras un F5.
+        _imgLogoDependenciaBase64 = AuthService.LogoDependenciaEnMemoria is { Length: > 0 } img
+            ? Convert.ToBase64String(img) : null;
+
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("COMERCIAL.SOLICITUDES_COMERCIALES", _onCambio);
+    }
+
+    private async Task Load() => _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+
+    private async Task<List<SolicitudesComercialesModel>> Fetch()
+    {
+        if (_codEntidadDependencia is null) return new();
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<SolicitudesComercialesModel>>>(
+                $"{ApiRoutes.Comercial.SolicitudesComercialesCliente}?codEntidadCliente={_codEntidadDependencia}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(SolicitudesComercialesDependencia), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<SolicitudesComercialesModel>> FetchSearch(string s)
+    {
+        if (_codEntidadDependencia is null) return new();
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<SolicitudesComercialesModel>>>(
+                $"{ApiRoutes.Comercial.SolicitudesComercialesClienteSearch}?codEntidadCliente={_codEntidadDependencia}&search={Uri.EscapeDataString(s)}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(SolicitudesComercialesDependencia), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    // Regla general de la app: una solicitud ANULADA ('ANU') queda congelada — solo consulta.
+    // Se bloquea acá, antes de despachar cualquier acción, para que valga tanto para los
+    // botones CRUD como para los configurables (Asignar Responsable, Reasignar Asesor,
+    // Ayuda Memoria). "Ver Aprobaciones" y la consulta sí siguen permitidas.
+    private bool BloquearPorAnulada(SolicitudesComercialesModel item, BotonTreeviewItem b)
+    {
+        if (!EstadoAlias.EsAnulado(item.COD_ESTADO_ALIAS)) return false;
+        // Ayuda Memoria sí se abre: el diálogo detecta la anulación y se pone en solo
+        // lectura por dentro (se pueden leer las memorias, no crear/editar/eliminar).
+        if (EsBotonVerAprobaciones(b) || EsBotonAyudaMemoria(b) || b.FLG_ACCION_GET == true) return false;
+        Snackbar.Add("La solicitud está anulada: solo se permite consultarla.", Severity.Warning);
+        return true;
+    }
+
+    private Task OnAccionGrilla(SolicitudesComercialesModel item, BotonTreeviewItem b)
+    {
+        if (BloquearPorAnulada(item, b)) return Task.CompletedTask;
+        // "ReasignarAsesor" se chequea primero: su texto ("REASIGNAR ASESOR...") contiene la
+        // substring "ASIGNAR", por lo que caería en EsBotonAsignarResponsable si este se
+        // evaluara antes — "ASESOR" es la palabra distintiva y no aparece en el otro botón.
+        if (EsBotonReasignarAsesor(b)) return AbrirReasignarAsesor(item);
+        if (EsBotonAsignarResponsable(b)) return AbrirAsignarResponsable(item);
+        if (EsBotonAyudaMemoria(b)) return AbrirAyudaMemoria(item);
+        if (EsBotonVerAprobaciones(b)) return AbrirVerAprobaciones(item);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private static bool EsBotonAsignarResponsable(BotonTreeviewItem b)
+    {
+        if (string.Equals(b.DES_METODO, "AsignarResponsable", StringComparison.OrdinalIgnoreCase)) return true;
+        var n = ((b.DES_BOTON_OPCION ?? b.DES_ALIAS ?? "") + " " + (b.DES_TOOLTIPTEXT ?? "")).ToUpperInvariant();
+        return n.Contains("ASIGNAR") || n.Contains("RESPONSABLE");
+    }
+
+    // Etiqueta de Búsqueda para "Asignar Responsable" en este módulo — resuelve el Área/
+    // personas asignables como Responsable vía PROC_ADMINISTRACION_AREAS_CARGOS_ENTIDADES.
+    private const string CodEtiquetaBusquedaResponsable = "DISEÑADORES_MUESTRAS";
+
+    private async Task AbrirAsignarResponsable(SolicitudesComercialesModel item)
+    {
+        var dlg = await DialogService.ShowAsync<SolicitudesComercialesAsignarResponsableDialog>(
+            "Asignar Responsable",
+            new DialogParameters
+            {
+                ["Item"] = item,
+                ["CodAplicacion"] = CodAplicacion,
+                ["CodOpcionAplicacion"] = CodOpcionAplicacion,
+                ["CodEtiquetaBusqueda"] = CodEtiquetaBusquedaResponsable
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    // Mismo criterio que EsBotonAsignarResponsable, para el botón "Reasignar Asesor Comercial"
+    // configurable (ADMINISTRACION/SEGURIDAD.APLICACIONES_OPCIONES_BOTONES).
+    private static bool EsBotonReasignarAsesor(BotonTreeviewItem b)
+    {
+        if (string.Equals(b.DES_METODO, "ReasignaAsesor", StringComparison.OrdinalIgnoreCase)) return true;
+        var n = ((b.DES_BOTON_OPCION ?? b.DES_ALIAS ?? "") + " " + (b.DES_TOOLTIPTEXT ?? "")).ToUpperInvariant();
+        return n.Contains("ASESOR");
+    }
+
+    // Etiqueta de Búsqueda para "Reasignar Asesor Comercial" en este módulo — resuelve el
+    // Área/personas asignables como asesor comercial vía PROC_ADMINISTRACION_AREAS_CARGOS_
+    // ENTIDADES. Distinta de la de "Asignar Responsable" en esta misma pantalla.
+    private const string CodEtiquetaBusquedaAsesor = "EJECUTIVO_VENTAS_GENERAL";
+
+    private async Task AbrirReasignarAsesor(SolicitudesComercialesModel item)
+    {
+        var dlg = await DialogService.ShowAsync<SolicitudesComercialesReasignarAsesorDialog>(
+            "Reasignar Asesor Comercial",
+            new DialogParameters
+            {
+                ["Item"] = item,
+                ["CodEtiquetaBusqueda"] = CodEtiquetaBusquedaAsesor
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    // Botón "Ayuda Memoria" — bitácora libre de la solicitud (COMERCIAL.SOLICITUDES_
+    // COMERCIALES_MEMORIAS). "MEMORIA" es palabra propia, sin choque con los otros botones.
+    private static bool EsBotonAyudaMemoria(BotonTreeviewItem b)
+    {
+        if (string.Equals(b.DES_METODO, "AyudaMemoria", StringComparison.OrdinalIgnoreCase)) return true;
+        var n = ((b.DES_BOTON_OPCION ?? b.DES_ALIAS ?? "") + " " + (b.DES_TOOLTIPTEXT ?? "")).ToUpperInvariant();
+        return n.Contains("MEMORIA");
+    }
+
+    private async Task AbrirAyudaMemoria(SolicitudesComercialesModel item)
+    {
+        var dlg = await DialogService.ShowAsync<SolicitudesComercialesMemoriasDialog>(
+            "Ayuda Memoria",
+            new DialogParameters { ["Item"] = item },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        await dlg.Result;
+    }
+
+    // Botón "Ver Aprobaciones" — notificaciones generadas por la solicitud, solo consulta.
+    // "APROBACION"/"NOTIFICAC" son palabras propias, sin choque con los otros botones.
+    private static bool EsBotonVerAprobaciones(BotonTreeviewItem b)
+    {
+        if (string.Equals(b.DES_METODO, "VerAprobaciones", StringComparison.OrdinalIgnoreCase)) return true;
+        var n = ((b.DES_BOTON_OPCION ?? b.DES_ALIAS ?? "") + " " + (b.DES_TOOLTIPTEXT ?? "")).ToUpperInvariant();
+        return n.Contains("APROBACION") || n.Contains("NOTIFICAC");
+    }
+
+    private async Task AbrirVerAprobaciones(SolicitudesComercialesModel item)
+    {
+        var dlg = await DialogService.ShowAsync<SolicitudesComercialesNotificacionesDialog>(
+            "Aprobaciones",
+            new DialogParameters { ["Item"] = item },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        await dlg.Result;
+    }
+
+    private async Task Abrir(SolicitudesComercialesModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva solicitud comercial",
+            CrudModo.Delete => $"Eliminar · {item?.DES_SOLICITUD_COMERCIAL}",
+            CrudModo.Read   => $"Consultar · {item?.DES_SOLICITUD_COMERCIAL}",
+            _               => $"Editar · {item?.DES_SOLICITUD_COMERCIAL}"
+        };
+        var dlg = await DialogService.ShowAsync<SolicitudesComercialesDialog>(titulo,
+            new DialogParameters
+            {
+                ["Item"] = item,
+                ["Modo"] = modo,
+                // Nueva solicitud desde esta pantalla: siempre para la entidad de dependencia
+                // de la sesión — precargada y deshabilitada en el diálogo.
+                ["CodEntidadClienteFijo"] = modo == CrudModo.Create ? _codEntidadDependencia : null
+            },
+            new DialogOptions { MaxWidth = MaxWidth.False, FullWidth = false, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    public void Dispose() => Cambios.Desuscribir("COMERCIAL.SOLICITUDES_COMERCIALES", _onCambio ?? (() => Task.CompletedTask));
+}

@@ -1,0 +1,78 @@
+@using KONSolutions.Shared.Models.Estandar
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_DOCUMENTO_IDENTIDAD" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="ESTANDAR.TIPOS_DOCUMENTO_IDENTIDAD" Columna="DES_TIPO_DOCUMENTO_IDENTIDAD"
+                        @bind-Value="_model.DES_TIPO_DOCUMENTO_IDENTIDAD"
+                        Disabled="_readonly" Obligatorio="true" />
+            <div class="my-3">
+                <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)"
+                             Label="Ícono" ReadOnly="_readonly" RemoveBackground="true" />
+            </div>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposDocumentoIdentidad? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposDocumentoIdentidad _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(TiposDocumentoIdentidad m) =>
+        _model = new TiposDocumentoIdentidad
+        {
+            COD_TIPO_DOCUMENTO_IDENTIDAD = m.COD_TIPO_DOCUMENTO_IDENTIDAD,
+            DES_TIPO_DOCUMENTO_IDENTIDAD = m.DES_TIPO_DOCUMENTO_IDENTIDAD,
+            IMG_ICONO = m.IMG_ICONO
+        };
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposDocumentoIdentidad>($"{ApiRoutes.Estandar.TiposDocumentoIdentidad}/{_model.COD_TIPO_DOCUMENTO_IDENTIDAD}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Estandar.TiposDocumentoIdentidad}/{_model.COD_TIPO_DOCUMENTO_IDENTIDAD}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TipoDocumentoIdentidadDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var resp = _esNuevo
+            ? await Http.PostAsJsonAsync(ApiRoutes.Estandar.TiposDocumentoIdentidad, _model)
+            : await Http.PutAsJsonAsync($"{ApiRoutes.Estandar.TiposDocumentoIdentidad}/{_model.COD_TIPO_DOCUMENTO_IDENTIDAD}", _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TipoDocumentoIdentidadDialog), nameof(Submit));
+    }
+}

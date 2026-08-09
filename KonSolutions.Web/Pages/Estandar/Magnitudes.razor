@@ -1,0 +1,430 @@
+@page "/estandar/magnitudes"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Estandar
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject ErrorLogService ErrorLog
+@inject MenuService MenuSvc
+@implements IDisposable
+
+<PageTitle>Magnitudes · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Magnitudes / Unidades de Medida" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_tiposVisibles.Count tipos</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTipo" OnSearch="FiltrarTipo" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltrosTipo" HasFilters="@(_filtrosTipo.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="LoadTipos" />
+        <GridPrintButton Titulo="Magnitudes"
+                         Headers="@(new List<string>{"Código","Descripción"})"
+                         Rows="@(_tipos.Select(x=>new List<string>{x.COD_TIPO_UNIDAD_MEDIDA,x.DES_TIPO_UNIDAD_MEDIDA}).ToList())" />
+        <AccionesBotones CodAplicacion="@_codApTipo" CodOpcionAplicacion="@_codOpTipo"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+@* ── MAESTRO: Tipos de Unidad de Medida ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="mb-4">
+    <div data-resizable-grid="magnitudes-maestro" data-default-height="280" style="position:relative;">
+    <MudDataGrid T="TiposUnidadMedida" Items="_tiposVisibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true"
+                 RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre"
+                 RowClick="OnTipoRowClick" RowClassFunc="@FilaTipoSeleccionada">
+        <Columns>
+            <TemplateColumn Title="Ícono" Sortable="false" Width="56px">
+                <CellTemplate><GridImage Image="context.Item.IMG_ICONO" /></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Código" Width="@Limites.ColWidth("ESTANDAR.TIPOS_UNIDAD_MEDIDA","COD_TIPO_UNIDAD_MEDIDA",80,180)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_TIPO_UNIDAD_MEDIDA" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TiposUnidadMedida" ItemsBase="@TiposBase(0)" ValorDe="@(x=>x.COD_TIPO_UNIDAD_MEDIDA)"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroTipo(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_UNIDAD_MEDIDA</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("ESTANDAR.TIPOS_UNIDAD_MEDIDA","DES_TIPO_UNIDAD_MEDIDA",150,400)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_UNIDAD_MEDIDA" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TiposUnidadMedida" ItemsBase="@TiposBase(1)" ValorDe="@(x=>x.DES_TIPO_UNIDAD_MEDIDA)"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroTipo(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_UNIDAD_MEDIDA</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var tipo = context.Item; }
+                    <AccionesBotones CodAplicacion="@_codApTipo" CodOpcionAplicacion="@_codOpTipo"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaTipo(tipo,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TiposUnidadMedida" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@* ── DETALLE: Unidades del tipo seleccionado ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div class="d-flex align-center justify-space-between pa-3" style="border-bottom:1px solid var(--line);">
+        <div class="d-flex align-center gap-3">
+            @if (_tipoSel?.IMG_ICONO is { Length: > 0 })
+            {
+                <MudImage Src="@($"data:image/svg+xml;base64,{Convert.ToBase64String(_tipoSel.IMG_ICONO)}")"
+                          Width="40" Height="40" Style="object-fit:contain;border-radius:4px;" />
+            }
+            <div>
+                <MudText Typo="Typo.h6">Unidades de medida</MudText>
+                <MudText Class="mono" Style="opacity:.5;font-size:.78rem;">
+                    @if (_tipoSel is not null) { <text>Tipo: @_tipoSel.DES_TIPO_UNIDAD_MEDIDA · @_unidades.Count unidades</text> }
+                    else { <text>Seleccione un tipo de magnitud arriba</text> }
+                </MudText>
+            </div>
+        </div>
+        <div class="d-flex gap-2">
+            <GridRefreshButton OnRefresh="LoadUnidades" />
+            <GridClearFiltersButton OnClear="LimpiarFiltrosUnidad" HasFilters="@(_filtrosUnidad.Any(f=>f.Value is not null))" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       Disabled="_tipoSel is null" OnClick="@(() => AbrirUnidad(null))" Size="Size.Small">Nueva unidad</MudButton>
+        </div>
+    </div>
+
+    @if (_tipoSel is null)
+    {
+        <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione un tipo de magnitud para ver sus unidades.</MudText>
+    }
+    else if (_loadingUnidades)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else
+    {
+        <div data-resizable-grid="magnitudes-detalle" style="position:relative;">
+        <MudDataGrid T="UnidadesMedida" Items="_unidadesVisibles" Dense="true" Hover="true" Striped="true"
+                     Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+            <Columns>
+                <TemplateColumn Title="Ícono" Sortable="false" Width="56px">
+                    <CellTemplate><GridImage Image="context.Item.IMG_ICONO" /></CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Código" Width="@Limites.ColWidth("ESTANDAR.UNIDADES_MEDIDA","COD_UNIDAD_MEDIDA",60,140)">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_UNIDAD_MEDIDA" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                            <FiltroExcelColumna T="UnidadesMedida" ItemsBase="@UnidadesBase(0)" ValorDe="@(x=>x.COD_UNIDAD_MEDIDA)"
+                                                ValoresActivos="_filtrosUnidad.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroUnidad(0,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.COD_UNIDAD_MEDIDA</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("ESTANDAR.UNIDADES_MEDIDA","DES_UNIDAD_MEDIDA",130,350)">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_UNIDAD_MEDIDA" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                            <FiltroExcelColumna T="UnidadesMedida" ItemsBase="@UnidadesBase(1)" ValorDe="@(x=>x.DES_UNIDAD_MEDIDA)"
+                                                ValoresActivos="_filtrosUnidad.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroUnidad(1,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.DES_UNIDAD_MEDIDA</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Símbolo" Width="80px">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_SIMBOLO" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                            <FiltroExcelColumna T="UnidadesMedida" ItemsBase="@UnidadesBase(2)" ValorDe="@(x=>x.COD_SIMBOLO??"")"
+                                                ValoresActivos="_filtrosUnidad.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>FiltroUnidad(2,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate><MudText Style="font-weight:600;">@context.Item.COD_SIMBOLO</MudText></CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Cód. SUNAT" Width="@Limites.ColWidth("ESTANDAR.UNIDADES_MEDIDA","COD_UNIDAD_MEDIDA_SUNAT",80,160)">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_UNIDAD_MEDIDA_SUNAT" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                            <FiltroExcelColumna T="UnidadesMedida" ItemsBase="@UnidadesBase(3)" ValorDe="@(x=>x.COD_UNIDAD_MEDIDA_SUNAT??"")"
+                                                ValoresActivos="_filtrosUnidad.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>FiltroUnidad(3,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.COD_UNIDAD_MEDIDA_SUNAT</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false">
+                    <CellTemplate>
+                        @{ var unidad = context.Item; }
+                        <AccionesBotones CodAplicacion="@_codApUnidad" CodOpcionAplicacion="@_codOpUnidad"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaUnidad(unidad,b))" />
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;">Este tipo no tiene unidades aún.</MudText></NoRecordsContent>
+            <PagerContent><MudDataGridPager T="UnidadesMedida" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    }
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio0;
+    private Func<Task>? _onCambio1;
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private string _codApTipo = "", _codOpTipo = "";
+    private string _codApUnidad = "", _codOpUnidad = "";
+
+    private void ResolverCodigosPorSeccion()
+    {
+        (_codApTipo, _codOpTipo)     = ResolverCod("Estandar/Magnitudes.razor");
+        (_codApUnidad, _codOpUnidad) = ResolverCod("Estandar/UnidadesMedida.razor");
+    }
+
+    private (string App, string Opcion) ResolverCod(string formulario)
+    {
+        var r = MenuSvc.BuscarCodigosPorFormulario(formulario);
+        return r is null ? (CodAplicacion, CodOpcionAplicacion) : (r.Value.CodAplicacion, r.Value.CodOpcionAplicacion);
+    }
+
+    // ── Maestro (Tipos) ──
+    private List<TiposUnidadMedida> _tipos = new();
+    private TiposUnidadMedida? _tipoSel;
+    private string _searchTipo = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtrosTipo = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<TiposUnidadMedida> Ordenar_g0(List<TiposUnidadMedida> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_UNIDAD_MEDIDA).ToList() : items.OrderByDescending(x => x.COD_TIPO_UNIDAD_MEDIDA).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_UNIDAD_MEDIDA).ToList() : items.OrderByDescending(x => x.DES_TIPO_UNIDAD_MEDIDA).ToList(),
+        _ => items
+    };
+    private List<UnidadesMedida> Ordenar_g1(List<UnidadesMedida> items) => _ordenColumna switch
+    {
+        2 => _ordenAscendente ? items.OrderBy(x => x.COD_UNIDAD_MEDIDA).ToList() : items.OrderByDescending(x => x.COD_UNIDAD_MEDIDA).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_UNIDAD_MEDIDA).ToList() : items.OrderByDescending(x => x.DES_UNIDAD_MEDIDA).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.COD_SIMBOLO).ToList() : items.OrderByDescending(x => x.COD_SIMBOLO).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.COD_UNIDAD_MEDIDA_SUNAT).ToList() : items.OrderByDescending(x => x.COD_UNIDAD_MEDIDA_SUNAT).ToList(),
+        _ => items
+    };
+    private List<TiposUnidadMedida> _tiposVisibles => Ordenar_g0(AplicarTipos(_tipos, -1));
+    private List<TiposUnidadMedida> TiposBase(int col) => AplicarTipos(_tipos, col);
+
+    private List<TiposUnidadMedida> AplicarTipos(List<TiposUnidadMedida> src, int ex)
+    {
+        IEnumerable<TiposUnidadMedida> q = src;
+        foreach (var (c, v) in _filtrosTipo) { if (c == ex || v is null) continue;
+            q = c switch { 0=>q.Where(x=>v.Contains(x.COD_TIPO_UNIDAD_MEDIDA)), 1=>q.Where(x=>v.Contains(x.DES_TIPO_UNIDAD_MEDIDA)), _=>q }; }
+        return q.ToList();
+    }
+
+    private void FiltroTipo(int c, HashSet<string>? v)
+    {
+        _filtrosTipo[c] = v;
+        if (_tipoSel is not null && !_tiposVisibles.Any(t => t.COD_TIPO_UNIDAD_MEDIDA == _tipoSel.COD_TIPO_UNIDAD_MEDIDA))
+            { _tipoSel = null; _unidades = new(); }
+        StateHasChanged();
+    }
+
+    private void LimpiarFiltrosTipo() { foreach (var k in _filtrosTipo.Keys.ToList()) _filtrosTipo[k] = null; StateHasChanged(); }
+    private async Task FiltrarTipo() => _tipos = string.IsNullOrWhiteSpace(_searchTipo) ? await FetchTipos() : await FetchTiposSearch(_searchTipo);
+
+    private string FilaTipoSeleccionada(TiposUnidadMedida item, int _)
+        => _tipoSel?.COD_TIPO_UNIDAD_MEDIDA == item.COD_TIPO_UNIDAD_MEDIDA ? "fila-seleccionada" : "";
+
+    // ── Detalle (Unidades) ──
+    private List<UnidadesMedida> _unidades = new();
+    private bool _loadingUnidades;
+    private readonly Dictionary<int, HashSet<string>?> _filtrosUnidad = new();
+    private List<UnidadesMedida> _unidadesVisibles => Ordenar_g1(AplicarUnidades(_unidades, -1));
+    private List<UnidadesMedida> UnidadesBase(int col) => AplicarUnidades(_unidades, col);
+
+    private List<UnidadesMedida> AplicarUnidades(List<UnidadesMedida> src, int ex)
+    {
+        IEnumerable<UnidadesMedida> q = src;
+        foreach (var (c, v) in _filtrosUnidad) { if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_UNIDAD_MEDIDA)),
+                1 => q.Where(x => v.Contains(x.DES_UNIDAD_MEDIDA)),
+                2 => q.Where(x => v.Contains(x.COD_SIMBOLO ?? "")),
+                3 => q.Where(x => v.Contains(x.COD_UNIDAD_MEDIDA_SUNAT ?? "")),
+                _ => q
+            }; }
+        return q.ToList();
+    }
+
+    private void FiltroUnidad(int c, HashSet<string>? v) { _filtrosUnidad[c] = v; StateHasChanged(); }
+    private void LimpiarFiltrosUnidad() { foreach (var k in _filtrosUnidad.Keys.ToList()) _filtrosUnidad[k] = null; StateHasChanged(); }
+
+    // ── Ciclo de vida ──
+    protected override async Task OnInitializedAsync()
+    {
+        ResolverCodigosPorSeccion();
+        await AccessLog.LogNavegacionAsync("ESTANDAR", "Magnitudes");
+        await LoadTipos();
+        _onCambio0 = async () => await InvokeAsync(async () => { await LoadTipos(); StateHasChanged(); });
+        Cambios.Suscribir("ESTANDAR.TIPOS_UNIDAD_MEDIDA", _onCambio0);
+        _onCambio1 = async () => await InvokeAsync(async () => { await LoadUnidades(); StateHasChanged(); });
+        Cambios.Suscribir("ESTANDAR.UNIDADES_MEDIDA", _onCambio1);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => AbrirTipo(null, CrudModo.Create));
+
+    private async Task LoadTipos()
+    {
+        _tipos = await FetchTipos();
+        if (_tipos.Any() && _tipoSel is null)
+        {
+            _tipoSel = _tipos.First();
+            await LoadUnidades();
+        }
+    }
+
+    private async Task LoadUnidades()
+    {
+        if (_tipoSel is null) { _unidades = new(); return; }
+        _loadingUnidades = true;
+        StateHasChanged();
+        var todas = await FetchUnidades();
+        _unidades = todas.Where(u => u.COD_TIPO_UNIDAD_MEDIDA == _tipoSel.COD_TIPO_UNIDAD_MEDIDA).ToList();
+        _loadingUnidades = false;
+    }
+
+    private async Task<List<TiposUnidadMedida>> FetchTipos()
+    {
+        try { var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposUnidadMedida>>>(ApiRoutes.Estandar.TiposUnidadMedida); return r?.Data ?? new(); }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Magnitudes), nameof(FetchTipos));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<TiposUnidadMedida>> FetchTiposSearch(string s)
+    {
+        try { var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposUnidadMedida>>>($"{ApiRoutes.Estandar.TiposUnidadMedida}/search?search={Uri.EscapeDataString(s)}"); return r?.Data ?? new(); }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Magnitudes), nameof(FetchTiposSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<UnidadesMedida>> FetchUnidades()
+    {
+        try { var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<UnidadesMedida>>>(ApiRoutes.Estandar.UnidadesMedida); return r?.Data ?? new(); }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Magnitudes), nameof(FetchUnidades));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    // ── Eventos de fila maestro ──
+    private async Task OnTipoRowClick(DataGridRowClickEventArgs<TiposUnidadMedida> args)
+    {
+        _tipoSel = args.Item;
+        await LoadUnidades();
+    }
+
+    // ── Acciones maestro ──
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirTipo(null, CrudModo.Create);
+        if (b.DES_METODO == "UnidadesMedidaDownloadSnippet") return DescargarDesdeSnippet(b);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaTipo(TiposUnidadMedida item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirTipo(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirTipo(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirTipo(TiposUnidadMedida? item, CrudModo modo)
+    {
+        var titulo = modo switch { CrudModo.Create=>"Nueva magnitud", CrudModo.Delete=>$"Eliminar · {item?.DES_TIPO_UNIDAD_MEDIDA}", _=>$"Editar · {item?.DES_TIPO_UNIDAD_MEDIDA}" };
+        var dlg = await DialogService.ShowAsync<MagnitudesDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadTipos();
+    }
+
+    // ── Acciones detalle ──
+    private Task OnAccionGrillaUnidad(UnidadesMedida item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirUnidad(item);
+        if (b.FLG_ACCION_DELETE == true) return EliminarUnidad(item);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirUnidad(UnidadesMedida? item)
+    {
+        if (_tipoSel is null) return;
+        var titulo = item is null ? "Nueva unidad de medida" : $"Editar · {item.DES_UNIDAD_MEDIDA}";
+        var dlg = await DialogService.ShowAsync<UnidadMedidaDialog>(titulo,
+            new DialogParameters
+            {
+                ["Item"]                   = item,
+                ["Modo"]                   = item is null ? CrudModo.Create : CrudModo.Update,
+                ["CodTipoUnidadMedida"]    = _tipoSel.COD_TIPO_UNIDAD_MEDIDA,
+                ["DesTipoUnidadMedida"]    = _tipoSel.DES_TIPO_UNIDAD_MEDIDA
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadUnidades();
+    }
+
+    private async Task EliminarUnidad(UnidadesMedida item)
+    {
+        var confirm = await DialogService.ShowMessageBox("Confirmar",
+            $"¿Eliminar la unidad '{item.DES_UNIDAD_MEDIDA}'?", yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirm != true) return;
+        var rd = await Http.DeleteAsync($"{ApiRoutes.Estandar.UnidadesMedida}/{Uri.EscapeDataString(item.COD_UNIDAD_MEDIDA)}");
+        if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); await LoadUnidades(); }
+        else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(Magnitudes), nameof(EliminarUnidad), "No se pudo eliminar el registro");
+    }
+
+    private async Task DescargarDesdeSnippet(BotonTreeviewItem b)
+    {
+        try
+        {
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Estandar.UnidadesMedidaDownloadSnippet,
+                new { b.COD_APLICACION, b.COD_OPCION_APLICACION, b.COD_BOTON_OPCION });
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Magnitudes y unidades cargadas correctamente.", Severity.Success);
+                await LoadTipos();
+            }
+            else
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(Magnitudes), nameof(DescargarDesdeSnippet));
+            }
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(Magnitudes)); }
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ESTANDAR.TIPOS_UNIDAD_MEDIDA", _onCambio0 ?? (() => Task.CompletedTask));
+        Cambios.Desuscribir("ESTANDAR.UNIDADES_MEDIDA", _onCambio1 ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

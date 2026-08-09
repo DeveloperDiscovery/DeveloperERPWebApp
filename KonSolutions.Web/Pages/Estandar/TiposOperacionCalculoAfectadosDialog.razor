@@ -1,0 +1,115 @@
+@using AfectadoModel = KONSolutions.Shared.Models.Comercial.TiposOperacionCalculoAfectados
+@using CalculoRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@DesAfectadoTexto" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <MudTextField Value="@CodCalculoTexto" Label="Tipo de valor de cálculo"
+                          Variant="Variant.Outlined" Disabled="true" Class="mb-3" />
+            <AriaCombo TItem="ComboboxItem" Items="_tiposValorCalculo"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       @bind-Value="_model.COD_TIPO_VALOR_CALCULO_AFECTADO"
+                       Label="Tipo de valor de cálculo afectado" Disabled="@(!_esNuevo || _readonly)" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public AfectadoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public string CodClaseOperacion { get; set; } = "";
+    [Parameter] public string CodTipoOperacion { get; set; } = "";
+    [Parameter] public string CodTipoValorCalculo { get; set; } = "";
+    [Parameter] public string DesTipoValorCalculo { get; set; } = "";
+
+    private AfectadoModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+    private string CodCalculoTexto => string.IsNullOrEmpty(DesTipoValorCalculo) ? CodTipoValorCalculo : $"{CodTipoValorCalculo} - {DesTipoValorCalculo}";
+    private string DesAfectadoTexto
+    {
+        get
+        {
+            var match = _tiposValorCalculo.FirstOrDefault(t => t.Id == _model.COD_TIPO_VALOR_CALCULO_AFECTADO);
+            return match is null ? _model.COD_TIPO_VALOR_CALCULO_AFECTADO : $"{match.Id} - {match.Texto}";
+        }
+    }
+
+    private List<ComboboxItem> _tiposValorCalculo = new();
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        else
+        {
+            _model.COD_CLASE_OPERACION    = CodClaseOperacion;
+            _model.COD_TIPO_OPERACION     = CodTipoOperacion;
+            _model.COD_TIPO_VALOR_CALCULO = CodTipoValorCalculo;
+        }
+    }
+
+    private void MapearDesdeModelo(AfectadoModel m) =>
+        _model = new AfectadoModel
+        {
+            COD_CLASE_OPERACION              = m.COD_CLASE_OPERACION,
+            COD_TIPO_OPERACION               = m.COD_TIPO_OPERACION,
+            COD_TIPO_VALOR_CALCULO           = m.COD_TIPO_VALOR_CALCULO,
+            COD_TIPO_VALOR_CALCULO_AFECTADO  = m.COD_TIPO_VALOR_CALCULO_AFECTADO,
+        };
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<AfectadoModel>(
+            $"{CalculoRoute.TiposOperacionCalculoAfectados}/{Uri.EscapeDataString(_model.COD_CLASE_OPERACION)}/{Uri.EscapeDataString(_model.COD_TIPO_OPERACION)}/{Uri.EscapeDataString(_model.COD_TIPO_VALOR_CALCULO)}/{Uri.EscapeDataString(_model.COD_TIPO_VALOR_CALCULO_AFECTADO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        var r = await Http.SafeGetAsync<List<ComboboxItem>>(CalculoRoute.TiposValorCalculoCombobox);
+        _tiposValorCalculo = r ?? new();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = CalculoRoute.TiposOperacionCalculoAfectados;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync(
+                $"{ruta}/{Uri.EscapeDataString(_model.COD_CLASE_OPERACION)}/{Uri.EscapeDataString(_model.COD_TIPO_OPERACION)}/{Uri.EscapeDataString(_model.COD_TIPO_VALOR_CALCULO)}/{Uri.EscapeDataString(_model.COD_TIPO_VALOR_CALCULO_AFECTADO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposOperacionCalculoAfectadosDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new
+        {
+            _model.COD_CLASE_OPERACION, _model.COD_TIPO_OPERACION, _model.COD_TIPO_VALOR_CALCULO,
+            _model.COD_TIPO_VALOR_CALCULO_AFECTADO
+        };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposOperacionCalculoAfectadosDialog), nameof(Submit));
+    }
+}

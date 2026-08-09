@@ -1,0 +1,301 @@
+@page "/seguridad/asignacion-roles"
+@attribute [Authorize]
+@inject AsignacionRolService Service
+@inject UsuarioService UsuarioSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject LimitesService Limites
+@inject ConfigService ConfigSvc
+
+<PageTitle>Asignación de Roles · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <TituloPagina Fallback="Asignación de Roles a Usuarios" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema SEGURIDAD · @_roles.Count roles</MudText>
+    </div>
+</div>
+
+@* ── MAESTRO: Roles ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="mb-4">
+    <MudToolBar Dense="true">
+        <MudText Typo="Typo.h6">Roles</MudText>
+        <MudSpacer />
+        <GridClearFiltersButton OnClear="LimpiarFiltrosRoles" HasFilters="@(_filtrosRoles.Any(f => f.Value is not null))" />
+        <GridRefreshButton OnRefresh="RecargarRoles" />
+    </MudToolBar>
+    <div data-resizable-grid="asignacion-roles-maestro" data-default-height="300" style="position:relative;">
+    <MudDataGrid T="ComboboxItem" Items="_rolesVisibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowClick="OnRolRowClick"
+                 RowClassFunc="@FilaSeleccionadaRol" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Texto="Código" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="ComboboxItem" ItemsBase="@BaseSinEstaColumnaRol(0)"
+                                            ValorDe="@(x => x.Id ?? "")"
+                                            ValoresActivos="_filtrosRoles.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltroRol(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.Id</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Texto="Descripción" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="ComboboxItem" ItemsBase="@BaseSinEstaColumnaRol(1)"
+                                            ValorDe="@(x => x.Texto ?? "")"
+                                            ValoresActivos="_filtrosRoles.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltroRol(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.Texto</CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin roles.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="ComboboxItem" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@* ── DETALLE: Usuarios del rol ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div class="d-flex align-center justify-space-between pa-3" style="border-bottom:1px solid var(--line);">
+        <div>
+            <MudText Typo="Typo.h6">Usuarios asignados</MudText>
+            <MudText Class="mono" Style="opacity:.5;font-size:.78rem;">
+                @if (_rolSel is not null) { <text>Rol: @_rolSel.Texto · @_usuarios.Count usuarios</text> }
+                else { <text>Seleccione un rol arriba</text> }
+            </MudText>
+        </div>
+        <div class="d-flex align-center gap-2">
+            <GridClearFiltersButton OnClear="LimpiarFiltrosUsuarios" HasFilters="@(_filtrosUsuarios.Any(f => f.Value is not null))" />
+            <GridRefreshButton OnRefresh="LoadUsuarios" />
+            <AccionesBotones CodAplicacion="@CodAplicacion"
+                             CodOpcionAplicacion="@CodOpcionAplicacion"
+                             Zona="@AccionesBotones.ZonaBotones.Header"
+                             OnAccion="OnAccionHeader" />
+        </div>
+    </div>
+
+    @if (_rolSel is null)
+    {
+        <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione un rol para ver sus usuarios.</MudText>
+    }
+    else if (_loadingUsuarios)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else
+    {
+        <div data-resizable-grid="asignacion-roles-hija" style="position:relative;">
+        <MudDataGrid T="RolAsignado" Items="_usuariosVisibles" Dense="true" Hover="true" Striped="true"
+                     Height="100%" FixedHeader="true"
+                     RowClick="@(e => _filaFocoUsuario = e.Item)" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+            <Columns>
+                <TemplateColumn Sortable="false" Title="Usuario" Width="@Limites.ColWidth("SEGURIDAD.USUARIOS","COD_USUARIO",60,150)">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="COD_USUARIO" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                            <FiltroExcelColumna T="RolAsignado" ItemsBase="@BaseSinEstaColumnaUsuario(0)"
+                                                ValorDe="@(x => x.COD_USUARIO ?? "")"
+                                                ValoresActivos="_filtrosUsuarios.GetValueOrDefault(0)"
+                                                ValoresActivosChanged="@(v => AplicarFiltroUsuario(0, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.COD_USUARIO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Nombre" Width="@Limites.ColWidth("SEGURIDAD.USUARIOS","DES_USUARIO",120,350)">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="DES_USUARIO" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                            <FiltroExcelColumna T="RolAsignado" ItemsBase="@BaseSinEstaColumnaUsuario(1)"
+                                                ValorDe="@(x => x.DES_USUARIO ?? "")"
+                                                ValoresActivos="_filtrosUsuarios.GetValueOrDefault(1)"
+                                                ValoresActivosChanged="@(v => AplicarFiltroUsuario(1, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.DES_USUARIO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false">
+                    <CellTemplate>
+                        @{ var usuario = context.Item; }
+                        <AccionesBotones CodAplicacion="@CodAplicacion"
+                                         CodOpcionAplicacion="@CodOpcionAplicacion"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                         OnAccion="@(b => OnAccionGrilla(usuario, b))" />
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;">Este rol no tiene usuarios asignados.</MudText></NoRecordsContent>
+            <PagerContent><MudDataGridPager T="RolAsignado" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    }
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<ComboboxItem> _roles = new();
+    private List<RolAsignado> _usuarios = new();
+    private ComboboxItem? _rolSel;
+    private RolAsignado? _filaFocoUsuario;
+    private bool _loadingUsuarios;
+
+    // Filtros grid roles
+    private readonly Dictionary<int, HashSet<string>?> _filtrosRoles = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<ComboboxItem> Ordenar_g0(List<ComboboxItem> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.Id).ToList() : items.OrderByDescending(x => x.Id).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.Texto).ToList() : items.OrderByDescending(x => x.Texto).ToList(),
+        _ => items
+    };
+    private List<RolAsignado> Ordenar_g1(List<RolAsignado> items) => _ordenColumna switch
+    {
+        2 => _ordenAscendente ? items.OrderBy(x => x.COD_USUARIO).ToList() : items.OrderByDescending(x => x.COD_USUARIO).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_USUARIO).ToList() : items.OrderByDescending(x => x.DES_USUARIO).ToList(),
+        _ => items
+    };
+    private List<ComboboxItem> _rolesVisibles => Ordenar_g0(AplicarTodosRoles(_roles, -1));
+    private List<ComboboxItem> BaseSinEstaColumnaRol(int col) => AplicarTodosRoles(_roles, col);
+
+    private List<ComboboxItem> AplicarTodosRoles(List<ComboboxItem> origen, int excluir)
+    {
+        IEnumerable<ComboboxItem> q = origen;
+        foreach (var (col, vals) in _filtrosRoles)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.Id ?? "")),
+                1 => q.Where(x => vals.Contains(x.Texto ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltroRol(int col, HashSet<string>? vals)
+    {
+        _filtrosRoles[col] = vals;
+        // Cascada: si el rol seleccionado quedó oculto, deseleccionarlo
+        if (_rolSel is not null && !_rolesVisibles.Any(r => r.Id == _rolSel.Id))
+        { _rolSel = null; _usuarios = new(); }
+        StateHasChanged();
+    }
+    private void LimpiarFiltrosRoles() { foreach (var k in _filtrosRoles.Keys.ToList()) _filtrosRoles[k] = null; StateHasChanged(); }
+
+    // Filtros grid usuarios
+    private readonly Dictionary<int, HashSet<string>?> _filtrosUsuarios = new();
+    private List<RolAsignado> _usuariosVisibles => Ordenar_g1(AplicarTodosUsuarios(_usuarios, -1));
+    private List<RolAsignado> BaseSinEstaColumnaUsuario(int col) => AplicarTodosUsuarios(_usuarios, col);
+
+    private List<RolAsignado> AplicarTodosUsuarios(List<RolAsignado> origen, int excluir)
+    {
+        IEnumerable<RolAsignado> q = origen;
+        foreach (var (col, vals) in _filtrosUsuarios)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.COD_USUARIO ?? "")),
+                1 => q.Where(x => vals.Contains(x.DES_USUARIO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltroUsuario(int col, HashSet<string>? vals) { _filtrosUsuarios[col] = vals; StateHasChanged(); }
+    private void LimpiarFiltrosUsuarios() { foreach (var k in _filtrosUsuarios.Keys.ToList()) _filtrosUsuarios[k] = null; StateHasChanged(); }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("SEGURIDAD", "AsignacionRoles");
+        _roles = await Service.GetRolesComboAsync();
+        if (_roles.Any()) { _rolSel = _roles.First(); await LoadUsuarios(); }
+    }
+
+    private async Task OnRolRowClick(DataGridRowClickEventArgs<ComboboxItem> args)
+    {
+        _rolSel = args.Item;
+        await LoadUsuarios();
+    }
+
+    private string FilaSeleccionadaRol(ComboboxItem item, int _)
+        => _rolSel is not null && item.Id == _rolSel.Id ? "fila-seleccionada" : "";
+
+    private async Task RecargarRoles()
+    {
+        _roles = await Service.GetRolesComboAsync();
+        if (_rolSel is not null && !_roles.Any(r => r.Id == _rolSel.Id)) { _rolSel = null; _usuarios = new(); }
+    }
+
+    private async Task LoadUsuarios()
+    {
+        if (_rolSel is null) { _usuarios = new(); return; }
+        _loadingUsuarios = true;
+        _usuarios = await Service.GetUsuariosDeRolAsync(_rolSel.Id);
+        _loadingUsuarios = false;
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return OpenAgregar();
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(RolAsignado usuario, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_DELETE == true) return Quitar(usuario);
+        return Task.CompletedTask;
+    }
+
+    private async Task OpenAgregar()
+    {
+        if (_rolSel is null) return;
+
+        var todos = await UsuarioSvc.GetAllAsync();
+        var activos = todos
+            .Where(u => u.COD_ESTADO == 1)
+            .Select(u => new ComboboxItem { Id = u.COD_USUARIO, Texto = $"{u.COD_USUARIO} · {u.DES_USUARIO}" })
+            .ToList();
+
+        var asignados = _usuarios.Select(u => u.COD_USUARIO).ToHashSet();
+        var disponibles = activos.Where(u => !asignados.Contains(u.Id)).ToList();
+
+        var dlg = await DialogService.ShowAsync<AgregarUsuarioRolDialog>(
+            $"Agregar usuario al rol {_rolSel.Texto}",
+            new DialogParameters { ["CodRol"] = _rolSel.Id, ["Disponibles"] = disponibles },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadUsuarios();
+    }
+
+    private async Task Quitar(RolAsignado u)
+    {
+        if (_rolSel is null || string.IsNullOrWhiteSpace(u.COD_USUARIO)) return;
+        var confirm = await DialogService.ShowMessageBox("Confirmar",
+            $"¿Quitar a '{u.COD_USUARIO}' del rol '{_rolSel.Texto}'?", yesText: "Quitar", cancelText: "Cancelar");
+        if (confirm == true)
+        {
+            var (ok, msg) = await Service.QuitarAsync(_rolSel.Id, u.COD_USUARIO!);
+            if (ok) { Snackbar.Add("Usuario quitado del rol.", Severity.Success); await LoadUsuarios(); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(AsignacionRoles));
+        }
+    }
+}

@@ -1,0 +1,320 @@
+@inject UsuarioService UsuarioService
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+
+<MudDialog Style="width:min(1024px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="@(SoloLectura ? CrudModo.Read : (Usuario is null ? CrudModo.Create : CrudModo.Update))"
+                         Codigo="@Usuario?.COD_USUARIO"
+                         Descripcion="@Usuario?.DES_USUARIO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <div style="display:flex;gap:16px;align-items:flex-start;">
+            <div style="flex:1;min-width:0;">
+
+            <div class="d-flex gap-3 mb-2 align-center">
+                <div style="flex:1;min-width:0;">
+                    <AriaCombo TItem="ComboboxItem" Items="_perfiles"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               Value="@(_model.COD_PERFIL_USUARIO)" ValueChanged="@(v => _model.COD_PERFIL_USUARIO = v ?? "")"
+                               Label="Perfil" Disabled="SoloLectura" />
+                </div>
+                @* Solo aplica al Crear (los SP de sugerencia filtran entidades sin
+                   COD_USUARIO_RELACIONADO — no tiene sentido re-sugerir en Editar). *@
+                @if (!_isEdit && (EsPerfilComercial || EsPerfilDependenciaComercial))
+                {
+                    <MudTooltip Text="@(EsPerfilComercial ? "Sugerir código desde Entidad Comercial" : "Sugerir código desde Entidad Dependiente")">
+                        <MudIconButton Icon="@(EsPerfilComercial ? Icons.Material.Filled.Storefront : Icons.Material.Filled.AccountTree)"
+                                       Color="Color.Primary" OnClick="AbrirSugerenciaAsync" />
+                    </MudTooltip>
+                }
+                <div style="flex:1;min-width:0;">
+                    <CampoTexto Tabla="SEGURIDAD.USUARIOS" Columna="COD_USUARIO"
+                                @bind-Value="_model.COD_USUARIO"
+                                Disabled="@(_isEdit || SoloLectura)" Margin="Margin.Normal" Class="" />
+                </div>
+            </div>
+            <div class="d-flex gap-3 mb-2">
+                <div style="flex:1;min-width:0;">
+                    <CampoTexto Tabla="SEGURIDAD.USUARIOS" Columna="DES_USUARIO"
+                                @bind-Value="_model.DES_USUARIO"
+                                Disabled="SoloLectura" Margin="Margin.Normal" Class="" />
+                </div>
+                <div style="flex:1;min-width:0;display:flex;align-items:center;gap:4px;">
+                    <div style="flex:1;min-width:0;">
+                        <CampoTexto Tabla="SEGURIDAD.USUARIOS" Columna="DES_CORREO_INSTITUCIONAL"
+                                    @bind-Value="_model.DES_CORREO_INSTITUCIONAL"
+                                    Disabled="SoloLectura" Margin="Margin.Normal" Class="" />
+                    </div>
+                    @* Elegir dominio (ENTORNO.DOMINIOS_EMPRESA) — reemplaza lo que haya
+                       después del '@' (o lo agrega si no hay '@' todavía). *@
+                    @if (!SoloLectura && _dominios.Count > 0)
+                    {
+                        <MudMenu Icon="@Icons.Material.Filled.AlternateEmail" Size="Size.Small"
+                                 AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                            @foreach (var dom in _dominios)
+                            {
+                                <MudMenuItem OnClick="@(() => ElegirDominio(dom.Texto))">
+                                    <span style="font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);color:var(--control-color, inherit);">@dom.Texto</span>
+                                </MudMenuItem>
+                            }
+                        </MudMenu>
+                    }
+                </div>
+            </div>
+            <div class="d-flex gap-3 mb-2">
+                <div style="flex:1;min-width:0;">
+                    <CampoTexto Tabla="SEGURIDAD.USUARIOS" Columna="NUM_TELEFONO"
+                                @bind-Value="_model.NUM_TELEFONO"
+                                Disabled="SoloLectura" Margin="Margin.Normal" Class="" />
+                </div>
+                <div style="flex:1;min-width:0;">
+                    <MudNumericField @bind-Value="_model.NUM_MAXIMO_INTENTOS" Label="Máx. intentos"
+                                     Disabled="SoloLectura" Variant="Variant.Outlined" Margin="Margin.Normal"
+                                     Min="1" Max="100" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </div>
+            </div>
+            <div class="d-flex gap-3 mb-2">
+                <div style="flex:1;min-width:0;">
+                    <MudNumericField @bind-Value="_model.NUM_DIAS_PASSWORD_RESET" Label="Días vencimiento contraseña"
+                                     Disabled="SoloLectura" Variant="Variant.Outlined" Margin="Margin.Normal"
+                                     Min="0" Max="3650" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </div>
+                <div style="flex:1;min-width:0;">
+                    <MudTextField Value="@(_fecUltimoCambio?.ToString("dd/MM/yyyy") ?? "Nunca")"
+                                  Label="Último cambio de contraseña" Variant="Variant.Outlined"
+                                  Margin="Margin.Normal" Disabled="true" ReadOnly="true" />
+                </div>
+            </div>
+
+            <div style="margin-top:8px;" class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.Domain" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_VALIDA_DIRECTORIO_ACTIVO" Color="Color.Primary" Disabled="SoloLectura"
+                           Label="Valida con Directorio Activo" />
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-top:4px;">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.Password" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch Value="_model.FLG_LOGIN_CREDENCIALES" ValueChanged="@((bool? v) => _model.FLG_LOGIN_CREDENCIALES = v)"
+                               Color="Color.Primary" Disabled="SoloLectura" Label="Login con credenciales" />
+                </div>
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.FaceRetouchingNatural" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch Value="_model.FLG_LOGIN_FACE" ValueChanged="@((bool? v) => { _model.FLG_LOGIN_FACE = v; StateHasChanged(); })"
+                               Color="Color.Primary" Disabled="SoloLectura" Label="Login facial" />
+                </div>
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.Fingerprint" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch Value="_model.FLG_LOGIN_HUELLA_DACTILAR" ValueChanged="@((bool? v) => _model.FLG_LOGIN_HUELLA_DACTILAR = v)"
+                               Color="Color.Primary" Disabled="SoloLectura" Label="Login huella dactilar" />
+                </div>
+            </div>
+
+            @if (_model.FLG_LOGIN_FACE == true && _registroFacial != true)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Icon="@Icons.Material.Filled.FaceRetouchingNatural" Class="mt-2">
+                    El login facial está activado pero el usuario no tiene biometría registrada.
+                    Debe registrar el rostro en <strong>Seguridad › Registro Facial</strong> antes de usar este método.
+                </MudAlert>
+            }
+
+            <EstadoCombo DesTabla="SEGURIDAD.USUARIOS" Value="_codEstadoCombo"
+                         ValueChanged="@(v => { _codEstadoCombo = v; _model.COD_ESTADO = v ?? 1; })"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v ?? 0)"
+                         Disabled="SoloLectura" Class="mt-2 mb-3" />
+
+            </div>
+
+            @* Panel derecho: imágenes *@
+            <div style="flex-shrink:0;display:flex;flex-direction:column;gap:16px;padding-left:8px;border-left:1px solid rgba(0,0,0,.1);">
+                <ImagePicker Image="_model.IMG_FOTO"  ImageChanged="@(v => _model.IMG_FOTO  = v)" Label="Foto del usuario"  ReadOnly="SoloLectura" />
+                <ImagePicker Image="_model.IMG_FIRMA" ImageChanged="@(v => _model.IMG_FIRMA = v)" Label="Firma del usuario" ReadOnly="SoloLectura" />
+            </div>
+            </div>
+
+            <div class="d-flex align-center gap-2 mt-4 dialog-acciones-fijas">
+                @if (_isEdit && _usuarioCompleto is not null)
+                {
+                    <PanelAuditoria CodUsuarioRegistro="@_usuarioCompleto.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@_usuarioCompleto.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@_usuarioCompleto.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@_usuarioCompleto.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@_usuarioCompleto.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@_usuarioCompleto.FEC_ACTUALIZACION" />
+                }
+                <MudSpacer />
+                @if (SoloLectura)
+                {
+                    <MudButton OnClick="Cancel" Variant="Variant.Filled" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.ArrowBack"
+                               Style="font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">Regresar</MudButton>
+                }
+                else
+                {
+                    <MudButton OnClick="Cancel" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel"
+                               Style="background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cancelar</MudButton>
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
+                               Disabled="_saving" StartIcon="@(_isEdit ? Icons.Material.Filled.Save : Icons.Material.Filled.NoteAdd)"
+                               Style="font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">
+                        @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                        @(_isEdit ? "Guardar cambios" : "Crear usuario")
+                    </MudButton>
+                }
+            </div>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Usuario? Usuario { get; set; }
+    [Parameter] public bool SoloLectura { get; set; }   // true = modo Consultar (campos deshabilitados)
+
+    private UsuarioInsertDto _model = new();
+    private bool _isEdit, _saving;
+    private DateTime? _fecUltimoCambio;
+    private Usuario? _usuarioCompleto;
+    private bool? _registroFacial;   // FLG_REGISTRO_FACIAL del usuario (solo lectura, desde BD)
+    private List<ComboboxItem> _perfiles = new();
+
+    // Nullable aparte del DTO (que exige int no-nulo): al Crear, queda en null para que
+    // EstadoCombo autoseleccione el estado por defecto de SEGURIDAD.USUARIOS en vez de
+    // heredar un (COD_TIPO_ESTADO, COD_ESTADO) hardcodeado que puede no existir como FK
+    // válida (causaba el error 547 al insertar).
+    private int? _codEstadoCombo;
+
+    // ── Sugerencia de código de usuario a partir de una Entidad sin usuario asignado ──
+    // Se detecta el perfil por su descripción (no hay un código fijo/hardcodeado para
+    // "Usuario Comercial" / "Usuario de Dependencia Comercial" — son datos de catálogo).
+    private string? PerfilSeleccionadoTexto => _perfiles.FirstOrDefault(p => p.Id == _model.COD_PERFIL_USUARIO)?.Texto;
+    private bool EsPerfilComercial =>
+        (PerfilSeleccionadoTexto ?? "").Contains("Comercial", StringComparison.OrdinalIgnoreCase)
+        && !(PerfilSeleccionadoTexto ?? "").Contains("Dependencia", StringComparison.OrdinalIgnoreCase);
+    private bool EsPerfilDependenciaComercial =>
+        (PerfilSeleccionadoTexto ?? "").Contains("Dependencia", StringComparison.OrdinalIgnoreCase);
+
+    private async Task AbrirSugerenciaAsync()
+    {
+        var comercial = EsPerfilComercial;
+        var ruta = comercial ? ApiRoutes.Estandar.EntidadesUsuariosComerciales : ApiRoutes.Estandar.EntidadesUsuariosDependientes;
+        var lista = await Http.SafeGetAsync<List<KONSolutions.Shared.Models.Estandar.EntidadUsuarioSugerido>>(ruta) ?? new();
+
+        var dlg = await DialogService.ShowAsync<SugerenciaUsuarioDialog>(
+            comercial ? "Entidades comerciales sin usuario" : "Entidades dependientes sin usuario",
+            new DialogParameters { ["Titulo"] = comercial ? "Entidades comerciales sin usuario" : "Entidades dependientes sin usuario", ["Items"] = lista },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var r = await dlg.Result;
+        if (r is { Canceled: false } && r.Data is KONSolutions.Shared.Models.Estandar.EntidadUsuarioSugerido elegido)
+        {
+            _model.COD_USUARIO = elegido.COD_USUARIO_SUGERIDO;
+            _model.COD_ENTIDAD = elegido.COD_ENTIDAD;
+            _model.DES_USUARIO = elegido.DES_ENTIDAD;
+            _model.DES_CORREO_INSTITUCIONAL = $"{elegido.COD_USUARIO_SUGERIDO}@";
+        }
+    }
+
+    // ── Dominios de correo de la empresa (ENTORNO.DOMINIOS_EMPRESA) ──
+    private List<ComboboxItem> _dominios = new();
+
+    private void ElegirDominio(string dominio)
+    {
+        var actual = _model.DES_CORREO_INSTITUCIONAL ?? "";
+        var arroba = actual.IndexOf('@');
+        var local = arroba >= 0 ? actual[..arroba] : actual;
+        _model.DES_CORREO_INSTITUCIONAL = $"{local}@{dominio}";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _perfiles = (await Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Seguridad.PerfilesCombobox)) ?? new();
+
+        // SHOWCOMBOX de DOMINIOS_EMPRESA no alias sus columnas como Id/Texto, así que se
+        // trae el DTO propio y se mapea a ComboboxItem acá (mismo patrón que TiposUso).
+        var dominios = await Http.SafeGetAsync<List<KONSolutions.Shared.Models.Entorno.DominiosEmpresa>>(ApiRoutes.Entorno.DominiosEmpresaCombobox) ?? new();
+        _dominios = dominios.Select(d => new ComboboxItem { Id = d.COD_DOMINIO_EMPRESA.ToString(), Texto = d.DES_DOMINIO_EMPRESA }).ToList();
+
+        _isEdit = Usuario is not null;
+        if (_isEdit && Usuario is not null)
+        {
+            // Traer el usuario completo (incluye IMG_FOTO/IMG_FIRMA, que la grilla no carga)
+            var completo = await UsuarioService.GetByIdAsync(Usuario.COD_USUARIO) ?? Usuario;
+
+            _model = new UsuarioInsertDto
+            {
+                COD_USUARIO = completo.COD_USUARIO,
+                DES_USUARIO = completo.DES_USUARIO ?? "",
+                COD_PERFIL_USUARIO = completo.COD_PERFIL_USUARIO ?? "",
+                DES_CORREO_INSTITUCIONAL = completo.DES_CORREO_INSTITUCIONAL,
+                NUM_TELEFONO = completo.NUM_TELEFONO,
+                FLG_VALIDA_DIRECTORIO_ACTIVO = completo.FLG_VALIDA_DIRECTORIO_ACTIVO,
+                FLG_LOGIN_CREDENCIALES    = completo.FLG_LOGIN_CREDENCIALES,
+                FLG_LOGIN_FACE            = completo.FLG_LOGIN_FACE,
+                FLG_LOGIN_HUELLA_DACTILAR = completo.FLG_LOGIN_HUELLA_DACTILAR,
+                FLG_REGISTRO_FACIAL       = completo.FLG_REGISTRO_FACIAL,
+                NUM_MAXIMO_INTENTOS = completo.NUM_MAXIMO_INTENTOS ?? 3,
+                NUM_INTENTOS = completo.NUM_INTENTOS ?? 0,
+                NUM_DIAS_PASSWORD_RESET = completo.NUM_DIAS_PASSWORD_RESET ?? 90,
+                IMG_FOTO = completo.IMG_FOTO,
+                IMG_FIRMA = completo.IMG_FIRMA,
+                COD_TIPO_ESTADO = completo.COD_TIPO_ESTADO ?? 0,
+                COD_ESTADO = completo.COD_ESTADO ?? 1
+            };
+            _codEstadoCombo  = _model.COD_ESTADO;
+            _fecUltimoCambio = completo.FEC_ULTIMA_PASSWORD_CHANGE;
+            _registroFacial  = completo.FLG_REGISTRO_FACIAL;
+            _usuarioCompleto = completo;
+        }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        bool ok; string msg;
+        if (_isEdit)
+        {
+            var dto = new UsuarioUpdateDto
+            {
+                COD_USUARIO = _model.COD_USUARIO, DES_USUARIO = _model.DES_USUARIO,
+                COD_PERFIL_USUARIO = _model.COD_PERFIL_USUARIO,
+                DES_CORREO_INSTITUCIONAL = _model.DES_CORREO_INSTITUCIONAL,
+                NUM_TELEFONO = _model.NUM_TELEFONO,
+                FLG_VALIDA_DIRECTORIO_ACTIVO = _model.FLG_VALIDA_DIRECTORIO_ACTIVO,
+                FLG_LOGIN_CREDENCIALES    = _model.FLG_LOGIN_CREDENCIALES,
+                FLG_LOGIN_FACE            = _model.FLG_LOGIN_FACE,
+                FLG_LOGIN_HUELLA_DACTILAR = _model.FLG_LOGIN_HUELLA_DACTILAR,
+                NUM_MAXIMO_INTENTOS = _model.NUM_MAXIMO_INTENTOS, NUM_INTENTOS = _model.NUM_INTENTOS,
+                NUM_DIAS_PASSWORD_RESET = _model.NUM_DIAS_PASSWORD_RESET,
+                IMG_FOTO = _model.IMG_FOTO, IMG_FIRMA = _model.IMG_FIRMA,
+                COD_TIPO_ESTADO = _model.COD_TIPO_ESTADO, COD_ESTADO = _model.COD_ESTADO
+            };
+            (ok, msg) = await UsuarioService.UpdateAsync(_model.COD_USUARIO, dto);
+        }
+        else
+        {
+            (ok, msg) = await UsuarioService.InsertAsync(_model);
+        }
+        _saving = false;
+
+        if (ok)
+        {
+            Snackbar.Add(_isEdit ? "Usuario actualizado." : "Usuario creado.", Severity.Success);
+            // Devuelve el registro actualizado (una sola consulta ligera por código,
+            // no la lista completa) para que la pantalla actualice solo esa fila en
+            // memoria, sin recargar todos los usuarios.
+            var actualizado = await UsuarioService.GetByIdAsync(_model.COD_USUARIO);
+            MudDialog.Close(DialogResult.Ok(actualizado));
+        }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(UsuarioDialog));
+    }
+
+    private async Task Cancel()
+    {
+        try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { }
+        MudDialog.Cancel();
+    }
+}

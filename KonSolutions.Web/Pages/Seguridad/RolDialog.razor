@@ -1,0 +1,90 @@
+@inject CatalogoService<Rol, RolDto> Service
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo"
+                         Codigo="@Rol?.COD_ROL_USUARIO"
+                         Descripcion="@Rol?.DES_ROL_USUARIO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="SEGURIDAD.ROLES_USUARIO" Columna="COD_ROL_USUARIO"
+                        @bind-Value="_model.COD_ROL_USUARIO" Disabled="@(_isEdit || _readonly)" />
+            <CampoTexto Tabla="SEGURIDAD.ROLES_USUARIO" Columna="DES_ROL_USUARIO"
+                        @bind-Value="_model.DES_ROL_USUARIO" Disabled="_readonly" />
+            <EstadoCombo DesTabla="SEGURIDAD.ROLES_USUARIO" @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v ?? 0)"
+                         Disabled="_readonly" Class="mt-3 mb-3" />
+            <PanelAuditoria CodUsuarioRegistro="@Rol?.COD_USUARIO_REGISTRO"
+                            CodEstacionRegistro="@Rol?.COD_ESTACION_REGISTRO"
+                            FecRegistro="@Rol?.FEC_REGISTRO"
+                            CodUsuarioActualizacion="@Rol?.COD_USUARIO_ACTUALIZACION"
+                            CodEstacionActualizacion="@Rol?.COD_ESTACION_ACTUALIZACION"
+                            FecActualizacion="@Rol?.FEC_ACTUALIZACION" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Rol? Rol { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private RolDto _model = new() { COD_ESTADO = 1 };
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        if (Rol is not null) MapearDesdeModelo(Rol);
+    }
+
+    /// <summary>Copia los campos editables del modelo (Rol de la grilla, o la respuesta
+    /// fresca de GetByIdAsync) hacia _model.</summary>
+    private void MapearDesdeModelo(Rol m)
+    {
+        _model = new RolDto
+        {
+            COD_ROL_USUARIO = m.COD_ROL_USUARIO,
+            DES_ROL_USUARIO = m.DES_ROL_USUARIO ?? "",
+            COD_TIPO_ESTADO = m.COD_TIPO_ESTADO ?? 0,
+            COD_ESTADO = m.COD_ESTADO ?? 1
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde GetByIdAsync — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_ROL_USUARIO);
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Modo != CrudModo.Create && Rol is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.COD_ROL_USUARIO);
+            _saving = false;
+            if (okd) { Snackbar.Add("Rol eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(RolDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model, Modo == CrudModo.Create);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Rol actualizado." : "Rol creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(RolDialog));
+    }
+}

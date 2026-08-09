@@ -1,0 +1,264 @@
+@page "/estandar/equivalencias"
+@using KONSolutions.Shared.Models
+@using KONSolutions.Shared.Common
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ErrorLogService ErrorLog
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <TituloPagina Fallback="Equivalencias de Unidades de Medida" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · UNIDADES_MEDIDA_EQUIVALENCIAS</MudText>
+    </div>
+    <div class="d-flex gap-2 align-center">
+        <AriaCombo TItem="TipoUnidadItem" Items="_tipos"
+                   TextFunc="@(t => t.DES_TIPO_UNIDAD_MEDIDA)" ValueFunc="@(t => t.COD_TIPO_UNIDAD_MEDIDA)"
+                   Value="_tipoSelId" ValueChanged="@(v => OnTipoChanged(v ?? ""))"
+                   Label="Tipo de Magnitud" Style="min-width:260px;" Class="" />
+        @if (!string.IsNullOrEmpty(_tipoSelId))
+        {
+            <MudTooltip Text="Cargar factores de conversión estándar (solo inserta los que faltan)">
+                <MudIconButton Icon="@Icons.Material.Filled.AutoFixHigh"
+                               Color="Color.Secondary" Variant="Variant.Outlined"
+                               Size="Size.Small" OnClick="CargarEstandar"
+                               Disabled="_cargando" />
+            </MudTooltip>
+        }
+        <GridRefreshButton OnRefresh="LoadMatriz" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+@if (_cargando)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+}
+else if (string.IsNullOrEmpty(_tipoSelId))
+{
+    <MudAlert Severity="Severity.Info">Seleccione un tipo de magnitud para ver la matriz de equivalencias.</MudAlert>
+}
+else if (_unidades.Count == 0)
+{
+    <MudAlert Severity="Severity.Warning">No hay unidades registradas para este tipo de magnitud.</MudAlert>
+}
+else
+{
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);overflow:auto;">
+        <table class="eq-matrix">
+            <thead>
+                <tr>
+                    <th class="eq-corner">
+                        <span class="eq-label-origen">ORIGEN</span>
+                        <div class="eq-diagonal"></div>
+                        <span class="eq-label-destino">DESTINO →</span>
+                    </th>
+                    @foreach (var col in _unidades)
+                    {
+                        <th class="eq-header">
+                            <MudTooltip Text="@col.DES_UNIDAD_MEDIDA">
+                                <span>@col.COD_SIMBOLO</span>
+                            </MudTooltip>
+                            <div class="eq-code">@col.COD_UNIDAD_MEDIDA</div>
+                        </th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _unidades)
+                {
+                    <tr>
+                        <th class="eq-row-header">
+                            <MudTooltip Text="@row.DES_UNIDAD_MEDIDA">
+                                <span>@row.COD_SIMBOLO</span>
+                            </MudTooltip>
+                            <div class="eq-code">@row.COD_UNIDAD_MEDIDA</div>
+                        </th>
+                        @foreach (var col in _unidades)
+                        {
+                            var r = row.COD_UNIDAD_MEDIDA;
+                            var c = col.COD_UNIDAD_MEDIDA;
+                            var esDiagonal = r == c;
+                            var val = esDiagonal ? 1m : GetFactor(r, c);
+                            <td class="@(esDiagonal ? "eq-diagonal-cell" : "eq-cell")"
+                                @onclick="@(async () => { if (!esDiagonal) await AbrirEdicion(row, col); })">
+                                @if (esDiagonal)
+                                {
+                                    <span class="eq-one">1</span>
+                                }
+                                else if (val.HasValue)
+                                {
+                                    <span class="eq-value">@val.Value.ToString("G8")</span>
+                                }
+                                else
+                                {
+                                    <span class="eq-empty">·</span>
+                                }
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </MudPaper>
+
+    <div class="d-flex gap-3 mt-3" style="font-size:.8rem;opacity:.6;">
+        <span><span class="eq-legend-box eq-legend-value"></span> Con valor</span>
+        <span><span class="eq-legend-box eq-legend-empty"></span> Sin definir (clic para agregar)</span>
+        <span><span class="eq-legend-box eq-legend-diag"></span> Misma unidad = 1</span>
+    </div>
+}
+
+
+<style>
+.eq-matrix { border-collapse: collapse; min-width: 100%; }
+.eq-matrix th, .eq-matrix td { border: 1px solid var(--grilla-lineas, var(--line)); }
+.eq-corner  { position:relative; width:90px; min-width:90px; height:56px;
+              background:var(--grilla-cab-fondo, var(--mud-palette-background-grey)); }
+.eq-label-origen  { position:absolute; top:6px; left:6px; font-size:.65rem; opacity:.5; font-weight:600;
+                    color:var(--grilla-cab-texto, inherit); }
+.eq-label-destino { position:absolute; bottom:5px; right:5px; font-size:.65rem; opacity:.5; font-weight:600;
+                    color:var(--grilla-cab-texto, inherit); }
+.eq-diagonal { position:absolute; top:0; left:0; width:100%; height:100%;
+               background: linear-gradient(to bottom right,
+                 transparent calc(50% - 0.5px),
+                 var(--grilla-lineas, var(--line)) calc(50% - 0.5px),
+                 var(--grilla-lineas, var(--line)) calc(50% + 0.5px),
+                 transparent calc(50% + 0.5px)); }
+.eq-header, .eq-row-header { padding:6px 8px; text-align:center;
+    background:var(--grilla-cab-fondo, var(--mud-palette-background-grey));
+    color:var(--grilla-cab-texto, inherit);
+    font-weight:600; font-size:.82rem; white-space:nowrap; min-width:72px; }
+.eq-code { font-size:.65rem; opacity:.45; font-weight:400; margin-top:1px; }
+.eq-cell { padding:0; text-align:center; cursor:pointer; transition:background .15s; min-width:72px; height:38px;
+           color:var(--grilla-texto, inherit); }
+.eq-cell:hover { background:var(--mud-palette-primary-lighten) !important; }
+.eq-matrix tbody tr:nth-child(even) .eq-cell   { background:var(--grilla-fila-par,   transparent); }
+.eq-matrix tbody tr:nth-child(odd)  .eq-cell   { background:var(--grilla-fila-impar, transparent); }
+.eq-matrix tbody tr:nth-child(even) .eq-cell:hover,
+.eq-matrix tbody tr:nth-child(odd)  .eq-cell:hover { background:var(--mud-palette-primary-lighten) !important; }
+.eq-diagonal-cell { padding:0; text-align:center; min-width:72px; height:38px;
+                    background:var(--grilla-cab-fondo, var(--mud-palette-background-grey)); }
+.eq-value  { font-size:.82rem; font-variant-numeric:tabular-nums; color:var(--mud-palette-primary); font-weight:500; }
+.eq-empty  { font-size:1.1rem; opacity:.18; }
+.eq-one    { font-size:.82rem; opacity:.35; font-weight:500; }
+.eq-legend-box { display:inline-block; width:14px; height:14px; border-radius:3px;
+                 border:1px solid var(--grilla-lineas, var(--line)); vertical-align:middle; margin-right:3px; }
+.eq-legend-value { background:rgba(var(--mud-palette-primary-rgb),.15); }
+.eq-legend-empty { background:transparent; }
+.eq-legend-diag  { background:var(--grilla-cab-fondo, var(--mud-palette-background-grey)); }
+</style>
+
+@code {
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<TipoUnidadItem>              _tipos     = new();
+    private List<UnidadesMedidaItem>         _unidades  = new();
+    private List<UnidadesMedidaEquivalencia> _factores  = new();
+    private string                           _tipoSelId = string.Empty;
+    private bool                             _cargando;
+
+    protected override async Task OnInitializedAsync() => await LoadTipos();
+
+    private async Task LoadTipos()
+    {
+        var r = await Http.GetFromJsonAsync<ApiResponse<List<TipoUnidadItem>>>(ApiRoutes.Estandar.TiposUnidadMedida);
+        _tipos = r?.Data ?? new();
+    }
+
+    private async Task OnTipoChanged(string id)
+    {
+        _tipoSelId = id;
+        await LoadMatriz();
+    }
+
+    private async Task LoadMatriz()
+    {
+        if (string.IsNullOrEmpty(_tipoSelId)) return;
+        _cargando = true; StateHasChanged();
+        try
+        {
+            var ruAll = await Http.GetFromJsonAsync<ApiResponse<List<UnidadesMedidaItem>>>(ApiRoutes.Estandar.UnidadesMedida);
+            _unidades = (ruAll?.Data ?? new()).Where(u => u.COD_TIPO_UNIDAD_MEDIDA == _tipoSelId).OrderBy(u => u.COD_UNIDAD_MEDIDA).ToList();
+
+            var re = await Http.GetFromJsonAsync<ApiResponse<List<UnidadesMedidaEquivalencia>>>(
+                $"{ApiRoutes.Estandar.UnidadesMedidaEquivalenciasPorTipo}/{_tipoSelId}");
+            _factores = re?.Data ?? new();
+        }
+        finally { _cargando = false; StateHasChanged(); }
+    }
+
+    private decimal? GetFactor(string origen, string destino)
+        => _factores.FirstOrDefault(f => f.COD_UNIDAD_MEDIDA == origen && f.COD_UNIDAD_MEDIDA_EQUIVALENTE == destino)?.VAL_EQUIVALENTE;
+
+    private async Task AbrirEdicion(UnidadesMedidaItem origen, UnidadesMedidaItem destino)
+    {
+        var valorActual = GetFactor(origen.COD_UNIDAD_MEDIDA, destino.COD_UNIDAD_MEDIDA);
+        var parameters  = new DialogParameters
+        {
+            [nameof(EquivalenciaDialog.Origen)]      = new EquivalenciaDialog.EquivalenciaDlgItem(origen.COD_UNIDAD_MEDIDA, origen.DES_UNIDAD_MEDIDA, origen.COD_SIMBOLO),
+            [nameof(EquivalenciaDialog.Destino)]     = new EquivalenciaDialog.EquivalenciaDlgItem(destino.COD_UNIDAD_MEDIDA, destino.DES_UNIDAD_MEDIDA, destino.COD_SIMBOLO),
+            [nameof(EquivalenciaDialog.ValorActual)] = valorActual,
+        };
+        var dlg = await DialogService.ShowAsync<EquivalenciaDialog>(string.Empty, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var result = await dlg.Result;
+        if (result is null || result.Canceled) return;
+
+        var r = (EquivalenciaDialog.EquivalenciaResult)result.Data!;
+        if (r.Eliminar)
+        {
+            var del = await Http.DeleteAsync(
+                $"{ApiRoutes.Estandar.UnidadesMedidaEquivalencias}/{origen.COD_UNIDAD_MEDIDA}/{destino.COD_UNIDAD_MEDIDA}");
+            if (del.IsSuccessStatusCode) { Snackbar.Add("Equivalencia eliminada.", Severity.Success); await LoadMatriz(); }
+            else await ErrorDialogHelper.MostrarAsync(del, ErrorLog, DialogService, nameof(Equivalencias), nameof(AbrirEdicion), "No se pudo eliminar el registro");
+        }
+        else
+        {
+            var dto = new { COD_UNIDAD_MEDIDA = origen.COD_UNIDAD_MEDIDA,
+                            COD_UNIDAD_MEDIDA_EQUIVALENTE = destino.COD_UNIDAD_MEDIDA,
+                            VAL_EQUIVALENTE = r.Factor };
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Estandar.UnidadesMedidaEquivalenciasUpsert, dto);
+            if (!resp.IsSuccessStatusCode) { await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(Equivalencias), nameof(AbrirEdicion)); return; }
+
+            if (r.AutoReciproco && r.Factor != 0)
+            {
+                var recip = new { COD_UNIDAD_MEDIDA = destino.COD_UNIDAD_MEDIDA,
+                                  COD_UNIDAD_MEDIDA_EQUIVALENTE = origen.COD_UNIDAD_MEDIDA,
+                                  VAL_EQUIVALENTE = Math.Round(1m / r.Factor, 10) };
+                await Http.PostAsJsonAsync(ApiRoutes.Estandar.UnidadesMedidaEquivalenciasUpsert, recip);
+            }
+
+            Snackbar.Add("Equivalencia guardada.", Severity.Success);
+            await LoadMatriz();
+        }
+    }
+
+    private async Task CargarEstandar()
+    {
+        _cargando = true; StateHasChanged();
+        try
+        {
+            var resp = await Http.PostAsync(
+                $"{ApiRoutes.Estandar.UnidadesMedidaEquivalenciasCargarEstandar}/{_tipoSelId}", null);
+            if (resp.IsSuccessStatusCode)
+            {
+                var r = await resp.Content.ReadFromJsonAsync<ApiResponse<WriteResult>>();
+                Snackbar.Add(r?.Message ?? "Factores estándar cargados.", Severity.Success);
+                await LoadMatriz();
+            }
+            else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(Equivalencias), nameof(CargarEstandar), "No se pudieron cargar los factores estándar");
+        }
+        finally { _cargando = false; StateHasChanged(); }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b) => Task.CompletedTask;
+
+    // DTOs locales para deserialización
+    private record TipoUnidadItem(string COD_TIPO_UNIDAD_MEDIDA, string DES_TIPO_UNIDAD_MEDIDA);
+    private record UnidadesMedidaItem(string COD_UNIDAD_MEDIDA, string DES_UNIDAD_MEDIDA, string COD_SIMBOLO, string COD_TIPO_UNIDAD_MEDIDA);
+    private record UnidadesMedidaEquivalencia(string COD_UNIDAD_MEDIDA, string COD_UNIDAD_MEDIDA_EQUIVALENTE, decimal? VAL_EQUIVALENTE);
+}

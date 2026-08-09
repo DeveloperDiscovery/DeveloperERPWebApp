@@ -1,0 +1,153 @@
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ErrorLogService ErrorLog
+
+@* SEGURIDAD.ROLES_USUARIO_ASIENTOS_CONTABLES — qué asientos puede usar el rol.
+   El SP _DISPONIBLES ya deja afuera los asientos anulados: la pantalla no vuelve a filtrar
+   por estado para no discrepar con la base si mañana cambia el criterio. *@
+
+@if (Rol is null)
+{
+    <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione un rol para ver sus asientos contables.</MudText>
+}
+else
+{
+    <div class="d-flex align-center justify-space-between pa-3 flex-wrap" style="border-bottom:1px solid var(--line);gap:12px;">
+        <MudText Typo="Typo.subtitle2">Asientos contables del rol</MudText>
+        <div class="d-flex align-center gap-2">
+            <GridRefreshButton OnRefresh="Cargar" />
+            <MudText Class="mono" Style="opacity:.5;font-size:.75rem;">
+                @_asignados.Count asignados · @_disponibles.Count disponibles
+            </MudText>
+        </div>
+    </div>
+
+    <PanelAsignacionDoble TItem="RolAsientoContable" @ref="_panel"
+                          Asignados="_asignados" Disponibles="_disponibles"
+                          Clave="@(a => a.COD_ASIENTO_CONTABLE)"
+                          Codigo="@(a => a.COD_ASIENTO_CONTABLE)"
+                          Descripcion="@(a => a.DES_ASIENTO_CONTABLE ?? a.COD_ASIENTO_CONTABLE)"
+                          TituloColumna="Asiento contable"
+                          EtiquetaPadre="rol" EtiquetaPlural="asientos contables"
+                          VacioAsignados="Este rol no tiene asientos contables asignados."
+                          VacioDisponibles="El rol ya tiene todos los asientos activos."
+                          NombreGrilla="rol-asientos-contables"
+                          SoloLectura="SoloLectura" Cargando="_cargando" Procesando="_procesando"
+                          OnAsignar="AsignarAsync" OnDesasignar="DesasignarAsync" />
+}
+
+@code {
+    [Parameter] public Rol? Rol { get; set; }
+    [Parameter] public bool SoloLectura { get; set; }
+
+    private PanelAsignacionDoble<RolAsientoContable>? _panel;
+    private List<RolAsientoContable> _asignados = new();
+    private List<RolAsientoContable> _disponibles = new();
+
+    private bool _cargando, _procesando;
+    private string? _rolCargado;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var cod = Rol?.COD_ROL_USUARIO;
+        if (cod == _rolCargado) return;
+        _rolCargado = cod;
+        await Cargar();
+    }
+
+    private async Task Cargar()
+    {
+        if (Rol is null) { _asignados = new(); _disponibles = new(); return; }
+
+        _cargando = true;
+        try
+        {
+            var rol = Uri.EscapeDataString(Rol.COD_ROL_USUARIO);
+
+            var ra = await Http.GetFromJsonAsync<ApiResponse<List<RolAsientoContable>>>(
+                $"{ApiRoutes.Seguridad.RolesAsientosContables}/{rol}");
+            _asignados = (ra?.Data ?? new())
+                .OrderBy(a => a.DES_ASIENTO_CONTABLE ?? a.COD_ASIENTO_CONTABLE).ToList();
+
+            var rd = await Http.GetFromJsonAsync<ApiResponse<List<RolAsientoContable>>>(
+                $"{ApiRoutes.Seguridad.RolesAsientosContablesDisponibles}/{rol}");
+            _disponibles = (rd?.Data ?? new())
+                .OrderBy(a => a.DES_ASIENTO_CONTABLE ?? a.COD_ASIENTO_CONTABLE).ToList();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(RolAsientosContablesTab), nameof(Cargar));
+            await MostrarErrorAsync("No se pudieron cargar los asientos contables del rol.");
+            _asignados = new();
+            _disponibles = new();
+        }
+        _cargando = false;
+    }
+
+    private Task AsignarAsync(List<RolAsientoContable> items)
+        => EnviarLoteAsync(ApiRoutes.Seguridad.RolesAsientosContablesAsignar, items, "asignar");
+
+    private Task DesasignarAsync(List<RolAsientoContable> items)
+        => EnviarLoteAsync(ApiRoutes.Seguridad.RolesAsientosContablesDesasignar, items, "quitar");
+
+    private async Task EnviarLoteAsync(string ruta, List<RolAsientoContable> items, string verbo)
+    {
+        if (SoloLectura)
+        {
+            await MostrarAvisoAsync("Sólo lectura", "No tiene permiso para modificar los asientos contables de este rol.");
+            return;
+        }
+        if (Rol is null || items.Count == 0 || _procesando) return;
+
+        _procesando = true;
+        try
+        {
+            var dto = new RolAsientosContablesLote
+            {
+                COD_ROL_USUARIO = Rol.COD_ROL_USUARIO,
+                Asientos = items.Select(i => i.COD_ASIENTO_CONTABLE).ToList()
+            };
+            var resp = await Http.PostAsJsonAsync(ruta, dto);
+            if (!resp.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService,
+                    nameof(RolAsientosContablesTab), nameof(EnviarLoteAsync), $"No se pudo {verbo}");
+                return;
+            }
+
+            var r = await resp.Content.ReadFromJsonAsync<ApiResponse<RolAsignacionLoteResult>>();
+            var res = r?.Data;
+            await Cargar();
+            _panel?.LimpiarMarcas();
+
+            if (res is null) { Snackbar.Add("Operación completada.", Severity.Success); return; }
+
+            if (res.Fallidos.Any())
+            {
+                await MostrarAvisoAsync($"No se pudo {verbo} todo",
+                    $"Se procesaron {res.Procesados}. Quedaron afuera: {string.Join(", ", res.Fallidos)}." +
+                    (string.IsNullOrWhiteSpace(res.DesError) ? "" : $" Motivo: {res.DesError}"));
+            }
+            else
+            {
+                Snackbar.Add($"{res.Procesados} asiento(s) contables actualizados.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(RolAsientosContablesTab), nameof(EnviarLoteAsync));
+            await MostrarErrorAsync($"No se pudo {verbo} los asientos contables.");
+        }
+        finally { _procesando = false; }
+    }
+
+    private Task MostrarErrorAsync(string mensaje)
+        => MostrarAvisoAsync("No se pudo completar la operación", $"{mensaje} Ver detalle en el log de errores.");
+
+    private async Task MostrarAvisoAsync(string titulo, string mensaje)
+        => await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters { ["Titulo"] = titulo, ["Mensaje"] = mensaje },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+}

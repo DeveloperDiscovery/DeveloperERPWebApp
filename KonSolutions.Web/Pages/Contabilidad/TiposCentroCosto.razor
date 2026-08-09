@@ -1,0 +1,190 @@
+@page "/contabilidad/tipos-centro-costo"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Contabilidad
+@inject CatalogoService<TipoCentroCosto, TipoCentroCostoDto> Service
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject ConfigService ConfigSvc
+@implements IDisposable
+
+<PageTitle>Tipos de Centro de Costo · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Centro de Costo" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema CONTABILIDAD · @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTerm" OnSearch="HandleSearch" Placeholder="Buscar tipo de centro de costo..." DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Tipos de Centro de Costo" Headers="@_printHeaders" Rows="@PrintRows()" />
+        <AccionesBotones CodAplicacion="@CodAplicacion"
+                         CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header"
+                         OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="tipos-centro-costo" style="position:relative;">
+    <MudDataGrid T="TipoCentroCosto" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="@Limites.ColWidth("CONTABILIDAD.TIPOS_CENTRO_COSTO","COD_TIPO_CENTRO_COSTO",60,150)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_TIPO_CENTRO_COSTO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TipoCentroCosto" ItemsBase="@BaseSinEstaColumna(0)"
+                                            ValorDe="@(x => x.COD_TIPO_CENTRO_COSTO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_CENTRO_COSTO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("CONTABILIDAD.TIPOS_CENTRO_COSTO","DES_TIPO_CENTRO_COSTO",120,350)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TIPO_CENTRO_COSTO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TipoCentroCosto" ItemsBase="@BaseSinEstaColumna(1)"
+                                            ValorDe="@(x => x.DES_TIPO_CENTRO_COSTO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_CENTRO_COSTO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion"
+                                     CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                     OnAccion="@(b => OnAccionGrilla(item, b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin tipos de centro de costo.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TipoCentroCosto" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<TipoCentroCosto> _items = new();
+    private string _searchTerm = string.Empty;
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<TipoCentroCosto> Ordenar(List<TipoCentroCosto> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_CENTRO_COSTO).ToList() : items.OrderByDescending(x => x.COD_TIPO_CENTRO_COSTO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_CENTRO_COSTO).ToList() : items.OrderByDescending(x => x.DES_TIPO_CENTRO_COSTO).ToList(),
+        _ => items
+    };
+
+    private List<TipoCentroCosto> _visibles => Ordenar(AplicarTodos(_items, -1));
+    private List<TipoCentroCosto> BaseSinEstaColumna(int col) => AplicarTodos(_items, col);
+
+    private List<TipoCentroCosto> AplicarTodos(List<TipoCentroCosto> origen, int excluir)
+    {
+        IEnumerable<TipoCentroCosto> q = origen;
+        foreach (var (col, vals) in _filtros)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.COD_TIPO_CENTRO_COSTO ?? "")),
+                1 => q.Where(x => vals.Contains(x.DES_TIPO_CENTRO_COSTO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltro(int col, HashSet<string>? vals) { _filtros[col] = vals; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private readonly List<string> _printHeaders = new() { "Código", "Descripción" };
+    private List<List<string>> PrintRows() => _items.Select(b => new List<string>
+    {
+        b.COD_TIPO_CENTRO_COSTO ?? "", b.DES_TIPO_CENTRO_COSTO ?? ""
+    }).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("CONTABILIDAD", "TiposCentroCosto");
+        await Load();
+        Cambios.Suscribir("CONTABILIDAD.TIPOS_CENTRO_COSTO", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Open(null));
+
+    private async Task Load() => _items = await Service.GetAllAsync();
+
+    private async Task HandleSearch()
+    {
+        _items = string.IsNullOrWhiteSpace(_searchTerm)
+            ? await Service.GetAllAsync()
+            : await Service.SearchAsync(_searchTerm);
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Open(null);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(TipoCentroCosto item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Ver(item);
+        if (b.FLG_ACCION_PUT    == true) return Open(item);
+        if (b.FLG_ACCION_DELETE == true) return Delete(item);
+        return Task.CompletedTask;
+    }
+
+    private async Task Ver(TipoCentroCosto item)    => await AbrirDialog(item, CrudModo.Read);
+    private async Task Open(TipoCentroCosto? b)     => await AbrirDialog(b, b is null ? CrudModo.Create : CrudModo.Update);
+    private async Task Delete(TipoCentroCosto b)    => await AbrirDialog(b, CrudModo.Delete);
+
+    private async Task AbrirDialog(TipoCentroCosto? b, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de centro de costo",
+            CrudModo.Read   => $"Ver · {b?.COD_TIPO_CENTRO_COSTO}",
+            CrudModo.Update => $"Editar · {b?.COD_TIPO_CENTRO_COSTO}",
+            CrudModo.Delete => $"Eliminar · {b?.COD_TIPO_CENTRO_COSTO}",
+            _ => "Tipo de centro de costo"
+        };
+        var parameters = new DialogParameters { ["Item"] = b, ["Modo"] = modo };
+        var dlg = await DialogService.ShowAsync<TipoCentroCostoDialog>(titulo, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("CONTABILIDAD.TIPOS_CENTRO_COSTO", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

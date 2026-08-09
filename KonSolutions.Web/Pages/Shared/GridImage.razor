@@ -1,0 +1,39 @@
+@*
+    GridImage.razor
+    --------------------------------------------------------------------------
+    Muestra una imagen (byte[]) dentro de una celda de grilla, con el tamaño
+    configurado en Configuración (ImagenGrillaAncho / ImagenGrillaAlto).
+    Aplica a TODOS los campos IMG_ de grilla (IMG_ICONO, IMG_PICTURE, IMG_FOTO,
+    IMG_FIRMA, etc.). Punto 4.
+*@
+@inject ConfigService ConfigSvc
+
+@if (Image is { Length: > 0 })
+{
+    <img src="@($"data:{MimeType};base64,{Convert.ToBase64String(Image)}")"
+         style="@($"width:{_ancho}px;height:{_alto}px;object-fit:contain;border-radius:4px;")" />
+}
+else
+{
+    <span style="@($"display:inline-flex;align-items:center;justify-content:center;width:{_ancho}px;height:{_alto}px;opacity:.2;")">
+        <MudIcon Icon="@Icons.Material.Filled.Image" />
+    </span>
+}
+
+@code {
+    /// <summary>Bytes de la imagen a mostrar.</summary>
+    [Parameter] public byte[]? Image { get; set; }
+
+    private int _ancho => ConfigSvc.Current.ImagenGrillaAncho;
+    private int _alto  => ConfigSvc.Current.ImagenGrillaAlto;
+
+    private string MimeType
+    {
+        get
+        {
+            if (Image is not { Length: > 0 }) return "image/png";
+            var header = System.Text.Encoding.UTF8.GetString(Image, 0, Math.Min(16, Image.Length));
+            return header.TrimStart().StartsWith("<") ? "image/svg+xml" : "image/png";
+        }
+    }
+}

@@ -1,0 +1,468 @@
+@using Modelo = KONSolutions.Shared.Models.Logistica.RequerimientosStock
+@using Item = KONSolutions.Shared.Models.Logistica.RequerimientosStockDetalle
+@using ProductoModel = KONSolutions.Shared.Models.Estandar.Productos
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<div class="documento-logistica">
+        @* El EditForm nombra su contexto. Sin esto choca con el "context" de cada CellTemplate
+           de la grilla de items y Razor no sabe a cual se refiere. *@
+        <EditForm Context="formulario" Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+
+            @* ── Cabecera ───────────────────────────────────────────────────────
+               Dos bloques: a la izquierda los datos del documento, a la derecha la
+               observación como panel alto con el estado debajo. La observación es texto
+               libre y suele ser larga: puesta en línea con los demás campos obligaba a
+               escribir en una ranura de dos renglones. *@
+            <MudGrid Spacing="2">
+
+                <MudItem xs="12" md="8">
+                    <MudGrid Spacing="2">
+                        <MudItem xs="6" md="2">
+                            @* Lo asigna la base al grabar: nunca es editable. *@
+                            <MudTextField T="string" Value="@(_esNuevo ? "(automático)" : _model.NUM_REQUERIMIENTO_STOCK?.ToString())"
+                                          Label="N° requerimiento" Variant="Variant.Outlined" Disabled="true" Class="mb-3" />
+                        </MudItem>
+                        <MudItem xs="6" md="3">
+                            <MudDatePicker @bind-Date="_model.FEC_REQUERIMIENTO_STOCK" Label="Fecha"
+                                           Variant="Variant.Outlined" DateFormat="dd/MM/yyyy"
+                                           Disabled="_readonly" Class="mb-3" />
+                        </MudItem>
+                        <MudItem xs="12" md="4">
+                            <AriaCombo TItem="ComboboxItem" Items="_tipos"
+                                       TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                                       @bind-Value="_model.COD_TIPO_REQUERIMIENTO"
+                                       Label="Tipo de requerimiento" Disabled="_readonly" Class="mb-3" />
+                        </MudItem>
+                        <MudItem xs="12" md="3">
+                            @* La escribe el proceso de atención cuando el requerimiento se atiende:
+                               acá se muestra, nunca se edita. *@
+                            <MudDatePicker @bind-Date="_model.FEC_ATENCION" Label="Fecha de atención"
+                                           Variant="Variant.Outlined" DateFormat="dd/MM/yyyy"
+                                           Disabled="true" Class="mb-3" />
+                        </MudItem>
+
+                        <MudItem xs="12">
+                            <CampoTexto Tabla="LOGISTICA.REQUERIMIENTOS_STOCK" Columna="DES_REQUERIMIENTO_STOCK"
+                                        @bind-Value="_model.DES_REQUERIMIENTO_STOCK"
+                                        Disabled="_readonly" Obligatorio="true" />
+                        </MudItem>
+
+                        @* Requiriente y «original» son dos pares distintos: el original guarda quién
+                           pidió antes de cualquier reasignación, y por eso no se copian entre sí.
+                           Van uno debajo del otro para que la diferencia se vea. *@
+                        <MudItem xs="12" md="6">
+                            <AriaCombo TItem="ComboboxItem" Items="_centros"
+                                       TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                                       @bind-Value="_model.COD_CENTRO_COSTO_REQUIRIENTE"
+                                       Label="Centro de costo requiriente" Disabled="_readonly" Class="mb-3" />
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <AriaCombo TItem="ComboboxItem" Items="_entidades"
+                                       TextFunc="@(t => t.Texto)" ValueFunc="@(t => t.Id)"
+                                       Value="@(_model.COD_ENTIDAD_REQUIRIENTE?.ToString())"
+                                       ValueChanged="@(v => _model.COD_ENTIDAD_REQUIRIENTE = decimal.TryParse(v, out var n) ? n : null)"
+                                       Label="Entidad requiriente" Disabled="_readonly" Class="mb-3" />
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <AriaCombo TItem="ComboboxItem" Items="_centros"
+                                       TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                                       @bind-Value="_model.COD_CENTRO_COSTO_REQUIRIENTE_ORIGINAL"
+                                       Label="Centro de costo original" Disabled="_readonly" Class="mb-3" />
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <AriaCombo TItem="ComboboxItem" Items="_entidades"
+                                       TextFunc="@(t => t.Texto)" ValueFunc="@(t => t.Id)"
+                                       Value="@(_model.COD_ENTIDAD_REQUIRIENTE_ORIGINAL?.ToString())"
+                                       ValueChanged="@(v => _model.COD_ENTIDAD_REQUIRIENTE_ORIGINAL = decimal.TryParse(v, out var n) ? n : null)"
+                                       Label="Entidad original" Disabled="_readonly" Class="mb-3" />
+                        </MudItem>
+                    </MudGrid>
+                </MudItem>
+
+                <MudItem xs="12" md="4">
+                    <CampoTexto Tabla="LOGISTICA.REQUERIMIENTOS_STOCK" Columna="DES_OBSERVACION"
+                                @bind-Value="_model.DES_OBSERVACION" Lines="7" Disabled="_readonly" />
+                    <EstadoCombo DesTabla="LOGISTICA.REQUERIMIENTOS_STOCK"
+                                 @bind-Value="_model.COD_ESTADO"
+                                 CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                                 Disabled="_readonly" />
+                </MudItem>
+            </MudGrid>
+
+            @* ── Detalle ───────────────────────────────────────────────────────
+               Vive en su propio marco y no se habilita hasta que la cabecera esté grabada:
+               los ítems se insertan contra el número de requerimiento, que lo genera la base
+               recién al grabar. *@
+            <MudPaper Elevation="0" Class="mt-4 pa-3" Style="border:1px solid var(--line);">
+                <div class="d-flex align-center gap-2 mb-2">
+                    <MudText Typo="Typo.subtitle2">Ítems del requerimiento</MudText>
+                    @if (!_cabeceraGrabada)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text"
+                                 Icon="@Icons.Material.Filled.Lock">Grabá la cabecera para cargar ítems</MudChip>
+                    }
+                    <MudSpacer />
+                    @if (!_readonly && _cabeceraGrabada)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Add" OnClick="AgregarItem">Agregar ítem</MudButton>
+                    }
+                </div>
+
+            <div class="@(_cabeceraGrabada ? "" : "detalle-bloqueado")" data-resizable-grid="requerimiento-detalle" style="position:relative;">
+                <MudDataGrid T="Item" Items="_items" Dense="true" Hover="true" Striped="true"
+                             ReadOnly="_readonly" EditMode="DataGridEditMode.Cell"
+                             CommittedItemChanges="@(async (Item it) => await GuardarItem(it))"
+                             Height="460px" FixedHeader="true">
+                    <Columns>
+                        <TemplateColumn Title="Sec." Sortable="false" Editable="false" Width="45px" CellStyle="text-align:right;">
+                            <CellTemplate><span class="mono">@context.Item.NUM_SECUENCIA</span></CellTemplate>
+                        </TemplateColumn>
+
+                        @* Con edición por celda la grilla renderiza EditTemplate, no CellTemplate:
+                           el combo tiene que estar en los dos, o al entrar a la celda aparece el
+                           editor de texto por defecto en vez del combo. *@
+                        <TemplateColumn Title="Producto" Sortable="false" Width="520px">
+                            <CellTemplate>
+                                @{ var it = context.Item; }
+                                <span class="mono" style="opacity:.65;">@it.COD_PRODUCTO</span>
+                                <span class="ml-1">@it.DES_PRODUCTO</span>
+                            </CellTemplate>
+                            <EditTemplate>
+                                @{ var it = context.Item; }
+                                <AriaCombo TItem="ProductoModel" Items="_productos"
+                                           TextFunc="@(x => $"{x.COD_PRODUCTO} — {x.DES_PRODUCTO}")"
+                                           ValueFunc="@(x => x.COD_PRODUCTO)"
+                                           Value="@it.COD_PRODUCTO"
+                                           ValueChanged="@(v => AsignarProducto(it, v))"
+                                           Disabled="_readonly" Class="" />
+                            </EditTemplate>
+                        </TemplateColumn>
+
+                        @* El lote es opcional: hay ítems que no se manejan por lote, así que el
+                           combo se puede dejar vacío y no valida nada. *@
+                        <TemplateColumn Title="Lote" Sortable="false" Width="200px">
+                            <CellTemplate>
+                                <span class="mono">@(string.IsNullOrWhiteSpace(context.Item.NUM_LOTE_CONTROL) ? "—" : context.Item.NUM_LOTE_CONTROL)</span>
+                            </CellTemplate>
+                            <EditTemplate>
+                                @{ var it = context.Item; }
+                                <AriaCombo TItem="ComboboxItem" Items="_lotes"
+                                           TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                                           Value="@it.NUM_LOTE_CONTROL"
+                                           ValueChanged="@(v => it.NUM_LOTE_CONTROL = Vacio(v))"
+                                           Disabled="_readonly" Class="" />
+                            </EditTemplate>
+                        </TemplateColumn>
+
+                        @* La unidad la define el producto: se completa sola al elegirlo y no se
+                           edita, para que no pueda quedar en desacuerdo con el maestro. *@
+                        <TemplateColumn Title="U.M." Sortable="false" Editable="false" Width="60px" CellStyle="text-align:center;">
+                            <CellTemplate><span class="mono">@(string.IsNullOrWhiteSpace(context.Item.COD_UNIDAD_MEDIDA) ? "—" : context.Item.COD_UNIDAD_MEDIDA)</span></CellTemplate>
+                        </TemplateColumn>
+
+                        <PropertyColumn Property="x => x.CAN_PRODUCTO" Title="Cantidad" Sortable="false"
+                                        Width="100px" CellStyle="text-align:right;"
+                                        HeaderStyle="text-align:right;" Format="N6" />
+
+                        @* La unidad la define el producto: se completa sola al elegirlo y no se
+                           edita, para que no pueda quedar en desacuerdo con el maestro. *@
+                        <TemplateColumn Title="U.M. sec." Sortable="false" Editable="false" Width="60px" CellStyle="text-align:center;">
+                            <CellTemplate><span class="mono">@(string.IsNullOrWhiteSpace(context.Item.COD_UNIDAD_MEDIDA_SECUNDARIA) ? "—" : context.Item.COD_UNIDAD_MEDIDA_SECUNDARIA)</span></CellTemplate>
+                        </TemplateColumn>
+
+                        <PropertyColumn Property="x => x.CAN_PRODUCTO_SECUNDARIA" Title="Cant. sec." Sortable="false"
+                                        Width="100px" CellStyle="text-align:right;"
+                                        HeaderStyle="text-align:right;" Format="N6" />
+
+                        @* Atendida y reservada las llenan los procesos de atención y de reserva.
+                           Editarlas desde acá desincronizaría el saldo sin que nadie lo note. *@
+                        <TemplateColumn Title="Atendida" Sortable="false" Editable="false" CellStyle="text-align:right;" HeaderStyle="text-align:right;" Width="100px">
+                            <CellTemplate><span class="mono">@context.Item.CAN_PRODUCTO_ATENDIDA?.ToString("N6")</span></CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Title="Reservada" Sortable="false" Editable="false" CellStyle="text-align:right;" HeaderStyle="text-align:right;" Width="100px">
+                            <CellTemplate><span class="mono">@context.Item.CAN_PRODUCTO_RESERVADA?.ToString("N6")</span></CellTemplate>
+                        </TemplateColumn>
+
+                        @* La grilla ya graba la fila al salir de la celda, pero eso no se ve.
+                           El botón lo hace explícito y da el aviso de guardado. *@
+                        <TemplateColumn Title="Acciones" Sortable="false" Editable="false" Width="90px" CellStyle="text-align:center;">
+                            <CellTemplate>
+                                @if (!_readonly)
+                                {
+                                    var it = context.Item;
+                                    <MudIconButton Icon="@Icons.Material.Filled.Save" Size="Size.Small"
+                                                   Color="Color.Primary" OnClick="@(() => GuardarItemConAviso(it))" Title="Grabar ítem" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                                   Color="Color.Error" OnClick="@(() => QuitarItem(it))" Title="Quitar ítem" />
+                                }
+                            </CellTemplate>
+                        </TemplateColumn>
+                    </Columns>
+                    <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;">Sin ítems.</MudText></NoRecordsContent>
+                </MudDataGrid>
+
+                <div class="d-flex align-center gap-4 mt-2 mono" style="font-size:.82rem;opacity:.7;">
+                    <span>Ítems <b>@_items.Count</b></span>
+                    <span>Cantidad total <b>@_items.Sum(x => x.CAN_PRODUCTO ?? 0).ToString("N6")</b></span>
+                </div>
+                @* Arrastrar el borde inferior cambia el alto; doble clic vuelve al original. *@
+                <div class="grid-resize-handle"></div>
+            </div>
+            </MudPaper>
+
+            @* Grabar ya no cierra: deja la cabecera grabada y el foco en el detalle. Del
+               documento se sale con Cerrar. *@
+            <div class="d-flex align-center gap-2 mt-4">
+                <MudSpacer />
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Close"
+                           OnClick="Cerrar" Disabled="_saving">Cerrar</MudButton>
+                @if (!_readonly)
+                {
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Save" Disabled="_saving">
+                        @(Modo == CrudModo.Delete ? "Eliminar" : _cabeceraGrabada ? "Guardar cambios" : "Grabar cabecera")
+                    </MudButton>
+                }
+            </div>
+        </EditForm>
+</div>
+
+@code {
+    /// <summary>Avisa a la pantalla que el documento terminó. El bool dice si hubo cambios,
+    /// para que el listado sepa si tiene que recargarse.</summary>
+    [Parameter] public EventCallback<bool> OnCerrar { get; set; }
+    [Parameter] public Modelo? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private Modelo _model = new();
+    private List<Item> _items = new();
+
+    private List<ComboboxItem> _tipos = new(), _centros = new(), _entidades = new();
+    private List<ProductoModel> _productos = new();
+    private List<ComboboxItem> _lotes = new();
+
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    /// <summary>La cabecera existe en la base y tiene número, así que el detalle ya puede
+    /// colgarse de ella. Es lo único que habilita la grilla de ítems.</summary>
+    private bool _cabeceraGrabada => _model.NUM_REQUERIMIENTO_STOCK is not null;
+
+    /// <summary>Se grabó algo en esta sesión del diálogo. Decide si al cerrar hay que refrescar
+    /// el listado o alcanza con descartar.</summary>
+    private bool _huboCambios;
+
+    /// <summary>Secuencias que todavía no existen en la base: deciden POST contra PUT al grabar
+    /// cada fila.</summary>
+    private readonly HashSet<int> _itemsNuevos = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+
+        var combos = new List<Task> { CargarTipos(), CargarCentros(), CargarEntidades(), CargarProductos(), CargarLotes() };
+        await Task.WhenAll(combos);
+
+        if (_esNuevo)
+        {
+            _model = new Modelo { FEC_REQUERIMIENTO_STOCK = DateTime.Today };
+            return;
+        }
+
+        if (Item is not null)
+        {
+            _model = Item;
+            await CargarDetalleAsync(Item.NUM_REQUERIMIENTO_STOCK);
+        }
+    }
+
+    private async Task CargarTipos()
+        => _tipos = (await Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Logistica.TiposRequerimientoCombobox)) ?? new();
+    private async Task CargarCentros()
+        => _centros = (await Http.SafeGetAsync<List<ComboboxItem>>($"{ApiRoutes.Contabilidad.CentrosCosto}/combobox")) ?? new();
+    private async Task CargarEntidades()
+        => _entidades = (await Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Estandar.EntidadesCombobox)) ?? new();
+    private async Task CargarLotes()
+        => _lotes = (await Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Logistica.LotesControlCombobox)) ?? new();
+    private async Task CargarProductos()
+        => _productos = (await Http.SafeGetAsync<List<ProductoModel>>(ApiRoutes.Estandar.Productos)) ?? new();
+
+    /// <summary>Al elegir el producto se completa su descripción y, si el ítem todavía no tiene
+    /// unidad, la que trae el maestro — que es la que se usa el 90 % de las veces.</summary>
+    private void AsignarProducto(Item it, string? cod)
+    {
+        it.COD_PRODUCTO = cod ?? "";
+        var p = _productos.FirstOrDefault(x => x.COD_PRODUCTO == cod);
+        it.DES_PRODUCTO = p?.DES_PRODUCTO ?? "";
+        // Las unidades ya no se eligen a mano, así que se pisan siempre con las del
+        // maestro: si el producto cambia, la unidad del anterior no puede quedar colgada.
+        // Van en NULL y no en cadena vacía: "" no es una unidad que exista en el maestro, y
+        // la FK la rechaza. Muchos productos no tienen unidad secundaria y eso es válido.
+        it.COD_UNIDAD_MEDIDA            = Vacio(p?.COD_UNIDAD_MEDIDA);
+        it.COD_UNIDAD_MEDIDA_SECUNDARIA = Vacio(p?.COD_UNIDAD_MEDIDA_SECUNDARIA);
+    }
+
+    private async Task CargarDetalleAsync(int? num)
+    {
+        if (num is null) return;
+        var r = await Http.SafeGetAsync<List<Item>>($"{ApiRoutes.Logistica.RequerimientosStockDetallePorDoc}/{num}");
+        _items = r ?? new();
+    }
+
+
+    /// <summary>La secuencia es parte de la clave primaria: la asigna la pantalla como el
+    /// máximo + 1. Dejarla a mano solo produce choques al grabar.</summary>
+    private void AgregarItem()
+    {
+        var sig = (_items.Count == 0 ? 0 : _items.Max(x => x.NUM_SECUENCIA ?? 0)) + 1;
+        _items.Add(new Item { NUM_REQUERIMIENTO_STOCK = _model.NUM_REQUERIMIENTO_STOCK, NUM_SECUENCIA = sig, CAN_PRODUCTO = 0 });
+        _itemsNuevos.Add(sig);
+    }
+
+    /// <summary>Quitar una fila la borra en la base en el momento: el detalle ya no se
+    /// sincroniza al final, cada fila se graba sola.</summary>
+    private async Task QuitarItem(Item it)
+    {
+        var sec = it.NUM_SECUENCIA ?? 0;
+        if (!_itemsNuevos.Contains(sec))
+        {
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Logistica.RequerimientosStockDetalle}/{_model.NUM_REQUERIMIENTO_STOCK}/{sec}");
+            if (!rd.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService,
+                    nameof(RequerimientoDocumento), nameof(QuitarItem), $"No se pudo eliminar el ítem {sec}");
+                return;
+            }
+            _huboCambios = true;
+        }
+        _itemsNuevos.Remove(sec);
+        _items.Remove(it);
+    }
+
+    /// <summary>Graba la fila que se acaba de editar en la grilla. Sin producto no se manda
+    /// nada: la fila recién agregada todavía está vacía y el SP la rechazaría.</summary>
+    /// <summary>Lo que dispara el botón. Igual que el guardado automático, pero avisa —y
+    /// explica por qué no graba si todavía falta el producto.</summary>
+    private async Task GuardarItemConAviso(Item it)
+    {
+        if (string.IsNullOrWhiteSpace(it.COD_PRODUCTO))
+        {
+            Snackbar.Add("Elegí el producto antes de grabar el ítem.", Severity.Warning);
+            return;
+        }
+        if (await GuardarItem(it)) Snackbar.Add($"Ítem {it.NUM_SECUENCIA} grabado.", Severity.Success);
+    }
+
+    /// <summary>Cadena vacía y "sin valor" son cosas distintas para la base: los códigos
+    /// viajan a claves foráneas, y "" no existe en ningún maestro.</summary>
+    private static string? Vacio(string? v) => string.IsNullOrWhiteSpace(v) ? null : v;
+
+    private async Task<bool> GuardarItem(Item it)
+    {
+        if (_readonly || string.IsNullOrWhiteSpace(it.COD_PRODUCTO)) return false;
+
+        it.NUM_REQUERIMIENTO_STOCK = _model.NUM_REQUERIMIENTO_STOCK;
+        var sec = it.NUM_SECUENCIA ?? 0;
+        var esNuevo = _itemsNuevos.Contains(sec);
+
+        var r = await Http.GuardarAsync(ApiRoutes.Logistica.RequerimientosStockDetalle, it, esNuevo);
+        if (!r.IsSuccessStatusCode)
+        {
+            await ErrorDialogHelper.MostrarAsync(r, ErrorLog, DialogService,
+                nameof(RequerimientoDocumento), nameof(GuardarItem), $"No se pudo grabar el ítem {sec}");
+            return false;
+        }
+        _itemsNuevos.Remove(sec);
+        _huboCambios = true;
+        return true;
+    }
+
+
+    private async Task Cerrar()
+    {
+        // El bool le dice al listado si tiene que recargarse o si alcanza con volver.
+        await OnCerrar.InvokeAsync(_huboCambios);
+    }
+
+    private async Task OnInvalidSubmit(EditContext ctx)
+    {
+        var errores = string.Join(" · ", ctx.GetValidationMessages());
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"]  = "Faltan datos obligatorios",
+                ["Mensaje"] = string.IsNullOrWhiteSpace(errores) ? "Hay campos obligatorios sin completar." : errores
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta    = ApiRoutes.Logistica.RequerimientosStock;
+        var rutaDet = ApiRoutes.Logistica.RequerimientosStockDetalle;
+
+        try
+        {
+            // ── Eliminar ────────────────────────────────────────────────────────
+            // Los ítems primero: la cabecera tiene la FK y el motor rechazaría el orden inverso.
+            if (Modo == CrudModo.Delete)
+            {
+                foreach (var it in _items.ToList())
+                    await Http.DeleteAsync($"{rutaDet}/{_model.NUM_REQUERIMIENTO_STOCK}/{it.NUM_SECUENCIA}");
+
+                var rd = await Http.DeleteAsync($"{ruta}/{_model.NUM_REQUERIMIENTO_STOCK}");
+                if (rd.IsSuccessStatusCode) { Snackbar.Add("Requerimiento eliminado.", Severity.Success); await OnCerrar.InvokeAsync(true); }
+                else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(RequerimientoDocumento), nameof(Submit), "No se pudo eliminar el requerimiento");
+                return;
+            }
+
+            // ── Cabecera ────────────────────────────────────────────────────────
+            // Grabar NO cierra el diálogo: al crear, es justo lo que habilita el detalle, y
+            // cerrar en ese momento obligaría a volver a abrir el documento para cargar ítems.
+            var esAlta = !_cabeceraGrabada;
+            var resp = await Http.GuardarAsync(ruta, _model, esAlta);
+            if (!resp.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(RequerimientoDocumento), nameof(Submit));
+                return;
+            }
+
+            _huboCambios = true;
+
+            if (esAlta)
+            {
+                // El número lo genera la base y vuelve en Codigo. Sin él la cabecera quedó
+                // grabada pero el detalle no tiene de dónde colgarse, así que se avisa en vez
+                // de habilitar una grilla que fallaría en cada fila.
+                var cuerpo = await resp.Content.ReadFromJsonAsync<ApiResponse<WriteResult>>();
+                if (int.TryParse(cuerpo?.Data?.Codigo, out var generado))
+                {
+                    _model.NUM_REQUERIMIENTO_STOCK = generado;
+                    _esNuevo = false;
+                    Snackbar.Add($"Requerimiento N° {generado} creado. Ya podés cargar los ítems.", Severity.Success);
+                }
+                else
+                {
+                    Snackbar.Add("El requerimiento se creó, pero la base no devolvió su número: reabrí el documento para cargarle ítems.", Severity.Warning);
+                }
+            }
+            else
+            {
+                Snackbar.Add("Requerimiento actualizado.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(RequerimientoDocumento), nameof(Submit));
+            Snackbar.Add("No se pudo grabar. Ver detalle en el log de errores.", Severity.Error);
+        }
+        finally { _saving = false; }
+    }
+}

@@ -1,0 +1,94 @@
+@using KONSolutions.Shared.Models.Seguridad
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Mover opción</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.75;">
+            Mueve <b>@DesOpcionOrigen</b> (y todos sus descendientes, botones, roles asignados y favoritos)
+            hacia la aplicación/opción destino que elijas. Se reinsertará como hijo de la opción destino.
+        </MudText>
+        <AriaCombo TItem="ComboboxItem" Items="_aplicaciones"
+                   TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                   Value="@_codAplicacionDestino" ValueChanged="OnAplicacionDestinoChanged"
+                   Label="Aplicación destino" Class="mb-3" />
+        <AriaCombo TItem="ComboboxItem" Items="_opcionesDestino"
+                   TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                   @bind-Value="_codOpcionDestino"
+                   Label="Opción destino (nuevo padre)" Disabled="@(string.IsNullOrEmpty(_codAplicacionDestino))" />
+
+        <div class="d-flex justify-end gap-2 mt-4">
+            <MudButton Variant="Variant.Text" OnClick="@(() => MudDialog.Cancel())">Cancelar</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_saving || string.IsNullOrEmpty(_codOpcionDestino))" OnClick="Mover">
+                @(_saving ? "Moviendo..." : "Mover")
+            </MudButton>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string CodAplicacionOrigen { get; set; } = "";
+    [Parameter] public string CodOpcionOrigen { get; set; } = "";
+    [Parameter] public string DesOpcionOrigen { get; set; } = "";
+
+    private List<ComboboxItem> _aplicaciones = new();
+    private List<ComboboxItem> _opcionesDestino = new();
+    private string? _codAplicacionDestino;
+    private string? _codOpcionDestino;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var r = await Http.SafeGetAsync<List<Aplicacion>>(ApiRoutes.Seguridad.Aplicaciones);
+        _aplicaciones = (r ?? new())
+            .Select(a => new ComboboxItem { Id = a.COD_APLICACION.Trim(), Texto = a.DES_APLICACION ?? a.COD_APLICACION })
+            .ToList();
+    }
+
+    private async Task OnAplicacionDestinoChanged(string? codApp)
+    {
+        _codAplicacionDestino = codApp;
+        _codOpcionDestino = null;
+        await CargarOpcionesDestino(codApp);
+    }
+
+    private class OpcionRow
+    {
+        public string COD_OPCION_APLICACION { get; set; } = "";
+        public string DES_OPCION_APLICACION { get; set; } = "";
+    }
+
+    private async Task CargarOpcionesDestino(string? codApp)
+    {
+        if (string.IsNullOrEmpty(codApp)) { _opcionesDestino = new(); return; }
+        // Solo carpetas (COD_TIPO_OPCION_APLICACION = "CRP") pueden ser padre destino —
+        // no módulos, sub módulos ni botones.
+        var r = await Http.SafeGetAsync<List<OpcionRow>>(
+            $"{ApiRoutes.Seguridad.AplicacionesOpciones}/by-app?codAplicacion={Uri.EscapeDataString(codApp)}&tipoOpciones=CRP");
+        _opcionesDestino = (r ?? new())
+            .Select(o => new ComboboxItem { Id = o.COD_OPCION_APLICACION, Texto = o.DES_OPCION_APLICACION })
+            .ToList();
+    }
+    private async Task Mover()
+    {
+        if (string.IsNullOrEmpty(_codAplicacionDestino) || string.IsNullOrEmpty(_codOpcionDestino)) return;
+        _saving = true;
+        var dto = new
+        {
+            COD_APLICACION = CodAplicacionOrigen,
+            COD_OPCION_APLICACION = CodOpcionOrigen,
+            COD_APLICACION_DESTINO = _codAplicacionDestino,
+            COD_OPCION_APLICACION_DESTINO = _codOpcionDestino
+        };
+        var resp = await Http.PostAsJsonAsync(ApiRoutes.Seguridad.AplicacionesOpcionesMove, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add("Movido correctamente.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(MoverOpcionDialog), nameof(Mover));
+    }
+}

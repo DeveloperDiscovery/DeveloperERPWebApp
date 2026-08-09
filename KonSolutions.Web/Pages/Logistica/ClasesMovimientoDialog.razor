@@ -1,0 +1,112 @@
+@using ClasesMovimientoModel = KONSolutions.Shared.Models.Logistica.ClasesMovimiento
+@using LogisticaRoute = KONSolutions.Web.Services.ApiRoutes.Logistica
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_CLASE_MOVIMIENTO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="LOGISTICA.CLASES_MOVIMIENTO" Columna="COD_CLASE_MOVIMIENTO"
+                        @bind-Value="_model.COD_CLASE_MOVIMIENTO"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="LOGISTICA.CLASES_MOVIMIENTO" Columna="DES_CLASE_MOVIMIENTO"
+                        @bind-Value="_model.DES_CLASE_MOVIMIENTO"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            @* Ámbito de la clase. No son excluyentes —una clase puede servir a almacenes y
+               a producción a la vez— así que van como dos switches y no como una opción. *@
+            <MudGrid Spacing="2" Class="mb-2">
+                <MudItem xs="12" sm="6">
+                    <div class="d-flex align-center gap-2" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Warehouse"
+                                 Color="@(_model.FLG_ALMACENES == true ? Color.Primary : Color.Default)"
+                                 Style="@(_model.FLG_ALMACENES == true ? "" : "opacity:.35;")" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_ALMACENES" Disabled="_readonly"
+                                   Color="Color.Primary" Label="Almacenes" />
+                    </div>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <div class="d-flex align-center gap-2" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.PrecisionManufacturing"
+                                 Color="@(_model.FLG_PRODUCCION == true ? Color.Primary : Color.Default)"
+                                 Style="@(_model.FLG_PRODUCCION == true ? "" : "opacity:.35;")" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_PRODUCCION" Disabled="_readonly"
+                                   Color="Color.Primary" Label="Producción" />
+                    </div>
+                </MudItem>
+            </MudGrid>
+
+            <EstadoCombo DesTabla="LOGISTICA.CLASES_MOVIMIENTO"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ClasesMovimientoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private ClasesMovimientoModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(ClasesMovimientoModel m)
+    {
+        _model.COD_CLASE_MOVIMIENTO = m.COD_CLASE_MOVIMIENTO;
+        _model.DES_CLASE_MOVIMIENTO = m.DES_CLASE_MOVIMIENTO;
+        _model.FLG_ALMACENES = m.FLG_ALMACENES;
+        _model.FLG_PRODUCCION = m.FLG_PRODUCCION;
+        _model.COD_TIPO_ESTADO = m.COD_TIPO_ESTADO;
+        _model.COD_ESTADO = m.COD_ESTADO;
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<ClasesMovimientoModel>($"{LogisticaRoute.ClasesMovimiento}/{Uri.EscapeDataString(_model.COD_CLASE_MOVIMIENTO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = LogisticaRoute.ClasesMovimiento;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_CLASE_MOVIMIENTO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(ClasesMovimientoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // PROC_LOGISTICA_CLASES_MOVIMIENTO_INSERT es upsert — siempre POST.
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ClasesMovimientoDialog), nameof(Submit));
+    }
+}

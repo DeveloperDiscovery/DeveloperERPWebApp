@@ -1,0 +1,613 @@
+@page "/logistica/stocks-almacen-ubicacion"
+@attribute [Authorize]
+@using Modelo = KONSolutions.Shared.Models.Logistica.StocksAlmacenUbicacionDetalle
+@using Filtro = KONSolutions.Shared.Models.Logistica.StocksAlmacenUbicacionSearchDetailDto
+@using LoteModel = KONSolutions.Shared.Models.Logistica.LotesControl
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Existencias por Ubicación · @ConfigSvc.Current.NombreApp</PageTitle>
+
+@* Pantalla de consulta: no da de alta ni modifica nada. Lo que se ve acá lo escriben los
+   movimientos de almacén. *@
+<div class="documento-logistica">
+
+    <div class="d-flex align-center gap-3 mb-3 grid-header-compacto">
+        <div class="grid-header-titulo">
+            <TituloPagina Fallback="Existencias por Ubicación" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+            <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema LOGISTICA · @_visibles.Count de @_items.Count filas</MudText>
+        </div>
+        <MudSpacer />
+        @* Plegar los filtros es lo único que puede agrandar la grilla de verdad: el alto que
+           ganan las filas es exactamente el que dejan libre. *@
+        <MudButton Variant="Variant.Text"
+                   StartIcon="@(_filtrosVisibles ? Icons.Material.Filled.UnfoldLess : Icons.Material.Filled.UnfoldMore)"
+                   OnClick="@(() => _filtrosVisibles = !_filtrosVisibles)">
+            @(_filtrosVisibles ? "Ocultar filtros" : "Mostrar filtros")
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FilterAltOff"
+                   OnClick="LimpiarFiltros" Disabled="_buscando">Limpiar</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search"
+                   OnClick="Buscar" Disabled="_buscando">Buscar</MudButton>
+    </div>
+
+    @* ── Filtros ────────────────────────────────────────────────────────────
+       Todos opcionales: el procedimiento descarta los que llegan vacíos o en cero, así que
+       la pantalla los manda todos siempre y no arma nada condicional. *@
+    @* Filtros a la izquierda y rangos de cantidad a la derecha. Van en una grilla de 9 y 3 y
+       no en un flex: con flex, el bloque de cantidades se caía abajo apenas los filtros pedían
+       su ancho mínimo, que es justo lo que pasaba. *@
+    @if (_filtrosVisibles)
+    {
+        <MudGrid Spacing="1" Class="mb-3">
+            <MudItem xs="12" md="10">
+                <MudPaper Elevation="0" Class="pa-3 filtros-panel" Style="border:1px solid var(--line);height:100%;">
+                    <MudGrid Spacing="1">
+            @* Almacén y ubicación van solos: son el "dónde", y el resto de la fila describe
+               el "qué". Mezclarlos obligaba a leer la fila en dos idiomas. *@
+            <MudItem xs="12" md="6">
+                <AriaCombo TItem="ComboboxItem" Items="_almacenes"
+                           TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                           Value="@_f.COD_ALMACEN" ValueChanged="OnAlmacenChanged"
+                           Label="Almacén" Class="mb-2" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                @* Las ubicaciones cuelgan del almacén: hasta que no se elige uno, no hay de
+                   dónde sacarlas. *@
+                <AriaCombo TItem="ComboboxItem" Items="_ubicaciones"
+                           TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                           @bind-Value="_f.COD_UBICACION_ALMACEN"
+                           Label="Ubicación" Disabled="@(string.IsNullOrWhiteSpace(_f.COD_ALMACEN))" Class="mb-2" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                @* Grupo, familia y sub familia: cada una acota a la siguiente. *@
+                <AriaCombo TItem="ComboboxItem" Items="_grupos"
+                           TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                           Value="@_f.COD_GRUPO_PRODUCTO" ValueChanged="OnGrupoChanged"
+                           Label="Grupo de producto" Class="mb-2" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                @* Las familias cuelgan del grupo, y las sub familias de la familia: cada una se
+                   habilita cuando su padre tiene valor, y se vacía cuando el padre cambia. *@
+                <AriaCombo TItem="ComboboxItem" Items="_familias"
+                           TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                           Value="@_f.COD_FAMILIA_PRODUCTO" ValueChanged="OnFamiliaChanged"
+                           Label="Familia de producto"
+                           Disabled="@(string.IsNullOrWhiteSpace(_f.COD_GRUPO_PRODUCTO))" Class="mb-2" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <AriaCombo TItem="ComboboxItem" Items="_subFamilias"
+                           TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                           @bind-Value="_f.COD_SUB_FAMILIA_PRODUCTO"
+                           Label="Sub familia de producto"
+                           Disabled="@(string.IsNullOrWhiteSpace(_f.COD_FAMILIA_PRODUCTO))" Class="mb-2" />
+            </MudItem>
+
+            <MudItem xs="12" md="4">
+                <AriaCombo TItem="ComboboxItem" Items="_tiposProducto"
+                           TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                           @bind-Value="_f.COD_TIPO_PRODUCTO"
+                           Label="Tipo de producto" Class="mb-2" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <AriaCombo TItem="ComboboxItem" Items="_productos"
+                           TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                           @bind-Value="_f.COD_PRODUCTO"
+                           Label="Producto" Class="mb-2" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                @* Busca por texto dentro de la descripción, no por coincidencia exacta: sirve
+                   para cuando se recuerda parte del nombre y no el código. *@
+                <MudTextField T="string" @bind-Value="_f.DES_PRODUCTO" Label="Descripción contiene"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+            </MudItem>
+
+            <MudItem xs="12" md="4">
+                <AriaCombo TItem="ComboboxItem" Items="_entidades"
+                           TextFunc="@(t => t.Texto)" ValueFunc="@(t => t.Id)"
+                           Value="@(_f.COD_ENTIDAD_PROVEEDOR?.ToString())"
+                           ValueChanged="OnProveedorChanged"
+                           Label="Proveedor" Class="mb-2" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                @* Elegido el proveedor, sólo se ofrecen sus lotes: un lote de otro proveedor
+                   combinado con este filtro no devolvería nada. *@
+                <AriaCombo TItem="LoteModel" Items="_lotes"
+                           TextFunc="@(x => $"{x.NUM_LOTE_CONTROL} — {x.DES_LOTE_CONTROL}")"
+                           ValueFunc="@(x => x.NUM_LOTE_CONTROL)"
+                           @bind-Value="_f.NUM_LOTE_CONTROL"
+                           Label="Lote" Class="mb-2" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudTextField T="string" @bind-Value="_f.NUM_LOTE_CONTROL_ENTIDAD" Label="Lote del proveedor"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2" />
+            </MudItem>
+        </MudGrid>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="2">
+                <MudPaper Elevation="0" Class="pa-3 filtros-panel filtros-cantidades" Style="border:1px solid var(--line);height:100%;">
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">Cantidades</MudText>
+                    @* Cero significa "sin límite por ese lado", no "igual a cero": así lo
+                       interpreta el procedimiento, y por eso arrancan vacíos y no en cero. *@
+                    @* El bloque pasó de 3 a 2 columnas y el ancho liberado se lo lleva el de
+                       filtros, que es el que tenía los combos apretados. A este ancho el
+                       nombre del rango ya no entra dentro del input: va como rótulo arriba del
+                       par, y cada campo queda con "Desde" y "Hasta", que es lo único que
+                       cambia entre los dos. *@
+                    <MudGrid Spacing="1">
+                        @foreach (var r in _rangos)
+                        {
+                            <MudItem xs="12" Class="pb-0">
+                                <MudText Typo="Typo.caption" Style="opacity:.7;">@r.Titulo</MudText>
+                            </MudItem>
+                            <MudItem xs="6">
+                                <MudNumericField T="decimal?" Value="@r.Desde" ValueChanged="@(v => r.Desde = v)"
+                                                 Label="Desde" Variant="Variant.Outlined"
+                                                 HideSpinButtons="true" Format="N2" Margin="Margin.Dense" Class="mb-2" />
+                            </MudItem>
+                            <MudItem xs="6">
+                                <MudNumericField T="decimal?" Value="@r.Hasta" ValueChanged="@(v => r.Hasta = v)"
+                                                 Label="Hasta" Variant="Variant.Outlined"
+                                                 HideSpinButtons="true" Format="N2" Margin="Margin.Dense" Class="mb-2" />
+                            </MudItem>
+                        }
+                    </MudGrid>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    }
+
+    @* ── Resultado ──────────────────────────────────────────────────────────── *@
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);">
+        <div data-resizable-grid="stocks-almacen-ubicacion" style="position:relative;">
+        <MudDataGrid T="Modelo" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                     ReadOnly="true" Height="@(_filtrosVisibles ? "460px" : "760px")" FixedHeader="true"
+                     RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+            <Columns>
+                @* Cada celda descriptiva lleva su dato principal arriba y el contexto abajo, en
+                   chico: así entra en una fila lo que si no serían seis columnas. *@
+                <TemplateColumn Title="Ubicación" Sortable="false" Width="320px">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Texto="Ubicación" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                            <FiltroExcelColumna T="Modelo" ItemsBase="@Base(0)" ValorDe="@(x => Clave(x, 0))"
+                                                ValoresActivos="_filtrosCol.GetValueOrDefault(0)" ValoresActivosChanged="@(v => FiltroCol(0, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        @{ var f = context.Item; }
+                        <div class="d-flex align-center gap-2">
+                            <MudTooltip Text="Ver la ubicación en el plano">
+                                <MudIconButton Icon="@Icons.Material.Filled.Place" Size="Size.Small"
+                                               Color="Color.Primary" OnClick="@(() => VerEnPlano(f))" />
+                            </MudTooltip>
+                            <div>
+                                <div>Almacén: <span class="mono">@f.COD_ALMACEN</span> — @f.DES_ALMACEN</div>
+                                <div class="mono" style="font-size:.75rem;opacity:.6;">
+                                    Ubicación: @f.COD_UBICACION_ALMACEN — @f.DES_UBICACION_ALMACEN
+                                </div>
+                            </div>
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+
+                <TemplateColumn Title="Producto" Sortable="false" Width="460px">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Texto="Producto" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                            <FiltroExcelColumna T="Modelo" ItemsBase="@Base(1)" ValorDe="@(x => Clave(x, 1))"
+                                                ValoresActivos="_filtrosCol.GetValueOrDefault(1)" ValoresActivosChanged="@(v => FiltroCol(1, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        @{ var f = context.Item; }
+                        <div class="d-flex align-center gap-2">
+                            <MudTooltip Text="Ver la ficha del producto">
+                                <MudIconButton Icon="@Icons.Material.Filled.Description" Size="Size.Small"
+                                               Color="Color.Primary" OnClick="@(() => VerProducto(f))" />
+                            </MudTooltip>
+                            <div>
+                                <div>@f.DES_PRODUCTO</div>
+                                <div class="mono" style="font-size:.75rem;opacity:.6;">
+                                    Código: @f.COD_PRODUCTO · UM: @f.COD_UNIDAD_MEDIDA — @f.DES_UNIDAD_MEDIDA
+                                </div>
+                                <div class="mono" style="font-size:.75rem;opacity:.6;">
+                                    @f.DES_GRUPO_PRODUCTO · @f.DES_FAMILIA_PRODUCTO · @f.DES_SUB_FAMILIA_PRODUCTO
+                                </div>
+                            </div>
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+
+                <TemplateColumn Title="Lote" Sortable="false" Width="320px">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Texto="Lote" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                            <FiltroExcelColumna T="Modelo" ItemsBase="@Base(2)" ValorDe="@(x => Clave(x, 2))"
+                                                ValoresActivos="_filtrosCol.GetValueOrDefault(2)" ValoresActivosChanged="@(v => FiltroCol(2, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        @{ var f = context.Item; }
+                        <div class="d-flex align-center gap-2">
+                            <MudTooltip Text="Ver el lote">
+                                <MudIconButton Icon="@Icons.Material.Filled.Inventory2" Size="Size.Small"
+                                               Color="Color.Primary" OnClick="@(() => VerLote(f))" />
+                            </MudTooltip>
+                            <div>
+                                <div>@f.NUM_LOTE_CONTROL_ENTIDAD — @f.DES_LOTE_CONTROL</div>
+                                <div class="mono" style="font-size:.75rem;opacity:.6;">
+                                    Lote interno: @f.NUM_LOTE_CONTROL
+                                </div>
+                                <div class="mono" style="font-size:.75rem;opacity:.6;">
+                                    Proveedor: @f.DES_NOMBRE_COMPLETO
+                                </div>
+                            </div>
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+
+                <TemplateColumn Title="Stock" Sortable="false" Width="120px"
+                                CellStyle="text-align:right;" HeaderStyle="text-align:right;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center justify-end gap-1">
+                            <EncabezadoOrdenable Texto="Stock" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                            <FiltroExcelColumna T="Modelo" ItemsBase="@Base(3)" ValorDe="@(x => Clave(x, 3))"
+                                                ValoresActivos="_filtrosCol.GetValueOrDefault(3)" ValoresActivosChanged="@(v => FiltroCol(3, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate><span class="mono">@Cantidad(context.Item.CAN_PRODUCTO, context.Item.COD_UNIDAD_MEDIDA)</span></CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Reservado" Sortable="false" Width="140px"
+                                CellStyle="text-align:right;" HeaderStyle="text-align:right;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center justify-end gap-1">
+                            <EncabezadoOrdenable Texto="Reservado" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                            <FiltroExcelColumna T="Modelo" ItemsBase="@Base(4)" ValorDe="@(x => Clave(x, 4))"
+                                                ValoresActivos="_filtrosCol.GetValueOrDefault(4)" ValoresActivosChanged="@(v => FiltroCol(4, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        @{ var f = context.Item; }
+                        <div class="d-flex align-center justify-end gap-1">
+                            <span class="mono">@Cantidad(f.CAN_RESERVADA, f.COD_UNIDAD_MEDIDA)</span>
+                            @if ((f.CAN_RESERVADA ?? 0) > 0)
+                            {
+                                <MudTooltip Text="Ver las reservas de este stock">
+                                    <MudIconButton Icon="@Icons.Material.Filled.BookmarkAdded" Size="Size.Small"
+                                                   Color="Color.Primary" OnClick="@(() => VerReservas(f))" />
+                                </MudTooltip>
+                            }
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Tránsito" Sortable="false" Width="120px"
+                                CellStyle="text-align:right;" HeaderStyle="text-align:right;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center justify-end gap-1">
+                            <EncabezadoOrdenable Texto="Tránsito" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                            <FiltroExcelColumna T="Modelo" ItemsBase="@Base(5)" ValorDe="@(x => Clave(x, 5))"
+                                                ValoresActivos="_filtrosCol.GetValueOrDefault(5)" ValoresActivosChanged="@(v => FiltroCol(5, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate><span class="mono">@Cantidad(context.Item.CAN_TRANSITO, context.Item.COD_UNIDAD_MEDIDA)</span></CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Inmovilizado" Sortable="false" Width="130px"
+                                CellStyle="text-align:right;" HeaderStyle="text-align:right;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center justify-end gap-1">
+                            <EncabezadoOrdenable Texto="Inmovilizado" Activo="@(_ordenColumna == 6)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(6))" />
+                            <FiltroExcelColumna T="Modelo" ItemsBase="@Base(6)" ValorDe="@(x => Clave(x, 6))"
+                                                ValoresActivos="_filtrosCol.GetValueOrDefault(6)" ValoresActivosChanged="@(v => FiltroCol(6, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate><span class="mono">@Cantidad(context.Item.CAN_INMOVILIZADO, context.Item.COD_UNIDAD_MEDIDA)</span></CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Disponible" Sortable="false" Width="130px"
+                                CellStyle="text-align:right;" HeaderStyle="text-align:right;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center justify-end gap-1">
+                            <EncabezadoOrdenable Texto="Disponible" Activo="@(_ordenColumna == 7)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(7))" />
+                            <FiltroExcelColumna T="Modelo" ItemsBase="@Base(7)" ValorDe="@(x => Clave(x, 7))"
+                                                ValoresActivos="_filtrosCol.GetValueOrDefault(7)" ValoresActivosChanged="@(v => FiltroCol(7, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        <span class="mono"><b>@Cantidad(context.Item.CAN_DISPONIBLE, context.Item.COD_UNIDAD_MEDIDA)</b></span>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent>
+                <MudText Class="pa-6 mono" Style="opacity:.5;">
+                    @(_buscado ? "No hay existencias con esos filtros." : "Elegí los filtros y tocá Buscar.")
+                </MudText>
+            </NoRecordsContent>
+            <PagerContent><MudDataGridPager T="Modelo" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    </MudPaper>
+</div>
+
+@code {
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private Filtro _f = new();
+    private List<Modelo> _items = new();
+    private bool _buscando, _buscado;
+
+    /// <summary>Los filtros se pliegan enteros. Es la única forma de que la grilla gane alto de
+    /// verdad: lo que ocupan ellos es exactamente lo que le falta a ella.</summary>
+    private bool _filtrosVisibles = true;
+
+    // Los cinco que no dependen de nada vienen juntos del loadcombos; los otros tres los pide
+    // el servidor ya acotados al padre elegido, en vez de traerse el catálogo entero y
+    // recortarlo acá.
+    private List<ComboboxItem> _almacenes = new(), _grupos = new(), _tiposProducto = new(),
+                               _entidades = new(), _productos = new(),
+                               _ubicaciones = new(), _familias = new(), _subFamilias = new();
+    private List<LoteModel>    _lotes = new();
+
+    /// <summary>Cada rango escribe sobre dos campos del filtro. Tenerlos en una lista evita
+    /// repetir cinco veces el mismo par de controles en el marcado.</summary>
+    private sealed class Rango
+    {
+        public string Titulo = "";
+        public Func<decimal?> LeerDesde = () => null;
+        public Action<decimal?> EscribirDesde = _ => { };
+        public Func<decimal?> LeerHasta = () => null;
+        public Action<decimal?> EscribirHasta = _ => { };
+        public decimal? Desde { get => LeerDesde(); set => EscribirDesde(value); }
+        public decimal? Hasta { get => LeerHasta(); set => EscribirHasta(value); }
+    }
+
+    private List<Rango> _rangos = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        ArmarRangos();
+        await AccessLog.LogNavegacionAsync("LOGISTICA", "StocksAlmacen");
+        await CargarCombos();
+    }
+
+    private void ArmarRangos() => _rangos = new()
+    {
+        new() { Titulo = "Stock",        LeerDesde = () => _f.CAN_PRODUCTO_INICIAL,    EscribirDesde = v => _f.CAN_PRODUCTO_INICIAL = v,
+                                          LeerHasta = () => _f.CAN_PRODUCTO_FINAL,      EscribirHasta = v => _f.CAN_PRODUCTO_FINAL = v },
+        new() { Titulo = "Reservado",    LeerDesde = () => _f.CAN_RESERVADA_INICIAL,   EscribirDesde = v => _f.CAN_RESERVADA_INICIAL = v,
+                                          LeerHasta = () => _f.CAN_RESERVADA_FINAL,     EscribirHasta = v => _f.CAN_RESERVADA_FINAL = v },
+        new() { Titulo = "Tránsito",     LeerDesde = () => _f.CAN_TRANSITO_INICIAL,    EscribirDesde = v => _f.CAN_TRANSITO_INICIAL = v,
+                                          LeerHasta = () => _f.CAN_TRANSITO_FINAL,      EscribirHasta = v => _f.CAN_TRANSITO_FINAL = v },
+        new() { Titulo = "Inmovilizado", LeerDesde = () => _f.CAN_IMOVILIZADO_INICIAL, EscribirDesde = v => _f.CAN_IMOVILIZADO_INICIAL = v,
+                                          LeerHasta = () => _f.CAN_IMOVILIZADO_FINAL,   EscribirHasta = v => _f.CAN_IMOVILIZADO_FINAL = v },
+        new() { Titulo = "Disponible",   LeerDesde = () => _f.CAN_DISPONIBLE_INICIAL,  EscribirDesde = v => _f.CAN_DISPONIBLE_INICIAL = v,
+                                          LeerHasta = () => _f.CAN_DISPONIBLE_FINAL,    EscribirHasta = v => _f.CAN_DISPONIBLE_FINAL = v },
+    };
+
+    /// <summary>Los cinco combos independientes en una sola llamada, en vez de cinco. El
+    /// procedimiento LOADCOMBOS existe justamente para eso.</summary>
+    private async Task CargarCombos()
+    {
+        var c = await Http.SafeGetAsync<KONSolutions.Shared.Models.Logistica.StocksAlmacenUbicacionCombos>(
+                    ApiRoutes.Logistica.StocksAlmacenUbicacionLoadCombos);
+        if (c is null) return;
+        _almacenes     = c.Almacenes;
+        _grupos        = c.Grupos;
+        _tiposProducto = c.TiposProducto;
+        _entidades     = c.Proveedores;
+        _productos     = c.Productos;
+
+        // Productos va por su propio endpoint cuando LOADCOMBOS no lo trae. El resultset de
+        // productos es el único del procedimiento que comparte columnas clave con los otros
+        // —COD_GRUPO_PRODUCTO y COD_TIPO_PRODUCTO son atributos del producto—, así que es el
+        // que se pierde ante cualquier cambio de forma. El combo estándar ya existe, lo usan
+        // las demás pantallas y no depende de en qué orden ni con qué columnas llegue.
+        if (_productos.Count == 0)
+            _productos = (await Http.SafeGetAsync<List<ComboboxItem>>(
+                             $"{ApiRoutes.Estandar.Productos}/combobox")) ?? new();
+    }
+
+    /// <summary>Al cambiar de almacén se recargan sus ubicaciones y se limpia la elegida: una
+    /// ubicación de otro almacén no filtraría nada.</summary>
+    private async Task OnAlmacenChanged(string? cod)
+    {
+        _f.COD_ALMACEN = cod;
+        _f.COD_UBICACION_ALMACEN = null;
+        // La ruta es combobox/{almacén}, no {almacén}/combobox: al revés el servidor la toma
+        // como "una ubicación llamada combobox" y no devuelve nada.
+        _ubicaciones = string.IsNullOrWhiteSpace(cod)
+            ? new()
+            : (await Http.SafeGetAsync<List<ComboboxItem>>(
+                   $"{ApiRoutes.Logistica.AlmacenesUbicaciones}/combobox/{Uri.EscapeDataString(cod)}")) ?? new();
+    }
+
+    /// <summary>Cambiar de grupo invalida la familia y la sub familia elegidas: pertenecen al
+    /// grupo anterior y combinadas con el nuevo no devolverían nada.</summary>
+    private async Task OnGrupoChanged(string? cod)
+    {
+        _f.COD_GRUPO_PRODUCTO = cod;
+        _f.COD_FAMILIA_PRODUCTO = null;
+        _f.COD_SUB_FAMILIA_PRODUCTO = null;
+        _subFamilias = new();
+        _familias = string.IsNullOrWhiteSpace(cod)
+            ? new()
+            : (await Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Estandar.FamiliasProductoPorGrupo(cod))) ?? new();
+    }
+
+    private async Task OnFamiliaChanged(string? cod)
+    {
+        _f.COD_FAMILIA_PRODUCTO = cod;
+        _f.COD_SUB_FAMILIA_PRODUCTO = null;
+        // Van los dos códigos: el de la sub familia se repite entre familias distintas, así
+        // que solo no la identifica.
+        _subFamilias = string.IsNullOrWhiteSpace(cod) || string.IsNullOrWhiteSpace(_f.COD_GRUPO_PRODUCTO)
+            ? new()
+            : (await Http.SafeGetAsync<List<ComboboxItem>>(
+                   ApiRoutes.Estandar.SubFamiliasProductoPorFamilia(_f.COD_GRUPO_PRODUCTO!, cod))) ?? new();
+    }
+
+    /// <summary>Los lotes salen del procedimiento por entidad. Sin proveedor elegido el combo
+    /// queda vacío a propósito: la lista completa de lotes no ayuda a nadie a filtrar.</summary>
+    private async Task OnProveedorChanged(string? valor)
+    {
+        _f.COD_ENTIDAD_PROVEEDOR = decimal.TryParse(valor, out var n) ? n : null;
+        _f.NUM_LOTE_CONTROL = null;
+        _lotes = _f.COD_ENTIDAD_PROVEEDOR is null
+            ? new()
+            : (await Http.SafeGetAsync<List<LoteModel>>(
+                   ApiRoutes.Logistica.LotesControlPorEntidad(_f.COD_ENTIDAD_PROVEEDOR.Value))) ?? new();
+    }
+
+    // ── Filtro y orden por columna ──────────────────────────────────────────
+    // Sobre lo que ya trajo el procedimiento, en memoria: los filtros de arriba deciden
+    // QUÉ se trae del servidor, y estos deciden qué se mira de lo traído. Volver a la base
+    // por cada click de cabecera sería un viaje por nada.
+    private readonly Dictionary<int, HashSet<string>?> _filtrosCol = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+
+    /// <summary>Texto por el que se filtra cada columna. Es el mismo que se ve en la celda:
+    /// si en la lista del filtro apareciera otra cosa, no habría forma de relacionarlos.</summary>
+    private static string Clave(Modelo x, int col) => col switch
+    {
+        0 => $"{x.COD_UBICACION_ALMACEN} — {x.DES_UBICACION_ALMACEN}",
+        1 => x.DES_PRODUCTO ?? "",
+        2 => x.NUM_LOTE_CONTROL_ENTIDAD ?? "",
+        3 => Cantidad(x.CAN_PRODUCTO, x.COD_UNIDAD_MEDIDA),
+        4 => Cantidad(x.CAN_RESERVADA, x.COD_UNIDAD_MEDIDA),
+        5 => Cantidad(x.CAN_TRANSITO, x.COD_UNIDAD_MEDIDA),
+        6 => Cantidad(x.CAN_INMOVILIZADO, x.COD_UNIDAD_MEDIDA),
+        7 => Cantidad(x.CAN_DISPONIBLE, x.COD_UNIDAD_MEDIDA),
+        _ => ""
+    };
+
+    /// <summary>Las cantidades se ordenan por su valor y no por el texto de la celda: como
+    /// string, "9" iría después de "10".</summary>
+    private static decimal? Numero(Modelo x, int col) => col switch
+    {
+        3 => x.CAN_PRODUCTO,
+        4 => x.CAN_RESERVADA,
+        5 => x.CAN_TRANSITO,
+        6 => x.CAN_INMOVILIZADO,
+        7 => x.CAN_DISPONIBLE,
+        _ => null
+    };
+
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+
+    private void FiltroCol(int c, HashSet<string>? v) { _filtrosCol[c] = v; StateHasChanged(); }
+
+    private List<Modelo> Ordenar(List<Modelo> items)
+    {
+        if (_ordenColumna is not int c) return items;
+        if (c >= 3)
+            return (_ordenAscendente ? items.OrderBy(x => Numero(x, c)) : items.OrderByDescending(x => Numero(x, c))).ToList();
+        return (_ordenAscendente ? items.OrderBy(x => Clave(x, c)) : items.OrderByDescending(x => Clave(x, c))).ToList();
+    }
+
+    /// <summary>Excluye la columna <paramref name="ex"/> para que su propio filtro no le
+    /// recorte la lista de valores que ofrece — así se ve la cascada de las demás.</summary>
+    private List<Modelo> AplicarCol(List<Modelo> src, int ex)
+    {
+        IEnumerable<Modelo> q = src;
+        foreach (var (c, v) in _filtrosCol)
+        {
+            if (c == ex || v is null) continue;
+            var col = c;
+            var set = v;
+            q = q.Where(x => set.Contains(Clave(x, col)));
+        }
+        return q.ToList();
+    }
+
+    private List<Modelo> _visibles => Ordenar(AplicarCol(_items, -1));
+    private List<Modelo> Base(int col) => AplicarCol(_items, col);
+
+    private static string Cantidad(decimal? valor, string? unidad)
+        => valor is null ? "—" : $"{valor.Value.ToString("N2")} {unidad}".TrimEnd();
+
+    private async Task Buscar()
+    {
+        _buscando = true;
+        try
+        {
+            var r = await Http.PostAsJsonAsync(ApiRoutes.Logistica.StocksAlmacenUbicacionSearchDetail, _f);
+            if (!r.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(r, ErrorLog, DialogService, nameof(StocksAlmacen), nameof(Buscar),
+                                                     "No se pudo consultar las existencias");
+                return;
+            }
+            var cuerpo = await r.Content.ReadFromJsonAsync<ApiResponse<List<Modelo>>>();
+            _items = cuerpo?.Data ?? new();
+            _buscado = true;
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(StocksAlmacen), nameof(Buscar));
+            Snackbar.Add("No se pudo consultar. Ver detalle en el log de errores.", Severity.Error);
+        }
+        finally { _buscando = false; }
+    }
+
+    private void LimpiarFiltros()
+    {
+        _f = new Filtro();
+        ArmarRangos();          // los rangos apuntan al filtro viejo: hay que reapuntarlos
+        _ubicaciones = new();
+        _familias = new();
+        _subFamilias = new();
+        _lotes = new();
+        _items = new();
+        _buscado = false;
+        // Los filtros de columna también: quedarían recortando una lista que ya no existe.
+        _filtrosCol.Clear();
+        _ordenColumna = null;
+    }
+
+    // ── Accesos desde la fila ───────────────────────────────────────────────
+    // Abren la información relacionada sin sacar al usuario de la consulta.
+    private async Task VerEnPlano(Modelo f)
+    {
+        if (string.IsNullOrWhiteSpace(f.DES_POLIGONO))
+        {
+            Snackbar.Add("Esta ubicación no tiene un polígono dibujado en el plano.", Severity.Info);
+            return;
+        }
+        // Pendiente: mostrar el polígono resaltado sobre el plano. El dibujo ya existe en
+        // PlanoZonificacion; falta extraerlo a un componente que se pueda abrir en diálogo.
+        Snackbar.Add($"Plano de {f.COD_UBICACION_ALMACEN} — pendiente de enganchar.", Severity.Info);
+        await Task.CompletedTask;
+    }
+
+    private Task VerProducto(Modelo f)
+    {
+        Snackbar.Add($"Ficha del producto {f.COD_PRODUCTO} — pendiente de enganchar.", Severity.Info);
+        return Task.CompletedTask;
+    }
+
+    private Task VerLote(Modelo f)
+    {
+        Snackbar.Add($"Lote {f.NUM_LOTE_CONTROL} — pendiente de enganchar.", Severity.Info);
+        return Task.CompletedTask;
+    }
+
+    private Task VerReservas(Modelo f)
+    {
+        Snackbar.Add($"Reservas de {f.COD_PRODUCTO} — pendiente de enganchar.", Severity.Info);
+        return Task.CompletedTask;
+    }
+}

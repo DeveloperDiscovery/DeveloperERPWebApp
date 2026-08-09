@@ -1,0 +1,40 @@
+@*
+    EstadoChip.razor
+    --------------------------------------------------------------------------
+    Chip de estado coloreado para usar en columnas de grillas.
+    Lee DES_ESTADO, DES_BACKCOLOR y DES_FORECOLOR directamente del registro
+    devuelto por el SP SHOWALL (que hace JOIN con ESTANDAR.ESTADOS).
+
+    Uso en MudDataGrid:
+      <TemplateColumn Title="Estado" SortBy="@(x => x.DES_ESTADO)">
+          <CellTemplate>
+              <EstadoChip Estado="@context.Item.DES_ESTADO"
+                          BackColor="@context.Item.DES_BACKCOLOR"
+                          ForeColor="@context.Item.DES_FORECOLOR" />
+          </CellTemplate>
+      </TemplateColumn>
+*@
+
+@if (!string.IsNullOrWhiteSpace(Estado))
+{
+    <span style="display:inline-block;
+                 padding:2px 10px;
+                 border-radius:20px;
+                 font-size:.78rem;
+                 font-family:monospace;
+                 font-weight:600;
+                 white-space:nowrap;
+                 background:@(_back);
+                 color:@(_fore);">
+        @Estado
+    </span>
+}
+
+@code {
+    [Parameter] public string? Estado    { get; set; }
+    [Parameter] public string? BackColor { get; set; }
+    [Parameter] public string? ForeColor { get; set; }
+
+    private string _back => string.IsNullOrWhiteSpace(BackColor) ? "#e0e0e0" : BackColor;
+    private string _fore => string.IsNullOrWhiteSpace(ForeColor) ? "#333333" : ForeColor;
+}

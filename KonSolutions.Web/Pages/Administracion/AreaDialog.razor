@@ -1,0 +1,245 @@
+@using KONSolutions.Shared.Models.Administracion
+@using KONSolutions.Shared.Common
+@using System.Net.Http.Json
+@inject CatalogoService<Area, AreaDto> Service
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+
+<MudDialog Style="width:min(806px,95vw);">
+    <DialogContent>
+        @if (_error is not null)
+        {
+            <ErrorSqlBox Titulo="@_error.Titulo" Mensaje="@_error.Mensaje" Origen="@_error.Origen"
+                         ErrorNumber="@_error.ErrorNumber" ErrorProcedure="@_error.ErrorProcedure"
+                         ErrorLine="@_error.ErrorLine" SqlSentence="@_error.SqlSentence" Pagina="@_error.Pagina"
+                         OnClose="@(() => _error = null)" />
+        }
+
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="SubmitInvalido">
+            <DataAnnotationsValidator />
+
+            @if (_isEdit || _readonly)
+            {
+                <MudTextField Value="@_model.COD_AREA?.ToString()" Label="Código" Variant="Variant.Outlined"
+                              Disabled="true" Class="mb-3" />
+            }
+
+            <MudTextField Value="@_textoAreaPadre" Label="Área padre (vacío = raíz)" Variant="Variant.Outlined"
+                          Disabled="true" Class="mb-3" />
+
+            <CampoTexto Tabla="ADMINISTRACION.AREAS" Columna="DES_AREA"
+                        @bind-Value="_model.DES_AREA" Disabled="_readonly" />
+
+            <div class="d-flex gap-3">
+                <div style="flex:1;min-width:0;">
+                    <AriaCombo TItem="ComboboxItem"
+                               Items="_sucursales"
+                               TextFunc="@(c => c.Texto)"
+                               ValueFunc="@(c => c.Id)"
+                               @bind-Value="_model.COD_SUCURSAL"
+                               Label="Sucursal" Disabled="_readonly" />
+                </div>
+                <div style="flex:1;min-width:0;">
+                    <AriaCombo TItem="ComboboxItem"
+                               Items="_centrosCosto"
+                               TextFunc="@(c => c.Texto)"
+                               ValueFunc="@(c => c.Id)"
+                               @bind-Value="_model.COD_CENTRO_COSTO"
+                               Label="Centro de costo" Disabled="_readonly" />
+                </div>
+            </div>
+
+            <MudNumericField @bind-Value="_model.NUM_ORDEN_PRESENTACION" Label="Orden de presentación" Variant="Variant.Outlined"
+                              Disabled="_readonly" Class="mb-3" Min="0" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+
+            <div class="d-flex gap-4 mb-3" style="flex-wrap:wrap;">
+                <div class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.AccountBalance" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_GERENCIA ?? false)" ValueChanged="@(v => _model.FLG_GERENCIA = v)"
+                                 Disabled="_readonly" Label="Gerencia" Color="Color.Primary" />
+                </div>
+                <div class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.AccountTree" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_SUB_GERENCIA ?? false)" ValueChanged="@(v => _model.FLG_SUB_GERENCIA = v)"
+                                 Disabled="_readonly" Label="Sub-gerencia" Color="Color.Primary" />
+                </div>
+                <div class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.Badge" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_JEFATURA ?? false)" ValueChanged="@(v => _model.FLG_JEFATURA = v)"
+                                 Disabled="_readonly" Label="Jefatura" Color="Color.Primary" />
+                </div>
+                <div class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.Badge" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_SUBJEFATURA ?? false)" ValueChanged="@(v => _model.FLG_SUBJEFATURA = v)"
+                                 Disabled="_readonly" Label="Subjefatura" Color="Color.Primary" />
+                </div>
+                <div class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.SupervisorAccount" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_SUPERVISOR ?? false)" ValueChanged="@(v => _model.FLG_SUPERVISOR = v)"
+                                 Disabled="_readonly" Label="Supervisor" Color="Color.Primary" />
+                </div>
+            </div>
+
+            <EstadoCombo DesTabla="ADMINISTRACION.AREAS" @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)" Disabled="_readonly" Class="mb-3" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Area? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public List<Area> Universo { get; set; } = new();
+
+    private AreaDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private record ErrorMostrado(string Titulo, string Mensaje, OrigenError Origen, string Pagina,
+        int? ErrorNumber = null, string? ErrorProcedure = null, int? ErrorLine = null, string? SqlSentence = null);
+    private ErrorMostrado? _error;
+
+    /// <summary>Áreas elegibles como padre: todo el universo salvo el propio registro (evita auto-referencia).</summary>
+    private List<Area> _padres => Universo.Where(a => a.COD_AREA != _model.COD_AREA).ToList();
+
+    private List<ComboboxItem> _sucursales = new();
+    private List<ComboboxItem> _centrosCosto = new();
+    private List<EstadoItem> _estados = new();
+
+    /// <summary>Texto fijo del área padre (no editable: la fija el contexto desde el que se creó — raíz o hijo de un nodo).</summary>
+    private string _textoAreaPadre
+    {
+        get
+        {
+            var padre = Universo.FirstOrDefault(a => a.COD_AREA == _model.COD_AREA_PADRE);
+            return padre is null ? "(raíz)" : $"{padre.COD_AREA} – {padre.DES_AREA}";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (Modo != CrudModo.Create && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        try
+        {
+            var url = $"{ApiRoutes.Administracion.AreasLoadcombos}?codTipoEstado={_model.COD_TIPO_ESTADO ?? 0}";
+            var resp = await Http.GetAsync(url);
+            var raw = await resp.Content.ReadAsStringAsync();
+
+            ApiResponse<AreasLoadCombosResult>? r = null;
+            try
+            {
+                r = System.Text.Json.JsonSerializer.Deserialize<ApiResponse<AreasLoadCombosResult>>(raw,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            }
+            catch (System.Text.Json.JsonException) { /* cuerpo no es ApiResponse; se maneja abajo */ }
+
+            if (!resp.IsSuccessStatusCode || r is null || !r.Success)
+            {
+                var msg = ApiErrorHelper.ExtraerMensaje(raw, r?.Message ?? "", (int)resp.StatusCode);
+                var origen = r?.ErrorNumber.HasValue == true ? OrigenError.SQL : OrigenError.API;
+                _error = new("No se pudieron cargar los combos", msg, origen, nameof(AreaDialog),
+                    r?.ErrorNumber, r?.ErrorProcedure, r?.ErrorLine, r?.SqlSentence);
+                await ErrorLog.LogRechazoAsync(msg, nameof(AreaDialog), "Loadcombos");
+                return;
+            }
+
+            _sucursales   = r.Data?.Sucursales ?? new();
+            _centrosCosto = r.Data?.CentrosCosto ?? new();
+            _estados      = r.Data?.Estados ?? new();
+            if (_model.COD_TIPO_ESTADO is null or 0) _model.COD_TIPO_ESTADO = r.Data?.CodTipoEstado;
+
+            // Al crear, preseleccionar el estado marcado EsDefault (si aún no hay uno elegido).
+            if (Modo == CrudModo.Create && _model.COD_ESTADO is null)
+                _model.COD_ESTADO = _estados.FirstOrDefault(e => e.EsDefault)?.CodEstado;
+
+            if (_sucursales.Count == 0 && _centrosCosto.Count == 0 && _estados.Count == 0)
+            {
+                var msgVacio = $"Loadcombos respondió OK pero sin filas (CodTipoEstado resuelto = {r.Data?.CodTipoEstado ?? 0}). " +
+                               "Verificar que PROC_ADMINISTRACION_AREAS_LOADCOMBOS esté creado y que ESTANDAR.TABLAS_TIPOS_ESTADO tenga fila para 'ADMINISTRACION.AREAS'.";
+                _error = new("Combos vacíos", "Los combos de Sucursal/Centro de costo/Estado llegaron vacíos desde el servidor.",
+                    OrigenError.API, nameof(AreaDialog));
+                await ErrorLog.LogRechazoAsync(msgVacio, nameof(AreaDialog), "Loadcombos-Vacio");
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = new("No se pudieron cargar los combos", ex.Message, OrigenError.WEB, nameof(AreaDialog));
+            await ErrorLog.LogAsync(ex, nameof(AreaDialog), "Loadcombos");
+        }
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de GetByIdAsync) hacia _model.</summary>
+    private void MapearDesdeModelo(Area m)
+    {
+        _model = new AreaDto
+        {
+            COD_AREA               = m.COD_AREA,
+            DES_AREA               = m.DES_AREA,
+            COD_AREA_PADRE         = m.COD_AREA_PADRE,
+            COD_SUCURSAL           = m.COD_SUCURSAL,
+            COD_CENTRO_COSTO       = m.COD_CENTRO_COSTO,
+            FLG_GERENCIA           = m.FLG_GERENCIA,
+            FLG_SUB_GERENCIA       = m.FLG_SUB_GERENCIA,
+            FLG_JEFATURA           = m.FLG_JEFATURA,
+            FLG_SUBJEFATURA        = m.FLG_SUBJEFATURA,
+            FLG_SUPERVISOR         = m.FLG_SUPERVISOR,
+            NUM_ORDEN_PRESENTACION = m.NUM_ORDEN_PRESENTACION,
+            COD_TIPO_ESTADO        = m.COD_TIPO_ESTADO,
+            COD_ESTADO             = m.COD_ESTADO
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde GetByIdAsync — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_AREA?.ToString() ?? "");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    private Task SubmitInvalido()
+    {
+        _error = new("No se pudo completar la acción", "Revisa los campos marcados: hay datos obligatorios sin completar.",
+            OrigenError.WEB, nameof(AreaDialog));
+        return Task.CompletedTask;
+    }
+
+    private async Task Submit()
+    {
+        _error = null;
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Service.EliminarDetalladoAsync(_model.COD_AREA?.ToString() ?? "");
+            _saving = false;
+            if (rd.Ok) { Snackbar.Add("Área eliminada.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else _error = new("No se pudo eliminar el registro", rd.Msg,
+                rd.ErrorNumber.HasValue ? OrigenError.SQL : OrigenError.API, nameof(AreaDialog),
+                rd.ErrorNumber, rd.ErrorProcedure, rd.ErrorLine, rd.SqlSentence);
+            return;
+        }
+        var r = await Service.GuardarDetalladoAsync(_model, Modo == CrudModo.Create);
+        _saving = false;
+        if (r.Ok) { Snackbar.Add(_isEdit ? "Área actualizada." : "Área creada.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else _error = new("No se pudo guardar el registro", r.Msg,
+            r.ErrorNumber.HasValue ? OrigenError.SQL : OrigenError.API, nameof(AreaDialog),
+            r.ErrorNumber, r.ErrorProcedure, r.ErrorLine, r.SqlSentence);
+    }
+}

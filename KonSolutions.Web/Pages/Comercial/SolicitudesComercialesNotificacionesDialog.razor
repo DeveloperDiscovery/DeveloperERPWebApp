@@ -1,0 +1,160 @@
+@* Diálogo "Ver Aprobaciones" (COMERCIAL.SOLICITUDES_COMERCIALES_NOTIFICACIONES) — lista
+   de solo lectura de las notificaciones generadas por una solicitud comercial. No tiene
+   CRUD a propósito: las filas las crea el flujo de notificación, no el usuario.
+   El botón "ver" de cada fila abre la ficha completa de la notificación reusando
+   NotificacionAprobacionDialog con SoloLectura=true, igual que Entorno/NotificacionesConsulta. *@
+@using SolicitudModel = KONSolutions.Shared.Models.Comercial.SolicitudesComerciales
+@using NotificacionModel = KONSolutions.Shared.Models.Comercial.SolicitudesComercialesNotificaciones
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+@inject NotificacionesAprobacionesService AprobSvc
+
+<MudDialog Style="width:min(1000px,94vw);min-height:55vh;">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" />
+            <span>Aprobaciones · @Item?.DES_SOLICITUD_COMERCIAL</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid Class="align-end mb-3">
+            <MudItem xs="12" sm="3">
+                <MudTextField Value="@Item?.NUM_SOLICITUD_COMERCIAL.ToString()" Label="Nº Solicitud" ReadOnly="true" Variant="Variant.Outlined" Class="mb-0" />
+            </MudItem>
+            <MudItem xs="12" sm="5">
+                <MudTextField Value="@Item?.DES_SOLICITUD_COMERCIAL" Label="Solicitud Comercial" ReadOnly="true" Variant="Variant.Outlined" Class="mb-0" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudTextField Value="@Item?.DES_NOMBRE_COMPLETO" Label="Entidad Cliente" ReadOnly="true" Variant="Variant.Outlined" Class="mb-0" />
+            </MudItem>
+        </MudGrid>
+
+        <div class="d-flex align-center gap-3 mb-3">
+            <BarraBusqueda @bind-Value="_search" Placeholder="Buscar en las notificaciones..." DebounceInterval="400" MaxWidth="360px" />
+            <MudSpacer />
+            <GridRefreshButton OnRefresh="Load" />
+        </div>
+
+        @if (_cargando)
+        {
+            <MudProgressLinear Indeterminate="true" Class="mb-3" />
+        }
+
+        <MudDataGrid T="NotificacionModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                     FixedHeader="true" RowsPerPage="10">
+            <Columns>
+                <TemplateColumn Title="" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;" Width="60">
+                    <CellTemplate>
+                        <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" Color="Color.Primary"
+                                       Title="Ver notificación" OnClick="@(() => VerAsync(context.Item.NUM_NOTIFICACION))" />
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Nº Notificación" Sortable="false" Width="130">
+                    <CellTemplate>@context.Item.NUM_NOTIFICACION</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Tipo" Sortable="false" Width="150">
+                    <CellTemplate>@context.Item.DES_TIPO_NOTIFICACION</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Notificación" Sortable="false">
+                    <CellTemplate>
+                        <div style="font-weight:600;">@context.Item.DES_NOTIFICACION</div>
+                        <div style="font-size:.75rem;opacity:.7;white-space:pre-line;">@context.Item.DES_INFORMACION</div>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Registrado" Sortable="false" Width="150">
+                    <CellTemplate>
+                        <div>@(context.Item.FEC_REGISTRO?.ToString("dd/MM/yyyy HH:mm") ?? "—")</div>
+                        <div style="font-size:.72rem;opacity:.6;">@context.Item.COD_USUARIO_REGISTRO</div>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Estado" Sortable="false" Width="140">
+                    <CellTemplate>
+                        <div class="d-flex align-center gap-1">
+                            @if (Base64(context.Item.IMG_PICTURE) is { } img)
+                            {
+                                <img src="@img" style="width:16px;height:16px;object-fit:contain;" alt="" />
+                            }
+                            <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent><MudText Align="Align.Center" Class="pa-6 mono" Style="opacity:.5;">Sin notificaciones para esta solicitud.</MudText></NoRecordsContent>
+            <PagerContent><MudDataGridPager T="NotificacionModel" /></PagerContent>
+        </MudDataGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => MudDialog.Close(DialogResult.Ok(true)))" Variant="Variant.Filled"
+                   Style="font-weight:700;background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cerrar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public SolicitudModel? Item { get; set; }
+
+    private List<NotificacionModel> _items = new();
+    private string _search = "";
+    private bool _cargando = true;
+
+    // Filtrado en memoria: la lista por solicitud es corta, no vale la pena ir al SP_SEARCH.
+    private List<NotificacionModel> _visibles => string.IsNullOrWhiteSpace(_search)
+        ? _items
+        : _items.Where(n =>
+            (n.DES_NOTIFICACION ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+            (n.DES_INFORMACION ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+            (n.DES_TIPO_NOTIFICACION ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+            (n.DES_ESTADO ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+            n.NUM_NOTIFICACION.ToString().Contains(_search, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        if (Item is null) return;
+        _cargando = true;
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<NotificacionModel>>>(
+                $"{ComercialRoute.SolicitudesComercialesNotificaciones}?numSolicitudComercial={Item.NUM_SOLICITUD_COMERCIAL}");
+            _items = (r?.Data ?? new()).OrderByDescending(n => n.NUM_NOTIFICACION).ToList();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(SolicitudesComercialesNotificacionesDialog), nameof(Load));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+        }
+        finally { _cargando = false; }
+    }
+
+    // Misma ficha (y mismo servicio) que usa Entorno/NotificacionesConsulta al hacer "ver",
+    // en modo consulta: sin botones de aprobar/rechazar/observar.
+    private async Task VerAsync(int numNotificacion)
+    {
+        try { await JS.InvokeVoidAsync("cursorBusy.show"); } catch { }
+        var data = await AprobSvc.GetByIdAsync(numNotificacion);
+        try { await JS.InvokeVoidAsync("cursorBusy.hide"); } catch { }
+
+        if (data is null)
+        {
+            Snackbar.Add("No se pudo obtener el detalle de la notificación.", Severity.Warning);
+            return;
+        }
+
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Entorno.NotificacionAprobacionDialog>(
+            "", new DialogParameters { ["Data"] = data, ["SoloLectura"] = true },
+            new DialogOptions
+            {
+                CloseButton = false, MaxWidth = MaxWidth.False, FullWidth = false,
+                Position = DialogPosition.Center, BackdropClick = false, CloseOnEscapeKey = false
+            });
+    }
+
+    private static string? Base64(byte[]? img)
+        => img is { Length: > 0 } ? $"data:image/png;base64,{Convert.ToBase64String(img)}" : null;
+}

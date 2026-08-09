@@ -1,0 +1,75 @@
+@using KONSolutions.Shared.Models.Contabilidad
+@inject CatalogoService<TipoCentroCosto, TipoCentroCostoDto> Service
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(480px,95vw);">
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="CONTABILIDAD.TIPOS_CENTRO_COSTO" Columna="COD_TIPO_CENTRO_COSTO"
+                        @bind-Value="_model.COD_TIPO_CENTRO_COSTO" Disabled="@(_isEdit || _readonly)" />
+            <CampoTexto Tabla="CONTABILIDAD.TIPOS_CENTRO_COSTO" Columna="DES_TIPO_CENTRO_COSTO"
+                        @bind-Value="_model.DES_TIPO_CENTRO_COSTO" Disabled="_readonly" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TipoCentroCosto? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TipoCentroCostoDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de GetByIdAsync) hacia _model.</summary>
+    private void MapearDesdeModelo(TipoCentroCosto m)
+    {
+        _model = new TipoCentroCostoDto
+        {
+            COD_TIPO_CENTRO_COSTO = m.COD_TIPO_CENTRO_COSTO,
+            DES_TIPO_CENTRO_COSTO = m.DES_TIPO_CENTRO_COSTO
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde GetByIdAsync — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_TIPO_CENTRO_COSTO);
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Modo != CrudModo.Create && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.COD_TIPO_CENTRO_COSTO);
+            _saving = false;
+            if (okd) { Snackbar.Add("Tipo de centro de costo eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(TipoCentroCostoDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model, Modo == CrudModo.Create);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Tipo de centro de costo actualizado." : "Tipo de centro de costo creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(TipoCentroCostoDialog));
+    }
+}

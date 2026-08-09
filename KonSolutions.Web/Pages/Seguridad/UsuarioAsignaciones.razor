@@ -1,0 +1,269 @@
+@* Tabs de asignaciones en la pantalla de Usuarios.
+   Tab 1: Roles asignados al usuario.
+   Tab 2: Opciones (TreeView) por rol, con botones (check verde si habilitado, rojo si no).
+          Selector: "Por Rol" (un árbol por rol) o "Todos los Roles" (distinct de opciones). *@
+@inject AsignacionService Asignacion
+@inject CatalogoService<Aplicacion, AplicacionDto> AplicacionSvc
+@inject ConfigService ConfigSvc
+
+<MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" Class="mt-2" PanelClass="pa-4">
+
+    @* ── TAB 1: Roles asignados ── *@
+    <MudTabPanel Text="Roles asignados" Icon="@Icons.Material.Filled.AdminPanelSettings">
+        @if (_loadingRoles)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (!_roles.Any())
+        {
+            <MudText Class="mono pa-4" Style="opacity:.5;">Este usuario no tiene roles asignados.</MudText>
+        }
+        else
+        {
+            <MudDataGrid T="RolAsignado" Items="_rolesVisibles" Dense="true" Hover="true" Striped="true"
+                         FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+                <Columns>
+                    <TemplateColumn Sortable="false" Title="Código de rol">
+                        <HeaderTemplate>
+                            <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_ROL_USUARIO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                                <FiltroExcelColumna T="RolAsignado" ItemsBase="@BaseRol(0)" ValorDe="@(x=>x.COD_ROL_USUARIO ?? "")"
+                                                    ValoresActivos="_filtrosRol.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroRol(0,v))" />
+                            </div>
+                        </HeaderTemplate>
+                        <CellTemplate>@context.Item.COD_ROL_USUARIO</CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Sortable="false" Title="Descripción">
+                        <HeaderTemplate>
+                            <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ROL_USUARIO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                                <FiltroExcelColumna T="RolAsignado" ItemsBase="@BaseRol(1)" ValorDe="@(x=>x.DES_ROL_USUARIO ?? "")"
+                                                    ValoresActivos="_filtrosRol.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroRol(1,v))" />
+                            </div>
+                        </HeaderTemplate>
+                        <CellTemplate>@context.Item.DES_ROL_USUARIO</CellTemplate>
+                    </TemplateColumn>
+                </Columns>
+                <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;">Sin roles asignados.</MudText></NoRecordsContent>
+                <PagerContent><MudDataGridPager T="RolAsignado" /></PagerContent>
+            </MudDataGrid>
+        }
+    </MudTabPanel>
+
+    @* ── TAB 2: Opciones asignadas (TreeView jerárquico) ── *@
+    <MudTabPanel Text="Opciones asignadas" Icon="@Icons.Material.Filled.AccountTree">
+        <div class="d-flex align-center gap-4 mb-3">
+            <MudRadioGroup T="string" Value="_modo" ValueChanged="OnModoChanged">
+                <MudRadio T="string" Value="@("rol")" Color="Color.Primary" Dense="true">Por Rol</MudRadio>
+                <MudRadio T="string" Value="@("todos")" Color="Color.Primary" Dense="true">Todos los Roles</MudRadio>
+            </MudRadioGroup>
+            <MudSpacer />
+            <MudTooltip Text="Expandir todo">
+                <MudIconButton Icon="@Icons.Material.Filled.UnfoldMore" Size="Size.Small"
+                               OnClick="@(() => { _expandirTodo = true; StateHasChanged(); })" />
+            </MudTooltip>
+            <MudTooltip Text="Contraer todo">
+                <MudIconButton Icon="@Icons.Material.Filled.UnfoldLess" Size="Size.Small"
+                               OnClick="@(() => { _expandirTodo = false; StateHasChanged(); })" />
+            </MudTooltip>
+        </div>
+
+        @if (_loadingOpciones)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (!_roles.Any())
+        {
+            <MudText Class="mono pa-4" Style="opacity:.5;">Sin roles para mostrar opciones.</MudText>
+        }
+        else if (_modo == "rol")
+        {
+            @foreach (var rol in _roles)
+            {
+                <div class="d-flex align-center gap-1 mt-3 mb-1">
+                    <MudIcon Icon="@Icons.Material.Filled.Badge" Size="Size.Small" />
+                    <MudText Typo="Typo.subtitle2" Class="mono">@rol.DES_ROL_USUARIO</MudText>
+                </div>
+                @foreach (var app in ArbolPorRol(rol.COD_ROL_USUARIO))
+                {
+                    <NodoAsignacion Nodo="app" Nivel="0" BotonesPorOpcion="_botonesPorOpcion" CodRol="@rol.COD_ROL_USUARIO"
+                                    ExpandirTodo="_expandirTodo" NodoFoco="_nodoFoco" NodoFocoChanged="@(v => { _nodoFoco = v; StateHasChanged(); })" />
+                }
+            }
+        }
+        else
+        {
+            <div class="d-flex align-center gap-1 mt-2 mb-1">
+                <MudIcon Icon="@Icons.Material.Filled.Groups" Size="Size.Small" />
+                <MudText Typo="Typo.subtitle2" Class="mono">Todas las opciones (distinct)</MudText>
+            </div>
+            @foreach (var app in ArbolDistinct())
+            {
+                <NodoAsignacion Nodo="app" Nivel="0" BotonesPorOpcion="_botonesPorOpcion" CodRol="@("")"
+                                ExpandirTodo="_expandirTodo" NodoFoco="_nodoFoco" NodoFocoChanged="@(v => { _nodoFoco = v; StateHasChanged(); })" />
+            }
+        }
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    [Parameter] public string CodUsuario { get; set; } = string.Empty;
+
+    private List<RolAsignado>   _roles            = new();
+    private List<OpcionAsignada> _todasOpciones   = new();
+    private Dictionary<string, List<BotonAsignado>> _botonesPorOpcion = new();
+    private Dictionary<string, string> _desApps  = new();
+    private string _modo = "rol";
+    private bool _expandirTodo = false;
+    private string? _nodoFoco;
+    private bool _loadingRoles = true, _loadingOpciones;
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosRol = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<RolAsignado> Ordenar(List<RolAsignado> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_ROL_USUARIO).ToList() : items.OrderByDescending(x => x.COD_ROL_USUARIO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_ROL_USUARIO).ToList() : items.OrderByDescending(x => x.DES_ROL_USUARIO).ToList(),
+        _ => items
+    };
+    private List<RolAsignado> _rolesVisibles => Ordenar(AplicarRol(_roles, -1));
+    private List<RolAsignado> BaseRol(int col) => AplicarRol(_roles, col);
+    private List<RolAsignado> AplicarRol(List<RolAsignado> src, int ex)
+    {
+        IEnumerable<RolAsignado> q = src;
+        foreach (var (c, v) in _filtrosRol)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_ROL_USUARIO ?? "")),
+                1 => q.Where(x => v.Contains(x.DES_ROL_USUARIO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroRol(int c, HashSet<string>? v) { _filtrosRol[c] = v; StateHasChanged(); }
+
+    protected override async Task OnParametersSetAsync() => await CargarRoles();
+
+    private async Task CargarRoles()
+    {
+        _loadingRoles = true;
+        _roles = await Asignacion.GetRolesAsync(CodUsuario);
+        _loadingRoles = false;
+        await CargarOpciones();
+    }
+
+    private async Task CargarOpciones()
+    {
+        _loadingOpciones = true;
+        _todasOpciones.Clear();
+        _botonesPorOpcion.Clear();
+
+        var aplicaciones = await AplicacionSvc.GetComboboxAsync();
+        _desApps = aplicaciones.ToDictionary(a => a.Id ?? "", a => a.Texto ?? a.Id ?? "");
+
+        foreach (var rol in _roles)
+        {
+            if (string.IsNullOrWhiteSpace(rol.COD_ROL_USUARIO)) continue;
+            foreach (var app in aplicaciones)
+            {
+                if (string.IsNullOrWhiteSpace(app.Id)) continue;
+                var ops = await Asignacion.GetOpcionesAsync(rol.COD_ROL_USUARIO, app.Id);
+                _todasOpciones.AddRange(ops);
+
+                foreach (var op in ops)
+                {
+                    if (string.IsNullOrWhiteSpace(op.COD_OPCION_APLICACION)) continue;
+                    var key = $"{rol.COD_ROL_USUARIO}|{op.COD_OPCION_APLICACION}";
+                    if (!_botonesPorOpcion.ContainsKey(key))
+                        _botonesPorOpcion[key] = await Asignacion.GetBotonesAsync(rol.COD_ROL_USUARIO, op.COD_OPCION_APLICACION!);
+                }
+            }
+        }
+
+        _loadingOpciones = false;
+    }
+
+    private void OnModoChanged(string modo) => _modo = modo;
+
+    // Construye árboles de NodoAsignacionVm para un rol dado, agrupando por aplicación.
+    private List<NodoAsignacionVm> ArbolPorRol(string? codRol)
+    {
+        var opciones = _todasOpciones.Where(o => o.COD_ROL_USUARIO == codRol).ToList();
+        return ConstruirArbol(opciones, codRol, _desApps);
+    }
+
+    private List<NodoAsignacionVm> ArbolDistinct()
+    {
+        var opciones = _todasOpciones
+            .GroupBy(o => $"{o.COD_APLICACION}|{o.COD_OPCION_APLICACION}")
+            .Select(g => g.First())
+            .ToList();
+        return ConstruirArbol(opciones, null, _desApps);
+    }
+
+    private static List<NodoAsignacionVm> ConstruirArbol(List<OpcionAsignada> opciones, string? codRol, Dictionary<string, string> desApps)
+    {
+        var porApp = opciones.GroupBy(o => o.COD_APLICACION ?? "");
+        var resultado = new List<NodoAsignacionVm>();
+
+        foreach (var grupo in porApp.OrderBy(g => g.Key))
+        {
+            var des = desApps.TryGetValue(grupo.Key, out var d) ? d : grupo.Key;
+            var appNodo = new NodoAsignacionVm
+            {
+                Cod   = grupo.Key,
+                Des   = des,
+                EsApp = true,
+                CodRol = codRol,
+                Hijos  = ArmarJerarquia(grupo.ToList(), codRol)
+            };
+            resultado.Add(appNodo);
+        }
+        return resultado;
+    }
+
+    // Arma jerarquía padre-hijo usando longitud de COD_OPCION_APLICACION (2 chars por nivel).
+    private static List<NodoAsignacionVm> ArmarJerarquia(List<OpcionAsignada> opciones, string? codRol)
+    {
+        var dict = opciones
+            .GroupBy(o => o.COD_OPCION_APLICACION ?? "")
+            .ToDictionary(
+                g => g.Key,
+                g => { var o = g.First(); return new NodoAsignacionVm
+                {
+                    Cod     = o.COD_OPCION_APLICACION ?? "",
+                    Des     = o.DES_OPCION_APLICACION ?? o.COD_OPCION_APLICACION ?? "",
+                    Formula = o.DES_FORMULARIO,
+                    Acceso  = o.FLG_ACCESO_PERMITIDO,
+                    CodRol  = codRol
+                }; });
+
+        var raices = new List<NodoAsignacionVm>();
+
+        foreach (var nodo in dict.Values.OrderBy(n => n.Cod))
+        {
+            var cod = nodo.Cod;
+            if (cod.Length <= 2)
+            {
+                raices.Add(nodo);
+            }
+            else
+            {
+                var codPadre = cod[..^2];
+                if (dict.TryGetValue(codPadre, out var padre))
+                    padre.Hijos.Add(nodo);
+                else
+                    raices.Add(nodo);
+            }
+        }
+        return raices;
+    }
+}

@@ -1,0 +1,317 @@
+@page "/estandar/paises"
+@attribute [Authorize]
+@using PaisRow = KONSolutions.Shared.Models.Estandar.Pais
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject ErrorLogService ErrorLog
+@implements IDisposable
+
+<PageTitle>Países · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Países" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Filtrar" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Países" Headers="@(new List<string>{"Código","País (español)","Nombre inglés","Capital","Región"})"
+                         Rows="@(_items.Select(x=>new List<string>{x.COD_PAIS,x.DES_PAIS,x.DES_PAIS_INGLES??"",x.DES_CAPITAL??"",x.DES_REGION??""}).ToList())" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+@if (_descargandoBanderas)
+{
+    <MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:1px solid var(--line);">
+        <div class="d-flex align-center gap-3">
+            <MudIcon Icon="@Icons.Material.Filled.Flag" Color="Color.Primary" />
+            <div style="flex:1;">
+                <MudText Typo="Typo.body2">
+                    Descargando banderas… @_progresoProcesado de @_progresoTotal
+                    (@_progresoPorcentaje%)
+                </MudText>
+                <MudProgressLinear Value="@_progresoPorcentaje" Color="Color.Primary"
+                                   Rounded="true" Class="mt-1" />
+            </div>
+        </div>
+    </MudPaper>
+}
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="paises" style="position:relative;">
+    <MudDataGrid T="PaisRow" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Title="Bandera" Sortable="false" Width="60px" CellStyle="text-align:center;">
+                <CellTemplate>
+                    @if (context.Item.IMG_ICONO is not null)
+                    { <GridImage Image="context.Item.IMG_ICONO" /> }
+                    else
+                    { <span style="font-size:1.4rem;">@context.Item.DES_BANDERA_EMOJI</span> }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Cód." Width="@Limites.ColWidth("ESTANDAR.PAISES","COD_PAIS",55,100)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_PAIS" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="PaisRow" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_PAIS)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_PAIS</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="País (español)" Width="@Limites.ColWidth("ESTANDAR.PAISES","DES_PAIS",160,320)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_PAIS" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="PaisRow" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_PAIS)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_PAIS</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Nombre inglés" Width="@Limites.ColWidth("ESTANDAR.PAISES","DES_PAIS_INGLES",130,260)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_PAIS_INGLES" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="PaisRow" ItemsBase="@Base(2)" ValorDe="@(x=>x.DES_PAIS_INGLES??"")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_PAIS_INGLES</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Capital" Width="@Limites.ColWidth("ESTANDAR.PAISES","DES_CAPITAL",110,200)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_CAPITAL" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="PaisRow" ItemsBase="@Base(3)" ValorDe="@(x=>x.DES_CAPITAL??"")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_CAPITAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Región" Width="@Limites.ColWidth("ESTANDAR.PAISES","DES_REGION",100,180)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_REGION" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="PaisRow" ItemsBase="@Base(4)" ValorDe="@(x=>x.DES_REGION??"")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(4)" ValoresActivosChanged="@(v=>Filtro(4,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_REGION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Subregión" Width="@Limites.ColWidth("ESTANDAR.PAISES","DES_SUBREGION",120,220)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_SUBREGION" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="PaisRow" ItemsBase="@Base(5)" ValorDe="@(x=>x.DES_SUBREGION ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(5)" ValoresActivosChanged="@(v=>Filtro(5,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_SUBREGION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Población" Width="110" CellStyle="text-align:right;font-family:monospace;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1 justify-end"><EncabezadoOrdenable Campo="NUM_POBLACION" Activo="@(_ordenColumna == 6)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(6))" />
+                        <FiltroExcelColumna T="PaisRow" ItemsBase="@Base(6)" ValorDe="@(x=>x.NUM_POBLACION?.ToString("N0", System.Globalization.CultureInfo.CurrentCulture) ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(6)" ValoresActivosChanged="@(v=>Filtro(6,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.NUM_POBLACION?.ToString("N0", System.Globalization.CultureInfo.CurrentCulture))</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false" Width="80" CellStyle="text-align:center;">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="PaisRow" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<PaisRow> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int,HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<PaisRow> Ordenar(List<PaisRow> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_PAIS).ToList() : items.OrderByDescending(x => x.COD_PAIS).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_PAIS).ToList() : items.OrderByDescending(x => x.DES_PAIS).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_PAIS_INGLES).ToList() : items.OrderByDescending(x => x.DES_PAIS_INGLES).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_CAPITAL).ToList() : items.OrderByDescending(x => x.DES_CAPITAL).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_REGION).ToList() : items.OrderByDescending(x => x.DES_REGION).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_SUBREGION).ToList() : items.OrderByDescending(x => x.DES_SUBREGION).ToList(),
+        6 => _ordenAscendente ? items.OrderBy(x => x.NUM_POBLACION).ToList() : items.OrderByDescending(x => x.NUM_POBLACION).ToList(),
+        _ => items
+    };
+    private List<PaisRow> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<PaisRow> Base(int col) => Aplicar(_items, col);
+
+    // Progreso descarga de banderas
+    private bool _descargandoBanderas;
+    private int  _progresoTotal, _progresoProcesado, _progresoPorcentaje;
+    private System.Threading.Timer? _timerProgreso;
+
+    private List<PaisRow> Aplicar(List<PaisRow> src, int ex)
+    {
+        IEnumerable<PaisRow> q = src;
+        foreach (var (c,v) in _filtros) { if (c==ex||v is null) continue;
+            q = c switch {
+                0 => q.Where(x=>v.Contains(x.COD_PAIS)),
+                1 => q.Where(x=>v.Contains(x.DES_PAIS)),
+                2 => q.Where(x=>v.Contains(x.DES_PAIS_INGLES??"")),
+                3 => q.Where(x=>v.Contains(x.DES_CAPITAL??"")),
+                4 => q.Where(x=>v.Contains(x.DES_REGION??"")),
+                5 => q.Where(x=>v.Contains(x.DES_SUBREGION??"")),
+                6 => q.Where(x=>v.Contains(x.NUM_POBLACION?.ToString("N0", System.Globalization.CultureInfo.CurrentCulture)??"")),
+                _ => q }; }
+        return q.ToList();
+    }
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c]=v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach(var k in _filtros.Keys.ToList()) _filtros[k]=null; StateHasChanged(); }
+    private async Task Filtrar() => _items = string.IsNullOrWhiteSpace(_search)
+        ? await Fetch() : await FetchSearch(_search);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ESTANDAR","Paises");
+        await Load();
+        Cambios.Suscribir("ESTANDAR.PAISES", async()=>await InvokeAsync(async()=>{await Load();StateHasChanged();}));
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load() { _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search); }
+    private async Task<List<PaisRow>> Fetch()
+    {
+        try { var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<PaisRow>>>(ApiRoutes.Estandar.Paises); return r?.Data ?? new(); }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Paises), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+    private async Task<List<PaisRow>> FetchSearch(string s)
+    {
+        try { var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<PaisRow>>>($"{ApiRoutes.Estandar.Paises}/search?search={Uri.EscapeDataString(s)}"); return r?.Data ?? new(); }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Paises), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        if (b.DES_METODO == "UploadJSON") return DescargarPaises(b);
+        return Task.CompletedTask;
+    }
+
+    private async Task DescargarPaises(BotonTreeviewItem b)
+    {
+        try
+        {
+            var payload = new { b.COD_APLICACION, b.COD_OPCION_APLICACION, COD_BOTON_OPCION = b.COD_BOTON_OPCION };
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Estandar.PaisesDownloadFromSnippet, payload);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Países cargados. Descargando banderas en segundo plano…", Severity.Info);
+                await Load();
+                IniciarPollingProgreso();
+            }
+            else
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(Paises), nameof(DescargarPaises));
+            }
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(Paises)); await ErrorLog.LogAsync(ex, nameof(Paises), nameof(DescargarPaises)); }
+    }
+
+    private void IniciarPollingProgreso()
+    {
+        _descargandoBanderas = true;
+        _timerProgreso?.Dispose();
+        _timerProgreso = new System.Threading.Timer(async _ =>
+        {
+            try
+            {
+                var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<ProgresoDto>>(
+                    ApiRoutes.Estandar.PaisesDownloadStatus);
+                if (r?.Data is { } d)
+                {
+                    _progresoTotal      = d.Total;
+                    _progresoProcesado  = d.Processed;
+                    _progresoPorcentaje = d.Percentage;
+                    if (!d.IsRunning)
+                    {
+                        _descargandoBanderas = false;
+                        _timerProgreso?.Dispose();
+                        _timerProgreso = null;
+                        await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+                        await InvokeAsync(() => Snackbar.Add("Banderas descargadas correctamente.", Severity.Success));
+                        return;
+                    }
+                }
+            }
+            catch { }
+            await InvokeAsync(StateHasChanged);
+        }, null, 1500, 2000);
+    }
+
+    private Task OnAccionGrilla(PaisRow item, BotonTreeviewItem b)
+    {
+        if(b.FLG_ACCION_GET==true)    return Abrir(item, CrudModo.Read);
+        if(b.FLG_ACCION_PUT==true)    return Abrir(item, CrudModo.Update);
+        if(b.FLG_ACCION_DELETE==true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(PaisRow? item, CrudModo modo)
+    {
+        var titulo = modo switch { CrudModo.Create=>"Nuevo país", CrudModo.Delete=>$"Eliminar · {item?.DES_PAIS}", _=>$"Editar · {item?.DES_PAIS}" };
+        var dlg = await DialogService.ShowAsync<PaisesDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth=MaxWidth.Small, FullWidth=true, BackdropClick = false, CloseOnEscapeKey = false });
+        if((await dlg.Result) is {Canceled:false}) await Load();
+    }
+
+    public void Dispose()
+    {
+        _timerProgreso?.Dispose();
+        Cambios.Desuscribir("ESTANDAR.PAISES", ()=>Task.CompletedTask);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+
+    private class ProgresoDto
+    {
+        public int  Total      { get; set; }
+        public int  Processed  { get; set; }
+        public bool IsRunning  { get; set; }
+        public int  Percentage { get; set; }
+    }
+}

@@ -1,0 +1,148 @@
+@* MARCA_VERIFICACION_2026-07-12-1758 *@
+@*
+    ComboSelect.razor
+    --------------------------------------------------------------------------
+    Combo genérico con búsqueda por contenido (LIKE).
+    Filtra los ítems que CONTIENEN el texto escrito, sin importar mayúsculas.
+
+    Uso con ComboboxItem:
+      <ComboSelect Items="_tiposOpciones"
+                   TextFunc="@(t => $"{t.Texto} ({t.Id})")"
+                   @bind-Value="_form.COD_TIPO"
+                   Label="Tipo de opción"
+                   Disabled="_readonly" />
+
+    Uso con cualquier clase:
+      <ComboSelect Items="_aplicaciones"
+                   TextFunc="@(a => $"{a.COD_APLICACION} - {a.DES_APLICACION}")"
+                   ValueFunc="@(a => a.COD_APLICACION)"
+                   @bind-Value="_form.COD_APLICACION"
+                   Label="Aplicación" />
+*@
+@inject IJSRuntime JS
+@typeparam TItem
+
+<div @onkeyup="HandleKeyUp">
+    <MudAutocomplete T="TItem"
+                     @bind-Value="_selected"
+                     SearchFunc="Buscar"
+                     ToStringFunc="@TextFunc"
+                     Label="@Label"
+                     Variant="Variant.Outlined"
+                     Class="@Class"
+                     Disabled="Disabled"
+                     Clearable="true"
+                     ClearIcon="@Icons.Material.Filled.Delete"
+                     Immediate="true"
+                     MinCharacters="MinCharacters"
+                     DebounceInterval="DebounceInterval"
+                     ResetValueOnEmptyText="true"
+                     CoerceText="false"
+                     CoerceValue="false"
+                     SelectValueOnTab="true"
+                     MaxItems="MaxItems" />
+</div>
+
+@code {
+    /// <summary>Lista completa de ítems.</summary>
+    [Parameter] public IEnumerable<TItem> Items { get; set; } = Enumerable.Empty<TItem>();
+
+    /// <summary>Función que convierte un ítem a texto visible.</summary>
+    [Parameter, EditorRequired] public Func<TItem, string> TextFunc { get; set; } = t => t?.ToString() ?? "";
+
+    /// <summary>
+    /// Función que extrae la clave del ítem para el bind-Value de tipo string.
+    /// Si no se especifica, se usa TextFunc.
+    /// </summary>
+    [Parameter] public Func<TItem, string>? ValueFunc { get; set; }
+
+    /// <summary>Valor enlazado (clave string).</summary>
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    [Parameter] public string  Label    { get; set; } = "";
+    [Parameter] public bool    Disabled { get; set; }
+    [Parameter] public string  Class    { get; set; } = "mb-3";
+
+    /// <summary>Caracteres mínimos antes de mostrar resultados. Default 0 (igual
+    /// que siempre). Para listas enormes (ej. Ubigeo, ~1900 filas) conviene subirlo
+    /// a 2-3 para no intentar pintar todo el listado apenas se hace foco.</summary>
+    [Parameter] public int MinCharacters { get; set; } = 0;
+
+    /// <summary>Espera (ms) tras la última tecla antes de filtrar. Default 0
+    /// (igual que siempre). Para listas enormes evita que cada tecla dispare
+    /// un re-render pesado mientras el usuario todavía está escribiendo.</summary>
+    [Parameter] public int DebounceInterval { get; set; } = 0;
+
+    /// <summary>Máximo de resultados a pintar en el desplegable. Default null
+    /// (sin límite, igual que siempre). Para listas enormes conviene acotarlo
+    /// (ej. 30) — el usuario de todas formas está tecleando para acotar más.</summary>
+    [Parameter] public int? MaxItems { get; set; }
+
+    // Propiedad con setter: MudAutocomplete la usa vía @bind-Value.
+    // El setter notifica al padre cuando el usuario selecciona un ítem.
+    // OnParametersSet asigna _selectedBacking directamente para evitar ciclos.
+    private TItem? _selectedBacking;
+    private TItem? _selected
+    {
+        get => _selectedBacking;
+        set
+        {
+            if (!EqualityComparer<TItem>.Default.Equals(_selectedBacking, value))
+            {
+                _selectedBacking = value;
+                var key = ValueFunc ?? TextFunc;
+                _ = ValueChanged.InvokeAsync(value is null ? null : key(value));
+            }
+        }
+    }
+
+    private string? _prevExternalValue;
+    private IEnumerable<TItem>? _prevItems;
+    private string? _textoActual;
+
+    protected override void OnParametersSet()
+    {
+        // Re-sincroniza solo cuando el Value externo cambió O cuando cargó la lista.
+        // Así el usuario puede escribir sin que OnParametersSet resetee el input.
+        var itemsChanged = !ReferenceEquals(Items, _prevItems);
+        if (Value == _prevExternalValue && !itemsChanged) return;
+        _prevExternalValue = Value;
+        _prevItems = Items;
+
+        if (Value is null) { _selectedBacking = default; return; }
+        var key = ValueFunc ?? TextFunc;
+        _selectedBacking = Items.FirstOrDefault(i => key(i) == Value);
+    }
+
+    private Task<IEnumerable<TItem>> Buscar(string? texto, CancellationToken _)
+    {
+        _textoActual = texto;
+        if (string.IsNullOrWhiteSpace(texto))
+            return Task.FromResult(Items);
+
+        var filtro = texto.Trim();
+        return Task.FromResult(Items.Where(i =>
+            TextFunc(i).Contains(filtro, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private async Task HandleKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter") return;
+
+        // Por keyup, MudAutocomplete ya procesó el keydown (flecha+Enter ya seleccionó).
+        // Si el texto escrito difiere del ítem actualmente seleccionado,
+        // MudAutocomplete no seleccionó nada → búsqueda manual por texto.
+        var currentSelText = _selectedBacking is null ? "" : TextFunc(_selectedBacking);
+        if (!string.IsNullOrWhiteSpace(_textoActual) &&
+            _textoActual.Trim() != currentSelText)
+        {
+            var match = Items.FirstOrDefault(i =>
+                TextFunc(i).Contains(_textoActual.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+                _selected = match;
+        }
+
+        try { await JS.InvokeVoidAsync("focusNextElement"); } catch { }
+    }
+}

@@ -1,0 +1,275 @@
+@inject BiometriaService BiometriaSvc
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.FaceRetouchingNatural" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">Verificación de identidad</MudText>
+            @{ var colorTimer = _segundosRestantes <= 10 ? "color:#e53e3e;" : "opacity:.6;"; }
+            <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                <MudIcon Icon="@Icons.Material.Filled.Timer" Size="Size.Small" Style="@colorTimer" />
+                <span class="mono" style="@("font-size:.9rem;font-weight:700;" + colorTimer)">@_segundosRestantes s</span>
+            </div>
+        </div>
+    </TitleContent>
+
+    <DialogContent>
+        <MudText Class="mono mb-3" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+            Hola, <strong>@NombreUsuario</strong> · ubique su rostro frente a la cámara
+        </MudText>
+
+        <MudProgressLinear Value="@((_segundosRestantes * 100.0) / TimeoutSegundos)"
+                           Color="@(_segundosRestantes <= 10 ? Color.Error : Color.Primary)"
+                           Class="mb-2" Style="height:4px;border-radius:2px;" />
+
+        @* Cámara *@
+        <div style="position:relative;background:#111;border-radius:10px;overflow:hidden;aspect-ratio:4/3;">
+            <video id="verif-facial-video" autoplay muted playsinline
+                   style="width:100%;height:100%;object-fit:cover;transform:scaleX(-1);
+                          display:@(_camaraActiva ? "block" : "none");" />
+
+            @if (!_camaraActiva && _cargando)
+            {
+                <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#888;">
+                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Large" />
+                    <span style="font-family:monospace;font-size:.8rem;">Iniciando cámara...</span>
+                </div>
+            }
+            else if (!_camaraActiva)
+            {
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#555;">
+                    <MudIcon Icon="@Icons.Material.Filled.CameraAlt" Style="font-size:5rem;" />
+                </div>
+            }
+
+            @* Indicador rostro *@
+            @if (_camaraActiva)
+            {
+                <div style="position:absolute;top:10px;left:50%;transform:translateX(-50%);
+                            background:@(_hayRostro ? "rgba(0,180,80,.8)" : "rgba(180,0,0,.7)");
+                            color:#fff;padding:5px 16px;border-radius:20px;
+                            font-family:monospace;font-size:.8rem;transition:background .3s;">
+                    @if (_hayRostro)
+                    { <span>✓ Rostro detectado — presione Verificar</span> }
+                    else
+                    { <span>⚠ Posicione su rostro</span> }
+                </div>
+            }
+
+            @* Óvalo guía *@
+            @if (_camaraActiva)
+            {
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+                    <div style="width:55%;aspect-ratio:3/4;
+                                border:2px dashed @(_hayRostro ? "rgba(0,220,100,.7)" : "rgba(255,255,255,.2)");
+                                border-radius:50%;transition:border-color .3s;"></div>
+                </div>
+            }
+
+            @* Resultado *@
+            @if (_resultado is not null)
+            {
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+                            background:@(_resultado.Value ? "rgba(0,150,60,.85)" : "rgba(160,0,0,.85)");">
+                    <div style="text-align:center;color:#fff;">
+                        <MudIcon Icon="@(_resultado.Value ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
+                                 Style="font-size:4rem;" />
+                        <div style="font-family:monospace;font-size:1rem;margin-top:8px;">
+                            @(_resultado.Value ? "Identidad verificada" : "Rostro no reconocido")
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @* Overlay tiempo agotado *@
+            @if (_tiempoAgotado)
+            {
+                <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+                            background:rgba(0,0,0,.82);color:#fff;gap:12px;">
+                    <MudIcon Icon="@Icons.Material.Filled.TimerOff" Style="font-size:4rem;color:#e53e3e;" />
+                    <div style="font-family:monospace;font-size:1rem;">Tiempo agotado</div>
+                </div>
+            }
+        </div>
+
+        @if (_intentosFallidos > 0 && !_tiempoAgotado)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                Intento @_intentosFallidos de 3 fallido. Asegúrese de tener buena iluminación.
+            </MudAlert>
+        }
+    </DialogContent>
+
+    <DialogActions>
+        @if (!_tiempoAgotado)
+        {
+            <MudButton OnClick="Cancelar" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel"
+                       Style="background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cancelar</MudButton>
+            @if (!_camaraActiva)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Videocam"
+                           Style="background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));"
+                           OnClick="IniciarCamara" Disabled="_cargando">
+                    Iniciar cámara
+                </MudButton>
+            }
+            else
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.VerifiedUser"
+                           Style="background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));"
+                           OnClick="Verificar"
+                           Disabled="@(!_hayRostro || _verificando || _resultado == true)">
+                    @if (_verificando) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                    Verificar identidad
+                </MudButton>
+            }
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string CodUsuario      { get; set; } = "";
+    [Parameter] public string NombreUsuario   { get; set; } = "";
+    [Parameter] public int    TimeoutSegundos { get; set; } = 60;
+
+    private bool _camaraActiva, _cargando, _hayRostro, _verificando, _tiempoAgotado;
+    private bool? _resultado;
+    private int   _intentosFallidos;
+    private int   _segundosRestantes;
+
+    private System.Threading.CancellationTokenSource? _detCts;
+    private System.Threading.CancellationTokenSource? _cuentaCts;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _segundosRestantes = TimeoutSegundos > 0 ? TimeoutSegundos : 60;
+            _ = IniciarCuentaRegresiva();
+            await IniciarCamara();
+        }
+    }
+
+    private async Task IniciarCuentaRegresiva()
+    {
+        _cuentaCts = new();
+        var ct = _cuentaCts.Token;
+        while (_segundosRestantes > 0 && !ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(1000, ct); } catch { break; }
+            if (ct.IsCancellationRequested) break;
+            _segundosRestantes--;
+            await InvokeAsync(StateHasChanged);
+        }
+        if (!ct.IsCancellationRequested && _segundosRestantes <= 0)
+        {
+            _tiempoAgotado = true;
+            await InvokeAsync(StateHasChanged);
+            await DetenerCamara();
+            await Task.Delay(1800);
+            MudDialog.Close(DialogResult.Ok("timeout"));
+        }
+    }
+
+    private async Task IniciarCamara()
+    {
+        _cargando = true;
+        StateHasChanged();
+        await JS.InvokeAsync<bool>("faceRec.init");
+        bool cam = await JS.InvokeAsync<bool>("faceRec.startCamera", "verif-facial-video");
+        _cargando = false;
+        if (!cam) { Snackbar.Add("No se pudo acceder a la cámara.", Severity.Error); return; }
+        _camaraActiva = true;
+        _ = DeteccionLoop();
+    }
+
+    private async Task DeteccionLoop()
+    {
+        _detCts = new();
+        var ct = _detCts.Token;
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var faceVisible = await JS.InvokeAsync<bool>("faceRec.isFaceVisible", "verif-facial-video");
+                _hayRostro = faceVisible;
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(200, ct);
+            }
+            catch { break; }
+        }
+    }
+
+    private async Task Verificar()
+    {
+        _verificando = true;
+        _resultado   = null;
+        StateHasChanged();
+
+        var desc = await JS.InvokeAsync<double[]?>("faceRec.captureDescriptor", "verif-facial-video");
+        if (desc is null || desc.Length < 128)
+        {
+            _verificando = false;
+            Snackbar.Add("No se pudo leer el descriptor facial.", Severity.Warning);
+            return;
+        }
+
+        var res = await BiometriaSvc.VerificarAsync(CodUsuario, desc);
+        _verificando = false;
+        _resultado   = res?.Verificado == true;
+
+        if (_resultado == true)
+        {
+            _cuentaCts?.Cancel();
+            await Task.Delay(900);
+            await DetenerCamara();
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+        {
+            _intentosFallidos++;
+            if (_intentosFallidos >= 3)
+            {
+                _cuentaCts?.Cancel();
+                Snackbar.Add("3 intentos fallidos. Acceso denegado.", Severity.Error);
+                await Task.Delay(1200);
+                await DetenerCamara();
+                MudDialog.Close(DialogResult.Cancel());
+            }
+            else
+            {
+                await Task.Delay(1500);
+                _resultado = null;
+            }
+        }
+    }
+
+    private async Task Cancelar()
+    {
+        _cuentaCts?.Cancel();
+        await DetenerCamara();
+        try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { }
+        MudDialog.Cancel();
+    }
+
+    private async Task DetenerCamara()
+    {
+        _detCts?.Cancel();
+        _hayRostro    = false;
+        _camaraActiva = false;
+        try { await JS.InvokeVoidAsync("faceRec.stopCamera"); } catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cuentaCts?.Cancel();
+        _detCts?.Cancel();
+        try { await JS.InvokeVoidAsync("faceRec.stopCamera"); } catch { }
+    }
+}

@@ -1,0 +1,376 @@
+@using Modelo = KONSolutions.Shared.Models.Logistica.LotesControl
+@using Item = KONSolutions.Shared.Models.Logistica.LotesControlDetalle
+@using ProductoModel = KONSolutions.Shared.Models.Estandar.Productos
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<div class="documento-logistica">
+        @* El EditForm nombra su contexto. Sin esto choca con el "context" de cada CellTemplate
+           de la grilla de items y Razor no sabe a cual se refiere. *@
+        <EditForm Context="formulario" Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+
+            @* ── Cabecera ───────────────────────────────────────────────────────
+               Una sola grilla, sin anidar. Antes había un bloque dentro de otro y cada nivel
+               aportaba su propio corrimiento, así que los campos de la izquierda nunca
+               arrancaban exactamente a la misma altura que los de la derecha. *@
+            <MudGrid Spacing="2">
+                <MudItem xs="12" md="3">
+                    @* Lo asigna el sistema al grabar: nunca es editable. *@
+                    <MudTextField T="string" Value="@(_esNuevo ? "(automático)" : _model.NUM_LOTE_CONTROL)"
+                                  Label="N° lote" Variant="Variant.Outlined" Disabled="true" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudDatePicker @bind-Date="_model.FEC_LOTE_CONTROL" Label="Fecha"
+                                   Variant="Variant.Outlined" DateFormat="dd/MM/yyyy"
+                                   Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudDatePicker @bind-Date="_model.FEC_VENCIMIENTO" Label="Vencimiento"
+                                   Variant="Variant.Outlined" DateFormat="dd/MM/yyyy"
+                                   Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudNumericField T="decimal?" @bind-Value="_model.VAL_TOTAL" Label="Valor total"
+                                     Variant="Variant.Outlined" Format="N2" HideSpinButtons="true"
+                                     Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+
+                <MudItem xs="12" md="9">
+                    <CampoTexto Tabla="LOGISTICA.LOTES_CONTROL" Columna="DES_LOTE_CONTROL"
+                                @bind-Value="_model.DES_LOTE_CONTROL"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <EstadoCombo DesTabla="LOGISTICA.LOTES_CONTROL"
+                                 @bind-Value="_model.COD_ESTADO"
+                                 CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                                 Disabled="_readonly" />
+                </MudItem>
+
+                @* Tipo, entidad y el número que le da la entidad van juntos: los tres describen
+                   de dónde viene el lote, y el número de la entidad no significa nada separado
+                   de a quién pertenece.
+
+                   El tipo y la entidad se fijan al crear y después no se tocan: son el origen
+                   del lote, y cambiarlos sobre uno que ya tiene movimientos reescribiría de
+                   dónde salió un stock que ya circuló. *@
+                <MudItem xs="12" md="4">
+                    <AriaCombo TItem="ComboboxItem" Items="_tipos"
+                               TextFunc="@(t => $"{t.Id} — {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_LOTE_CONTROL"
+                               Label="Tipo de lote" Disabled="@(_readonly || !_esNuevo)" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <AriaCombo TItem="ComboboxItem" Items="_entidades"
+                               TextFunc="@(t => t.Texto)" ValueFunc="@(t => t.Id)"
+                               Value="@(_model.COD_ENTIDAD?.ToString())"
+                               ValueChanged="@(v => _model.COD_ENTIDAD = decimal.TryParse(v, out var n) ? n : null)"
+                               Label="Entidad" Disabled="@(_readonly || !_esNuevo)" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    @* El número con que el tercero identifica el mismo lote. Sirve para casarlo
+                       contra su documentación cuando no coincide con el nuestro. *@
+                    <CampoTexto Tabla="LOGISTICA.LOTES_CONTROL" Columna="NUM_LOTE_CONTROL_ENTIDAD"
+                                @bind-Value="_model.NUM_LOTE_CONTROL_ENTIDAD" Disabled="_readonly" />
+                </MudItem>
+            </MudGrid>
+
+            @* ── Detalle ───────────────────────────────────────────────────────
+               Se habilita cuando el lote ya está grabado: los productos se cuelgan de su
+               número, que la base asigna recién al crearlo. *@
+            <MudPaper Elevation="0" Class="mt-4 pa-3" Style="border:1px solid var(--line);">
+                <div class="d-flex align-center gap-2 mb-2">
+                    <MudText Typo="Typo.subtitle2">Productos del lote</MudText>
+                    @if (!_cabeceraGrabada)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text"
+                                 Icon="@Icons.Material.Filled.Lock">Grabá el lote para cargar productos</MudChip>
+                    }
+                    <MudSpacer />
+                    <MudText Class="mono" Style="font-size:.82rem;opacity:.7;">
+                        @_items.Count productos · total @_items.Sum(x => x.VAL_TOTAL ?? 0).ToString("N2")
+                    </MudText>
+                    @if (!_readonly && _cabeceraGrabada)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Add" OnClick="AgregarItem">Agregar producto</MudButton>
+                    }
+                </div>
+
+            <div class="@(_cabeceraGrabada ? "" : "detalle-bloqueado")" data-resizable-grid="lote-detalle" style="position:relative;">
+                <MudDataGrid T="Item" Items="_items" Dense="true" Hover="true" Striped="true"
+                             ReadOnly="_readonly" EditMode="DataGridEditMode.Cell"
+                             CommittedItemChanges="@(async (Item it) => await GuardarItem(it))"
+                             Height="460px" FixedHeader="true">
+                    <Columns>
+                        @* El producto ES la clave del ítem junto con el lote. Se elige al agregar
+                           la fila y después queda fijo: cambiarlo sería borrar un ítem y crear
+                           otro, y el procedimiento de modificación no hace eso. *@
+                        <TemplateColumn Title="Producto" Sortable="false" Width="520px">
+                            <CellTemplate>
+                                @{ var it = context.Item; }
+                                <span class="mono" style="opacity:.65;">@it.COD_PRODUCTO</span>
+                                <span class="ml-1">@it.DES_PRODUCTO</span>
+                            </CellTemplate>
+                            <EditTemplate>
+                                @{ var it = context.Item; }
+                                @if (_itemsNuevos.Contains(it.COD_PRODUCTO ?? "") || string.IsNullOrWhiteSpace(it.COD_PRODUCTO))
+                                {
+                                    <AriaCombo TItem="ProductoModel" Items="_productos"
+                                               TextFunc="@(x => $"{x.COD_PRODUCTO} — {x.DES_PRODUCTO}")"
+                                               ValueFunc="@(x => x.COD_PRODUCTO)"
+                                               Value="@it.COD_PRODUCTO"
+                                               ValueChanged="@(v => AsignarProducto(it, v))"
+                                               Disabled="_readonly" Class="" />
+                                }
+                                else
+                                {
+                                    <span class="mono" style="opacity:.65;">@it.COD_PRODUCTO</span>
+                                    <span class="ml-1">@it.DES_PRODUCTO</span>
+                                }
+                            </EditTemplate>
+                        </TemplateColumn>
+
+                        <PropertyColumn Property="x => x.CAN_PRODUCTO" Title="Cantidad" Sortable="false"
+                                        Width="120px" CellStyle="text-align:right;"
+                                        HeaderStyle="text-align:right;" Format="N6" />
+
+                        <PropertyColumn Property="x => x.VAL_TOTAL" Title="Valor" Sortable="false"
+                                        Width="120px" CellStyle="text-align:right;"
+                                        HeaderStyle="text-align:right;" Format="N2" />
+
+                        <TemplateColumn Title="Acciones" Sortable="false" Editable="false" Width="110px" CellStyle="text-align:center;">
+                            <CellTemplate>
+                                @if (!_readonly)
+                                {
+                                    var it = context.Item;
+                                    <MudIconButton Icon="@Icons.Material.Filled.Save" Size="Size.Small"
+                                                   Color="Color.Primary" OnClick="@(() => GuardarItemConAviso(it))" Title="Grabar producto" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                                   Color="Color.Error" OnClick="@(() => QuitarItem(it))" Title="Quitar producto" />
+                                }
+                            </CellTemplate>
+                        </TemplateColumn>
+                    </Columns>
+                    <NoRecordsContent>
+                        <MudText Class="pa-4 mono" Style="opacity:.5;">
+                            @(_cabeceraGrabada ? "Este lote todavía no tiene productos." : "Grabá el lote para cargarle productos.")
+                        </MudText>
+                    </NoRecordsContent>
+                </MudDataGrid>
+                @* Arrastrar el borde inferior cambia el alto; doble clic vuelve al original. *@
+                <div class="grid-resize-handle"></div>
+            </div>
+            </MudPaper>
+
+            <div class="d-flex align-center gap-2 mt-4">
+                <MudSpacer />
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Close"
+                           OnClick="Cerrar" Disabled="_saving">Cerrar</MudButton>
+                @if (!_readonly)
+                {
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Save" Disabled="_saving">
+                        @(Modo == CrudModo.Delete ? "Eliminar" : "Guardar")
+                    </MudButton>
+                }
+            </div>
+        </EditForm>
+</div>
+
+@code {
+    /// <summary>Avisa a la pantalla que el documento terminó. El bool dice si hubo cambios,
+    /// para que el listado sepa si tiene que recargarse.</summary>
+    [Parameter] public EventCallback<bool> OnCerrar { get; set; }
+    [Parameter] public Modelo? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private Modelo _model = new();
+    private List<Item> _items = new();
+    private List<ComboboxItem> _tipos = new(), _entidades = new();
+    private List<ProductoModel> _productos = new();
+
+    /// <summary>Productos que todavía no existen en la base. Deciden POST contra PUT, y también
+    /// si el combo de producto sigue abierto: una vez grabado, el producto es parte de la clave
+    /// y ya no se puede cambiar desde la fila.</summary>
+    private readonly HashSet<string> _itemsNuevos = new();
+
+    private bool _esNuevo, _saving, _huboCambios;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    /// <summary>El lote existe en la base. Acá no habilita edición del detalle —no la hay—,
+    /// sólo distingue "sin productos todavía" de "no se grabó nada aún".</summary>
+    private bool _cabeceraGrabada => !_esNuevo && !string.IsNullOrWhiteSpace(_model.NUM_LOTE_CONTROL);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        await Task.WhenAll(CargarTipos(), CargarEntidades(), CargarProductos());
+
+        if (_esNuevo) { _model = new Modelo { FEC_LOTE_CONTROL = DateTime.Today }; return; }
+
+        if (Item is not null)
+        {
+            _model = Item;
+            await CargarDetalleAsync(Item.NUM_LOTE_CONTROL);
+        }
+    }
+
+    private async Task CargarTipos()
+        => _tipos = (await Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Logistica.TiposLoteControlCombobox)) ?? new();
+    private async Task CargarEntidades()
+        => _entidades = (await Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Estandar.EntidadesCombobox)) ?? new();
+    private async Task CargarProductos()
+        => _productos = (await Http.SafeGetAsync<List<ProductoModel>>(ApiRoutes.Estandar.Productos)) ?? new();
+
+    /// <summary>La fila nace vacía y sin clave: recién al elegir el producto queda identificada.</summary>
+    private void AgregarItem()
+        => _items.Add(new Item { NUM_LOTE_CONTROL = _model.NUM_LOTE_CONTROL, COD_PRODUCTO = "", CAN_PRODUCTO = 0 });
+
+    private void AsignarProducto(Item it, string? cod)
+    {
+        // Al cambiar el producto de una fila sin grabar hay que mover la marca de "nueva":
+        // la lleva el código, que es lo que identifica al ítem.
+        if (!string.IsNullOrWhiteSpace(it.COD_PRODUCTO)) _itemsNuevos.Remove(it.COD_PRODUCTO);
+        it.COD_PRODUCTO = cod ?? "";
+        it.DES_PRODUCTO = _productos.FirstOrDefault(x => x.COD_PRODUCTO == cod)?.DES_PRODUCTO ?? "";
+        if (!string.IsNullOrWhiteSpace(it.COD_PRODUCTO)) _itemsNuevos.Add(it.COD_PRODUCTO);
+    }
+
+    /// <summary>Lo que dispara el botón: graba y avisa, o explica por qué no puede.</summary>
+    private async Task GuardarItemConAviso(Item it)
+    {
+        if (string.IsNullOrWhiteSpace(it.COD_PRODUCTO))
+        {
+            Snackbar.Add("Elegí el producto antes de grabar la fila.", Severity.Warning);
+            return;
+        }
+        if (await GuardarItem(it)) Snackbar.Add($"Producto {it.COD_PRODUCTO} grabado.", Severity.Success);
+    }
+
+    private async Task<bool> GuardarItem(Item it)
+    {
+        if (_readonly || string.IsNullOrWhiteSpace(it.COD_PRODUCTO)) return false;
+
+        it.NUM_LOTE_CONTROL = _model.NUM_LOTE_CONTROL;
+        var esNuevo = _itemsNuevos.Contains(it.COD_PRODUCTO);
+
+        var r = await Http.GuardarAsync(ApiRoutes.Logistica.LotesControlDetalle, it, esNuevo);
+        if (!r.IsSuccessStatusCode)
+        {
+            await ErrorDialogHelper.MostrarAsync(r, ErrorLog, DialogService,
+                nameof(LoteDocumento), nameof(GuardarItem), $"No se pudo grabar el producto {it.COD_PRODUCTO}");
+            return false;
+        }
+        _itemsNuevos.Remove(it.COD_PRODUCTO);
+        _huboCambios = true;
+        return true;
+    }
+
+    /// <summary>Quitar la fila la borra en la base: cada fila se graba sola, no hay un
+    /// sincronizado al final que pudiera deshacerlo.</summary>
+    private async Task QuitarItem(Item it)
+    {
+        var cod = it.COD_PRODUCTO ?? "";
+        if (!string.IsNullOrWhiteSpace(cod) && !_itemsNuevos.Contains(cod))
+        {
+            var rd = await Http.DeleteAsync(
+                $"{ApiRoutes.Logistica.LotesControlDetalle}/{Uri.EscapeDataString(_model.NUM_LOTE_CONTROL)}/{Uri.EscapeDataString(cod)}");
+            if (!rd.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService,
+                    nameof(LoteDocumento), nameof(QuitarItem), $"No se pudo eliminar el producto {cod}");
+                return;
+            }
+            _huboCambios = true;
+        }
+        _itemsNuevos.Remove(cod);
+        _items.Remove(it);
+    }
+
+    private async Task CargarDetalleAsync(string? num)
+    {
+        if (string.IsNullOrWhiteSpace(num)) return;
+        var r = await Http.SafeGetAsync<List<Item>>(
+            $"{ApiRoutes.Logistica.LotesControlDetallePorDoc}/{Uri.EscapeDataString(num)}");
+        _items = r ?? new();
+    }
+
+    private async Task Cerrar()
+    {
+        // El bool le dice al listado si tiene que recargarse o si alcanza con volver.
+        await OnCerrar.InvokeAsync(_huboCambios);
+    }
+
+    private async Task OnInvalidSubmit(EditContext ctx)
+    {
+        var errores = string.Join(" · ", ctx.GetValidationMessages());
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"]  = "Faltan datos obligatorios",
+                ["Mensaje"] = string.IsNullOrWhiteSpace(errores) ? "Hay campos obligatorios sin completar." : errores
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Logistica.LotesControl;
+        try
+        {
+            if (Modo == CrudModo.Delete)
+            {
+                var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.NUM_LOTE_CONTROL)}");
+                if (rd.IsSuccessStatusCode) { Snackbar.Add("Lote eliminado.", Severity.Success); await OnCerrar.InvokeAsync(true); }
+                else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(LoteDocumento), nameof(Submit), "No se pudo eliminar el lote");
+                return;
+            }
+
+            // POST al crear, PUT al modificar: el número lo escribe el usuario, así que el
+            // alta no tiene que devolver ninguna clave generada.
+            var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+            if (!resp.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(LoteDocumento), nameof(Submit));
+                return;
+            }
+
+            _huboCambios = true;
+
+            if (_esNuevo)
+            {
+                // El número lo asigna el servidor: vuelve en Codigo y sin él la pantalla no
+                // sabría qué lote acaba de crear ni podría traerle el detalle.
+                var cuerpo = await resp.Content.ReadFromJsonAsync<ApiResponse<WriteResult>>();
+                var generado = cuerpo?.Data?.Codigo;
+                if (!string.IsNullOrWhiteSpace(generado))
+                {
+                    _model.NUM_LOTE_CONTROL = generado;
+                    _esNuevo = false;
+                    Snackbar.Add($"Lote {generado} creado.", Severity.Success);
+                    await CargarDetalleAsync(generado);
+                }
+                else
+                {
+                    Snackbar.Add("El lote se creó, pero el servidor no devolvió su número: volvé a abrirlo desde la lista.", Severity.Warning);
+                }
+            }
+            else
+            {
+                Snackbar.Add("Lote actualizado.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(LoteDocumento), nameof(Submit));
+            Snackbar.Add("No se pudo grabar. Ver detalle en el log de errores.", Severity.Error);
+        }
+        finally { _saving = false; }
+    }
+}

@@ -1,0 +1,103 @@
+@using TiposMermaModel = KONSolutions.Shared.Models.Ingenieria.TiposMerma
+@using TiposMermaRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_MERMA" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <div class="d-flex" style="gap:16px;">
+                <div style="flex:1;min-width:0;">
+                    <CampoTexto Tabla="INGENIERIA.TIPOS_MERMA" Columna="COD_TIPO_MERMA"
+                                @bind-Value="_model.COD_TIPO_MERMA"
+                                Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+                    <CampoTexto Tabla="INGENIERIA.TIPOS_MERMA" Columna="DES_TIPO_MERMA"
+                                @bind-Value="_model.DES_TIPO_MERMA"
+                                Disabled="_readonly" Obligatorio="true" />
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.PrecisionManufacturing" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Producción</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_PRODUCCION" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.LocalShipping" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Logística</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_LOGISTICA" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                </div>
+                <div style="flex-shrink:0;padding-left:8px;border-left:1px solid rgba(0,0,0,.1);">
+                    <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)" Label="Icono" ReadOnly="_readonly" />
+                </div>
+            </div>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposMermaModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposMermaModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(TiposMermaModel m)
+    {
+        _model = new TiposMermaModel
+        {
+            COD_TIPO_MERMA = m.COD_TIPO_MERMA,
+            DES_TIPO_MERMA = m.DES_TIPO_MERMA,
+            FLG_PRODUCCION = m.FLG_PRODUCCION,
+            FLG_LOGISTICA = m.FLG_LOGISTICA,
+            IMG_ICONO = m.IMG_ICONO,
+        };
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<TiposMermaModel>>(
+                $"{TiposMermaRoute.TiposMerma}/{Uri.EscapeDataString(_model.COD_TIPO_MERMA)}");
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = TiposMermaRoute.TiposMerma;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_TIPO_MERMA)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposMermaDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new { _model.COD_TIPO_MERMA, _model.DES_TIPO_MERMA, _model.FLG_PRODUCCION, _model.FLG_LOGISTICA, _model.IMG_ICONO };
+        var resp = await Http.GuardarAsync(ruta, dto, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposMermaDialog), nameof(Submit));
+    }
+}

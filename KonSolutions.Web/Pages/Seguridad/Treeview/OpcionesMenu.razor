@@ -1,0 +1,317 @@
+@page "/seguridad/opciones-menu"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@using KONSolutions.Shared.Models.Seguridad
+
+<PageTitle>Opciones Menú · KONSolutions ERP</PageTitle>
+
+<style>
+    .hex-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        padding: 24px;
+        align-content: flex-start;
+    }
+    .hex-cell {
+        position: relative;
+        width: calc(20% - 12px);
+        min-width: 110px;
+        aspect-ratio: 1 / 1.1;
+        cursor: pointer;
+        transition: transform .18s ease, box-shadow .18s ease;
+    }
+    .hex-cell:hover { transform: translateY(-4px) scale(1.04); }
+    .hex-shape {
+        width: 100%;
+        height: 100%;
+        clip-path: polygon(50% 0%, 95% 25%, 95% 75%, 50% 100%, 5% 75%, 5% 25%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        transition: background .18s;
+    }
+    .hex-label {
+        font-size: .72rem;
+        font-weight: 600;
+        text-align: center;
+        padding: 0 8px;
+        line-height: 1.2;
+        word-break: break-word;
+        max-width: 100%;
+    }
+    .hex-badge {
+        position: absolute;
+        top: 6px; right: 6px;
+        background: rgba(0,0,0,.25);
+        color: #fff;
+        font-size: .6rem;
+        border-radius: 8px;
+        padding: 1px 5px;
+    }
+    .nivel-enter { animation: fadeIn .25s ease; }
+    @@keyframes fadeIn { from { opacity:0; transform: scale(.92); } to { opacity:1; transform: scale(1); } }
+
+    /* Panel derecho */
+    .side-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        cursor: pointer;
+        border-radius: 4px;
+        font-size: .82rem;
+        transition: background .12s;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+    .side-item:hover { background: rgba(0,0,0,.06); }
+    .side-item.activo { background: var(--foco-fondo, #b8472d); color: var(--foco-texto, #fff); }
+</style>
+
+<div class="d-flex align-center justify-space-between mb-3">
+    <div>
+        <TituloPagina Fallback="Opciones Menú" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;">Vista visual · navegación por panales</MudText>
+    </div>
+    <MudButton Variant="Variant.Outlined" Color="Color.Default"
+               StartIcon="@Icons.Material.Filled.Refresh"
+               OnClick="Cargar" Size="Size.Small">Actualizar</MudButton>
+</div>
+
+@if (_cargando)
+{
+    <div class="d-flex justify-center align-center" style="height:500px;">
+        <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+    </div>
+}
+else
+{
+    <div class="d-flex gap-3" style="min-height:580px;align-items:flex-start;">
+
+        @* ── Panel izquierdo: hexágonos ── *@
+        <div style="flex:1;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--tile);">
+
+            @* Breadcrumb *@
+            <div class="px-4 py-2 d-flex align-center gap-1 flex-wrap"
+                 style="border-bottom:1px solid var(--line);min-height:44px;background:rgba(0,0,0,.02);">
+                @for (int i = 0; i < _ruta.Count; i++)
+                {
+                    var idx = i;
+                    var nodo = _ruta[idx];
+                    var esUltimo = idx == _ruta.Count - 1;
+                    <span @onclick="@(() => NavegrarA(idx))"
+                          style="cursor:pointer;font-size:.82rem;
+                                 font-weight:@(esUltimo?"700":"400");
+                                 color:@(esUltimo?ColorPorTipo(nodo.COD_TIPO):"inherit");
+                                 opacity:@(esUltimo?"1":".55");">
+                        @(string.IsNullOrWhiteSpace(nodo.DES_OPCION) ? nodo.COD_CHILDREN : nodo.DES_OPCION)
+                    </span>
+                    @if (!esUltimo)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Style="font-size:.85rem;opacity:.35;" />
+                    }
+                }
+                @if (_ruta.Count > 1)
+                {
+                    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small"
+                                   Style="margin-left:auto;" OnClick="Volver" />
+                }
+            </div>
+
+            @* Grid de hexágonos *@
+            <div class="hex-grid nivel-enter">
+                @if (!_hijos.Any())
+                {
+                    <div class="d-flex flex-column align-center justify-center py-10 w-100" style="opacity:.3;">
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Style="font-size:2.5rem;" />
+                        <MudText Class="mt-2" Style="font-size:.85rem;">Sin subniveles</MudText>
+                    </div>
+                }
+                @foreach (var nodo in _hijos)
+                {
+                    var n = nodo;
+                    var esActivo = _nivelActual?.COD_CHILDREN == n.COD_CHILDREN;
+                    <div class="hex-cell" @onclick="@(() => Entrar(n))">
+                        <div class="hex-shape"
+                             style="background:@(esActivo ? ColorPorTipo(n.COD_TIPO) : FondoHex(n.COD_TIPO));
+                                    box-shadow:@(esActivo ? $"0 0 20px {ColorPorTipo(n.COD_TIPO)}66" : "0 2px 8px rgba(0,0,0,.10)");">
+                            <MudIcon Icon="@IconoPorTipo(n.COD_TIPO)"
+                                     Style="@($"font-size:1.6rem;color:{(esActivo?"#fff":ColorPorTipo(n.COD_TIPO))};")"/>
+                            <span class="hex-label"
+                                  style="color:@(esActivo?"#fff":"var(--ink)");">
+                                @(string.IsNullOrWhiteSpace(n.DES_OPCION) ? n.COD_CHILDREN : n.DES_OPCION)
+                            </span>
+                        </div>
+                        @if (n.Hijos.Any())
+                        {
+                            <div class="hex-badge">@n.Hijos.Count</div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        @* ── Panel derecho: menú colapsable ── *@
+        <div style="width:280px;flex-shrink:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--tile);">
+            <div class="px-3 py-2" style="border-bottom:1px solid var(--line);background:rgba(0,0,0,.02);">
+                <MudText Typo="Typo.subtitle2" Style="font-weight:700;font-size:.82rem;">Estructura</MudText>
+            </div>
+            <div style="max-height:540px;overflow-y:auto;">
+                @foreach (var raiz in _raices)
+                {
+                    <SideItem Nodo="raiz" NodoActivo="_nivelActual" OnSeleccionar="SeleccionarDesdePanel" />
+                }
+            </div>
+        </div>
+
+    </div>
+}
+
+@code {
+    // Recibidos siempre por AbrirTabOpcion (MainLayout) para pantallas con botones
+    // dinámicos vía AccionesBotones — esta pantalla no los usa todavía, pero debe
+    // aceptarlos para no romper al abrirse desde el menú.
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<NodoOpcion> _raices      = new();
+    private List<NodoOpcion> _hijos       = new();
+    private List<NodoOpcion> _ruta        = new();
+    private NodoOpcion?      _nivelActual;
+    private bool             _cargando;
+
+    protected override async Task OnInitializedAsync() => await Cargar();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_raices.Any()) { await Cargar(); StateHasChanged(); }
+    }
+
+    private async Task Cargar()
+    {
+        _cargando = true;
+        try
+        {
+            var resp = await Http.GetFromJsonAsync<ApiResp<List<NodoOpcion>>>(
+                ApiRoutes.Seguridad.AplicacionesOpcionesTreeview);
+            if (resp?.Data is not null)
+            {
+                _raices = ArmarArbol(resp.Data);
+                var root = _raices.FirstOrDefault() ?? new NodoOpcion { DES_OPCION = "Inicio", COD_TIPO = "ROT" };
+                _ruta   = new List<NodoOpcion> { root };
+                _hijos  = root.Hijos;
+            }
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(OpcionesMenu)); }
+        finally { _cargando = false; }
+    }
+
+    private void Entrar(NodoOpcion nodo)
+    {
+        _nivelActual = nodo;
+        if (nodo.Hijos.Any())
+        {
+            _ruta.Add(nodo);
+            _hijos = nodo.Hijos;
+        }
+    }
+
+    private void NavegrarA(int idx)
+    {
+        _ruta        = _ruta.Take(idx + 1).ToList();
+        _nivelActual = _ruta.Last();
+        _hijos       = _nivelActual.Hijos;
+    }
+
+    private void Volver()
+    {
+        if (_ruta.Count <= 1) return;
+        _ruta.RemoveAt(_ruta.Count - 1);
+        _nivelActual = _ruta.Last();
+        _hijos       = _nivelActual.Hijos;
+    }
+
+    private void SeleccionarDesdePanel(NodoOpcion nodo)
+    {
+        var nuevaRuta = EncontrarRuta(_raices, nodo);
+        if (nuevaRuta is null) return;
+        _ruta        = nuevaRuta;
+        _nivelActual = nodo;
+        _hijos       = nodo.Hijos;
+        StateHasChanged();
+    }
+
+    private static List<NodoOpcion>? EncontrarRuta(List<NodoOpcion> nodos, NodoOpcion dest)
+    {
+        foreach (var n in nodos)
+        {
+            if (n.COD_CHILDREN == dest.COD_CHILDREN) return new List<NodoOpcion> { n };
+            var sub = EncontrarRuta(n.Hijos, dest);
+            if (sub is not null) { sub.Insert(0, n); return sub; }
+        }
+        return null;
+    }
+
+    private static List<NodoOpcion> ArmarArbol(List<NodoOpcion> planos)
+    {
+        var sinDuplicados = planos
+            .GroupBy(n => n.COD_CHILDREN)
+            .Select(g => g.First())
+            .ToList();
+        var mapa = sinDuplicados.ToDictionary(n => n.COD_CHILDREN);
+        foreach (var nodo in sinDuplicados)
+            if (!string.IsNullOrWhiteSpace(nodo.COD_PARENT) && mapa.TryGetValue(nodo.COD_PARENT, out var padre))
+                padre.Hijos.Add(nodo);
+        var raices = sinDuplicados
+            .Where(n => string.IsNullOrWhiteSpace(n.COD_PARENT) || !mapa.ContainsKey(n.COD_PARENT))
+            .ToList();
+        if (!raices.Any())
+        {
+            var rot = sinDuplicados.FirstOrDefault(n => n.COD_TIPO == "ROT");
+            if (rot is not null) raices.Add(rot);
+        }
+        if (raices.Count == 1 && raices[0].COD_TIPO == "ROT" && raices[0].Hijos.Any())
+            return raices[0].Hijos;
+        return raices;
+    }
+
+    private static string ColorPorTipo(string tipo) => tipo switch
+    {
+        "ROT" => "#16130f",
+        "APP" => "#b8472d",
+        "CRP" => "#e6921a",
+        "MDL" => "#2b6cb0",
+        "SMD" => "#6b46c1",
+        "BTN" => "#2f855a",
+        _     => "#888"
+    };
+
+    private static string FondoHex(string tipo) => tipo switch
+    {
+        "ROT" => "rgba(22,19,15,.07)",
+        "APP" => "rgba(184,71,45,.09)",
+        "CRP" => "rgba(230,146,26,.09)",
+        "MDL" => "rgba(43,108,176,.09)",
+        "SMD" => "rgba(107,70,193,.09)",
+        "BTN" => "rgba(47,133,90,.09)",
+        _     => "rgba(0,0,0,.05)"
+    };
+
+    private static string IconoPorTipo(string tipo) => tipo switch
+    {
+        "ROT" => Icons.Material.Filled.AccountTree,
+        "APP" => Icons.Material.Filled.AppsOutage,
+        "CRP" => Icons.Material.Filled.Folder,
+        "MDL" => Icons.Material.Filled.ViewModule,
+        "SMD" => Icons.Material.Filled.ViewQuilt,
+        "BTN" => Icons.Material.Filled.SmartButton,
+        _     => Icons.Material.Filled.Circle
+    };
+
+    private record ApiResp<T>(bool Success, T? Data, string? Message);
+}

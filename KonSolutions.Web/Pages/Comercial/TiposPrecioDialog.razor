@@ -1,0 +1,96 @@
+@using TiposPrecioModel = KONSolutions.Shared.Models.Comercial.TiposPrecio
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_PRECIO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            @if (!_esNuevo)
+            {
+                <CampoTexto Tabla="COMERCIAL.TIPOS_PRECIO" Columna="COD_TIPO_PRECIO"
+                            @bind-Value="_codigoStr" Disabled="true" />
+            }
+            <CampoTexto Tabla="COMERCIAL.TIPOS_PRECIO" Columna="DES_TIPO_PRECIO"
+                        @bind-Value="_model.DES_TIPO_PRECIO"
+                        Disabled="_readonly" Obligatorio="true" />
+            <EstadoCombo DesTabla="COMERCIAL.TIPOS_PRECIO"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" />
+            <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)" Label="Ícono" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposPrecioModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposPrecioModel _model = new();
+    private string? _codigoStr;
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        // Mapeo inicial desde el Item que pasó la grilla — se usa como fallback mientras
+        // se resuelve el viaje a SHOWBYID (en OnInitializedAsync) o si ese viaje falla; una
+        // vez que responde, MapearDesdeModelo() pisa estos valores con los frescos de la BD.
+        if (Item is not null) MapearDesdeModelo(Item);
+        _codigoStr = _model.COD_TIPO_PRECIO?.ToString();
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de SHOWBYID) hacia _model.</summary>
+    private void MapearDesdeModelo(TiposPrecioModel m)
+    {
+        _model.COD_TIPO_PRECIO = m.COD_TIPO_PRECIO;
+        _model.DES_TIPO_PRECIO = m.DES_TIPO_PRECIO;
+        _model.COD_TIPO_ESTADO = m.COD_TIPO_ESTADO;
+        _model.COD_ESTADO = m.COD_ESTADO;
+        _model.IMG_ICONO = m.IMG_ICONO;
+        _codigoStr = _model.COD_TIPO_PRECIO?.ToString();
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear), para no mostrar datos desactualizados de la
+    /// grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposPrecioModel>($"{ApiRoutes.Comercial.TiposPrecio}/{_model.COD_TIPO_PRECIO}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Comercial.TiposPrecio;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_TIPO_PRECIO}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposPrecioDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // El SP hace upsert: POST tanto para crear como para editar (COD identity).
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposPrecioDialog), nameof(Submit));
+    }
+}

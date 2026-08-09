@@ -1,0 +1,202 @@
+@* Pestaña hija de Sucursales: ESTANDAR.SUCURSALES_TIPOS_COMPROBANTE_PAGO de la sucursal seleccionada. *@
+@using ComprobanteModel = KONSolutions.Shared.Models.Estandar.SucursalesTiposComprobantePago
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject LimitesService Limites
+@inject ErrorLogService ErrorLog
+
+<div class="d-flex align-center justify-space-between pa-3" style="border-bottom:1px solid var(--line);">
+    <div>
+        <MudText Typo="Typo.h6">Tipos de Comprobante de Pago</MudText>
+        <MudText Class="mono" Style="opacity:.5;font-size:.78rem;color:var(--subtitulo-color,#6b6358);">
+            @if (!string.IsNullOrWhiteSpace(CodSucursal)) { <text>Sucursal: @DesSucursal · @_items.Count tipos habilitados</text> }
+            else { <text>Seleccione una sucursal arriba</text> }
+        </MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   Disabled="@string.IsNullOrWhiteSpace(CodSucursal)" Size="Size.Small"
+                   OnClick="@(() => Abrir(null, CrudModo.Create))">Habilitar tipo</MudButton>
+    </div>
+</div>
+
+@if (string.IsNullOrWhiteSpace(CodSucursal))
+{
+    <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione una sucursal para ver sus tipos de comprobante.</MudText>
+}
+else if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <div data-resizable-grid="sucursal-tipos-comprobante" style="position:relative;">
+    <MudDataGrid T="ComprobanteModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código"
+                            Width="@Limites.ColWidth("ESTANDAR.SUCURSALES_TIPOS_COMPROBANTE_PAGO","COD_TIPO_COMPROBANTE_PAGO",70,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_TIPO_COMPROBANTE_PAGO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="ComprobanteModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_TIPO_COMPROBANTE_PAGO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.COD_TIPO_COMPROBANTE_PAGO</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo de comprobante"
+                            Width="@Limites.ColWidth("ESTANDAR.SUCURSALES_TIPOS_COMPROBANTE_PAGO","DES_TIPO_COMPROBANTE_PAGO",180,340)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TIPO_COMPROBANTE_PAGO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="ComprobanteModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_TIPO_COMPROBANTE_PAGO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_COMPROBANTE_PAGO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Serie" Width="110" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate><EncabezadoOrdenable Campo="NUM_SERIE_COMPROBANTE" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" /></HeaderTemplate>
+                @* La serie se muestra con 3 dígitos, que es como se imprime en el comprobante. *@
+                <CellTemplate><span class="mono">@(context.Item.NUM_SERIE_COMPROBANTE?.ToString("D3"))</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Último correlativo" Width="150" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
+                <HeaderTemplate><EncabezadoOrdenable Campo="NUM_CORRELATIVO_ULTIMO" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" /></HeaderTemplate>
+                <CellTemplate><span class="mono">@(context.Item.NUM_CORRELATIVO_ULTIMO?.ToString("N0"))</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false" Width="130">
+                <CellTemplate>
+                    @{ var c = context.Item; }
+                    <div class="d-flex align-center gap-1">
+                        <MudTooltip Text="Modificar">
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                                           OnClick="@(() => Abrir(c, CrudModo.Update))" />
+                        </MudTooltip>
+                        <MudTooltip Text="Eliminar">
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                           OnClick="@(() => Abrir(c, CrudModo.Delete))" />
+                        </MudTooltip>
+                        <MudTooltip Text="Consultar">
+                            <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" Color="Color.Info"
+                                           OnClick="@(() => Abrir(c, CrudModo.Read))" />
+                        </MudTooltip>
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;">Esta sucursal no tiene tipos de comprobante habilitados.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="ComprobanteModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+}
+
+@code {
+    [Parameter] public string CodSucursal { get; set; } = "";
+    [Parameter] public string DesSucursal { get; set; } = "";
+
+    private List<ComprobanteModel> _items = new();
+    private bool _loading;
+    private string _sucursalCargada = "";
+
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+
+    private List<ComprobanteModel> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<ComprobanteModel> Base(int col) => Aplicar(_items, col);
+
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+
+    private List<ComprobanteModel> Ordenar(List<ComprobanteModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_COMPROBANTE_PAGO).ToList() : items.OrderByDescending(x => x.COD_TIPO_COMPROBANTE_PAGO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_COMPROBANTE_PAGO).ToList() : items.OrderByDescending(x => x.DES_TIPO_COMPROBANTE_PAGO).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.NUM_SERIE_COMPROBANTE).ToList()     : items.OrderByDescending(x => x.NUM_SERIE_COMPROBANTE).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.NUM_CORRELATIVO_ULTIMO).ToList()    : items.OrderByDescending(x => x.NUM_CORRELATIVO_ULTIMO).ToList(),
+        _ => items
+    };
+
+    private List<ComprobanteModel> Aplicar(List<ComprobanteModel> src, int ex)
+    {
+        IEnumerable<ComprobanteModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_TIPO_COMPROBANTE_PAGO)),
+                1 => q.Where(x => v.Contains(x.DES_TIPO_COMPROBANTE_PAGO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    // Recarga sola cuando el padre cambia de sucursal. Se compara contra la última cargada
+    // para no repetir la llamada en cada render del componente.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (CodSucursal != _sucursalCargada)
+        {
+            _sucursalCargada = CodSucursal;
+            await Load();
+        }
+    }
+
+    public async Task Load()
+    {
+        if (string.IsNullOrWhiteSpace(CodSucursal)) { _items = new(); return; }
+        _loading = true;
+        try
+        {
+            // El SP SHOWALL exige @COD_SUCURSAL: la ruta lleva el código de la sucursal padre.
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ComprobanteModel>>>(
+                $"{ApiRoutes.Estandar.SucursalesTiposComprobantePago}/{Uri.EscapeDataString(CodSucursal)}");
+            _items = r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(SucursalTiposComprobanteTab), nameof(Load));
+            Snackbar.Add("No se pudieron cargar los tipos de comprobante. Ver detalle en el log de errores.", Severity.Error);
+            _items = new();
+        }
+        _loading = false;
+    }
+
+    private async Task Abrir(ComprobanteModel? item, CrudModo modo)
+    {
+        if (string.IsNullOrWhiteSpace(CodSucursal)) { Snackbar.Add("Seleccione primero una sucursal.", Severity.Warning); return; }
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Habilitar tipo de comprobante",
+            CrudModo.Delete => $"Eliminar · {item?.DES_TIPO_COMPROBANTE_PAGO}",
+            CrudModo.Read   => $"Consultar · {item?.DES_TIPO_COMPROBANTE_PAGO}",
+            _               => $"Editar · {item?.DES_TIPO_COMPROBANTE_PAGO}"
+        };
+        var dlg = await DialogService.ShowAsync<SucursalTipoComprobanteDialog>(titulo,
+            new DialogParameters
+            {
+                ["Item"]        = item,
+                ["Modo"]        = modo,
+                ["CodSucursal"] = CodSucursal,
+                ["DesSucursal"] = DesSucursal
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+}

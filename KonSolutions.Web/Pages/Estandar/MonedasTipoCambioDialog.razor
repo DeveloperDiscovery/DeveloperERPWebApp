@@ -1,0 +1,170 @@
+@using KONSolutions.Shared.Models.Estandar
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@(Moneda?.DES_MONEDA ?? "")" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            <MudText Typo="Typo.caption" Style="opacity:.5;">Moneda</MudText>
+            <MudText Class="mono mb-3" Style="font-weight:600;">@Moneda?.COD_MONEDA — @Moneda?.DES_MONEDA</MudText>
+
+            <MudDatePicker @bind-Date="_fechaTC" Label="Fecha tipo de cambio"
+                           Variant="Variant.Outlined" Margin="Margin.Dense"
+                           ReadOnly="_readonly" Class="mb-3"
+                           DateFormat="dd/MM/yyyy" />
+
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.caption" Style="opacity:.5;letter-spacing:.06em;">TIPO COMERCIAL</MudText>
+            <MudGrid Spacing="2" Class="mt-1 mb-3">
+                <MudItem xs="6">
+                    <MudNumericField T="decimal?" @bind-Value="_model.FAC_COMERCIAL_COMPRA"
+                                     Label="Compra" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     ReadOnly="_readonly" Format="N4"
+                                     Culture="@System.Globalization.CultureInfo.InvariantCulture" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudNumericField T="decimal?" @bind-Value="_model.FAC_COMERCIAL_VENTA"
+                                     Label="Venta" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     ReadOnly="_readonly" Format="N4"
+                                     Culture="@System.Globalization.CultureInfo.InvariantCulture" />
+                </MudItem>
+            </MudGrid>
+
+            <MudText Typo="Typo.caption" Style="opacity:.5;letter-spacing:.06em;">TIPO SUNAT</MudText>
+            <MudGrid Spacing="2" Class="mt-1 mb-3">
+                <MudItem xs="6">
+                    <MudNumericField T="decimal?" @bind-Value="_model.FAC_SUNAT_COMPRA"
+                                     Label="Compra" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     ReadOnly="_readonly" Format="N4"
+                                     Culture="@System.Globalization.CultureInfo.InvariantCulture" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudNumericField T="decimal?" @bind-Value="_model.FAC_SUNAT_VENTA"
+                                     Label="Venta" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     ReadOnly="_readonly" Format="N4"
+                                     Culture="@System.Globalization.CultureInfo.InvariantCulture" />
+                </MudItem>
+            </MudGrid>
+
+            <MudText Typo="Typo.caption" Style="opacity:.5;letter-spacing:.06em;">TIPO PARALELO</MudText>
+            <MudGrid Spacing="2" Class="mt-1 mb-3">
+                <MudItem xs="6">
+                    <MudNumericField T="decimal?" @bind-Value="_model.FAC_PARALELO_COMPRA"
+                                     Label="Compra" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     ReadOnly="_readonly" Format="N4"
+                                     Culture="@System.Globalization.CultureInfo.InvariantCulture" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudNumericField T="decimal?" @bind-Value="_model.FAC_PARALELO_VENTA"
+                                     Label="Venta" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     ReadOnly="_readonly" Format="N4"
+                                     Culture="@System.Globalization.CultureInfo.InvariantCulture" />
+                </MudItem>
+            </MudGrid>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public MonedaTipoCambio? Item { get; set; }
+    [Parameter] public Moneda? Moneda { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private MonedaTipoCambio _model = new();
+    private DateTime? _fechaTC;
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Moneda is not null) _model.COD_MONEDA = Moneda.COD_MONEDA;
+        if (Item is not null)
+        {
+            MapearDesdeModelo(Item);
+        }
+        else
+        {
+            _fechaTC = DateTime.Today;
+        }
+    }
+
+    private void MapearDesdeModelo(MonedaTipoCambio m)
+    {
+        _model = new MonedaTipoCambio
+        {
+            COD_MONEDA           = m.COD_MONEDA,
+            FEC_TIPO_CAMBIO      = m.FEC_TIPO_CAMBIO,
+            FAC_COMERCIAL_COMPRA = m.FAC_COMERCIAL_COMPRA,
+            FAC_COMERCIAL_VENTA  = m.FAC_COMERCIAL_VENTA,
+            FAC_SUNAT_COMPRA     = m.FAC_SUNAT_COMPRA,
+            FAC_SUNAT_VENTA      = m.FAC_SUNAT_VENTA,
+            FAC_PARALELO_COMPRA  = m.FAC_PARALELO_COMPRA,
+            FAC_PARALELO_VENTA   = m.FAC_PARALELO_VENTA,
+        };
+        _fechaTC = m.FEC_TIPO_CAMBIO;
+    }
+
+    /// <summary>Trae el Tipo de Cambio fresco desde SHOWBYID (clave compuesta
+    /// COD_MONEDA/FEC_TIPO_CAMBIO, formateada igual que en Submit/Delete) — evita mostrar
+    /// datos desactualizados de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        try
+        {
+            var fecStr = _model.FEC_TIPO_CAMBIO?.ToString("yyyy-MM-dd") ?? "";
+            var url = $"{ApiRoutes.Estandar.MonedasTipoCambio}/{Uri.EscapeDataString(_model.COD_MONEDA)}/{Uri.EscapeDataString(fecStr)}";
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<MonedaTipoCambio>>(url);
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var fecStr = _model.FEC_TIPO_CAMBIO?.ToString("yyyy-MM-dd") ?? "";
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Estandar.MonedasTipoCambio}/{Uri.EscapeDataString(_model.COD_MONEDA)}/{Uri.EscapeDataString(fecStr)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(MonedasTipoCambioDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        _model.FEC_TIPO_CAMBIO = _fechaTC;
+        var dto = new
+        {
+            _model.COD_MONEDA, _model.FEC_TIPO_CAMBIO,
+            _model.FAC_COMERCIAL_COMPRA, _model.FAC_COMERCIAL_VENTA,
+            _model.FAC_SUNAT_COMPRA, _model.FAC_SUNAT_VENTA,
+            _model.FAC_PARALELO_COMPRA, _model.FAC_PARALELO_VENTA
+        };
+        var resp = await Http.GuardarAsync(ApiRoutes.Estandar.MonedasTipoCambio, dto, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(Modo == CrudModo.Create ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(MonedasTipoCambioDialog), nameof(Submit));
+    }
+}

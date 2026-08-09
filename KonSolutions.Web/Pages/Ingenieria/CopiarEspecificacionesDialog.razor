@@ -1,0 +1,169 @@
+@using FamiliasProductoModel = KONSolutions.Shared.Models.Estandar.FamiliasProducto
+@using SubFamiliasProductoModel = KONSolutions.Shared.Models.Estandar.SubFamiliasProducto
+@using CopiarDto = KONSolutions.Shared.Models.Ingenieria.GruposFamiliasSubFamiliasEspecificacionTecnicaCopiarDto
+@using Destino = KONSolutions.Shared.Models.Ingenieria.GruposFamiliasSubFamiliasEspecificacionTecnicaDestino
+@using CopiarResultado = KONSolutions.Shared.Models.Ingenieria.GruposFamiliasSubFamiliasEspecificacionTecnicaCopiarResultado
+@using EstandarRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@using IngenieriaRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Copiar Especificaciones Técnicas a otras Sub Familias</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Class="mono mb-3" Style="opacity:.6;font-size:.82rem;">
+            Se copiarán las Especificaciones Técnicas ya asignadas en la Sub Familia actual
+            (con sus valores) hacia las Sub Familias que elijas abajo.
+        </MudText>
+        <AriaCombo TItem="ComboboxItem" Items="_grupos"
+                   TextFunc="@(g => $"{g.Id} - {g.Texto}")" ValueFunc="@(g => g.Id)"
+                   Value="@_codGrupoDestino" ValueChanged="@(v => OnGrupoChanged(v ?? ""))"
+                   Label="Grupo de Producto (destino)" />
+        <AriaCombo TItem="ComboboxItem" Items="_familias"
+                   TextFunc="@(f => $"{f.Id} - {f.Texto}")" ValueFunc="@(f => f.Id)"
+                   Value="@_codFamiliaDestino" ValueChanged="@(v => OnFamiliaChanged(v ?? ""))"
+                   Label="Familia de Producto (destino)" Disabled="@string.IsNullOrEmpty(_codGrupoDestino)" />
+
+        @if (string.IsNullOrEmpty(_codFamiliaDestino))
+        {
+            <MudText Class="mono pa-3" Style="opacity:.5;">Elija Grupo y Familia para ver sus Sub Familias.</MudText>
+        }
+        else if (!_subFamilias.Any())
+        {
+            <MudText Class="mono pa-3" Style="opacity:.5;">Esta Familia no tiene Sub Familias.</MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Sub Familias destino</MudText>
+            @foreach (var sf in _subFamilias)
+            {
+                var esOrigen = sf.Id == CodSubFamiliaProducto && _codGrupoDestino == CodGrupoProducto && _codFamiliaDestino == CodFamiliaProducto;
+                <MudCheckBox T="bool" Value="@_seleccionadas.Contains(sf.Id)" ValueChanged="@(v => Toggle(sf.Id, v))"
+                             Disabled="esOrigen" Label="@($"{sf.Id} - {sf.Texto}{(esOrigen ? " (origen, no aplica)" : "")}")" />
+            }
+        }
+
+        @if (_resultado is not null)
+        {
+            <MudAlert Severity="@(_resultado.TotalErrores == 0 ? Severity.Success : Severity.Warning)" Class="mt-3">
+                Copiadas: @_resultado.TotalCopiados @(_resultado.TotalErrores > 0 ? $" · Errores: {_resultado.TotalErrores}" : "")
+                @if (_resultado.Detalles.Any())
+                {
+                    <ul class="mt-1">
+                        @foreach (var d in _resultado.Detalles) { <li class="mono" style="font-size:.78rem;">@d</li> }
+                    </ul>
+                }
+            </MudAlert>
+        }
+
+        <MudStack Row="true" Justify="Justify.FlexEnd" Class="mt-4" Spacing="2">
+            <MudButton OnClick="@(() => MudDialog.Cancel())">Cerrar</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_copiando || !_seleccionadas.Any())" OnClick="Copiar">
+                @(_copiando ? "Copiando..." : "Copiar")
+            </MudButton>
+        </MudStack>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string CodGrupoProducto { get; set; } = "";
+    [Parameter] public string CodFamiliaProducto { get; set; } = "";
+    [Parameter] public string CodSubFamiliaProducto { get; set; } = "";
+
+    private List<ComboboxItem> _grupos = new();
+    private List<ComboboxItem> _familias = new();
+    private List<ComboboxItem> _subFamilias = new();
+    private string _codGrupoDestino = "";
+    private string _codFamiliaDestino = "";
+    private HashSet<string> _seleccionadas = new();
+    private bool _copiando;
+    private CopiarResultado? _resultado;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(EstandarRoute.GruposProductoCombobox);
+            _grupos = r?.Data ?? new();
+        }
+        catch { _grupos = new(); }
+        // Por defecto arranca sobre el mismo Grupo/Familia de origen (caso más común: copiar
+        // a otras Sub Familias de la misma Familia).
+        _codGrupoDestino = CodGrupoProducto;
+        await OnGrupoChanged(CodGrupoProducto, cargarFamilia: false);
+        _codFamiliaDestino = CodFamiliaProducto;
+        await CargarSubFamilias();
+    }
+
+    private async Task OnGrupoChanged(string val, bool cargarFamilia = true)
+    {
+        _codGrupoDestino = val;
+        _codFamiliaDestino = "";
+        _subFamilias = new();
+        if (string.IsNullOrEmpty(val)) { _familias = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<FamiliasProductoModel>>>(
+                $"{EstandarRoute.FamiliasProducto}?codGrupoProducto={Uri.EscapeDataString(val)}");
+            _familias = (r?.Data ?? new()).Select(f => new ComboboxItem { Id = f.COD_FAMILIA_PRODUCTO.Trim(), Texto = f.DES_FAMILIA_PRODUCTO }).ToList();
+        }
+        catch { _familias = new(); }
+    }
+
+    private async Task OnFamiliaChanged(string val)
+    {
+        _codFamiliaDestino = val;
+        await CargarSubFamilias();
+    }
+
+    private async Task CargarSubFamilias()
+    {
+        _subFamilias = new();
+        if (string.IsNullOrEmpty(_codGrupoDestino) || string.IsNullOrEmpty(_codFamiliaDestino)) return;
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<SubFamiliasProductoModel>>>(
+                $"{EstandarRoute.SubFamiliasProducto}?codGrupoProducto={Uri.EscapeDataString(_codGrupoDestino)}&codFamiliaProducto={Uri.EscapeDataString(_codFamiliaDestino)}");
+            _subFamilias = (r?.Data ?? new()).Select(s => new ComboboxItem { Id = s.COD_SUB_FAMILIA_PRODUCTO.Trim(), Texto = s.DES_SUB_FAMILIA_PRODUCTO }).ToList();
+        }
+        catch { _subFamilias = new(); }
+    }
+
+    private void Toggle(string codSubFamilia, bool marcado)
+    {
+        if (marcado) _seleccionadas.Add(codSubFamilia);
+        else _seleccionadas.Remove(codSubFamilia);
+    }
+
+    private async Task Copiar()
+    {
+        _copiando = true;
+        _resultado = null;
+        var dto = new CopiarDto
+        {
+            COD_GRUPO_PRODUCTO = CodGrupoProducto,
+            COD_FAMILIA_PRODUCTO = CodFamiliaProducto,
+            COD_SUB_FAMILIA_PRODUCTO = CodSubFamiliaProducto,
+            Destinos = _seleccionadas.Select(s => new Destino
+            {
+                COD_GRUPO_PRODUCTO = _codGrupoDestino,
+                COD_FAMILIA_PRODUCTO = _codFamiliaDestino,
+                COD_SUB_FAMILIA_PRODUCTO = s
+            }).ToList()
+        };
+        var resp = await Http.PostAsJsonAsync(IngenieriaRoute.GruposEspecificacionTecnicaCopiar, dto);
+        _copiando = false;
+        if (resp.IsSuccessStatusCode)
+        {
+            var r = await resp.Content.ReadFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<CopiarResultado>>();
+            _resultado = r?.Data;
+            Snackbar.Add(r?.Message ?? "Copia realizada.", _resultado?.TotalErrores > 0 ? Severity.Warning : Severity.Success);
+        }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(CopiarEspecificacionesDialog), nameof(Copiar));
+    }
+}

@@ -1,0 +1,101 @@
+@using TiposMedioContactoModel = KONSolutions.Shared.Models.Comercial.TiposMedioContacto
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_MEDIO_CONTACTO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            @if (!_esNuevo)
+            {
+                <CampoTexto Tabla="COMERCIAL.TIPOS_MEDIO_CONTACTO" Columna="COD_TIPO_MEDIO_CONTACTO"
+                            @bind-Value="_codigoStr" Disabled="true" />
+            }
+            <CampoTexto Tabla="COMERCIAL.TIPOS_MEDIO_CONTACTO" Columna="DES_TIPO_MEDIO_CONTACTO"
+                        @bind-Value="_model.DES_TIPO_MEDIO_CONTACTO"
+                        Disabled="_readonly" Obligatorio="true" />
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.Email" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_CORREO" Color="Color.Primary" Label="Correo" Disabled="_readonly" /></div>
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.Phone" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_TELEFONO" Color="Color.Secondary" Label="Teléfono" Disabled="_readonly" /></div>
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.Language" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_WEB" Color="Color.Tertiary" Label="Web" Disabled="_readonly" /></div>
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.Share" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_RED_SOCIAL" Color="Color.Warning" Label="Red social" Disabled="_readonly" /></div>
+            <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)" Label="Ícono" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposMedioContactoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposMedioContactoModel _model = new();
+    private string? _codigoStr;
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        // Mapeo inicial desde el Item que pasó la grilla — se usa como fallback mientras
+        // se resuelve el viaje a SHOWBYID (en OnInitializedAsync) o si ese viaje falla; una
+        // vez que responde, MapearDesdeModelo() pisa estos valores con los frescos de la BD.
+        if (Item is not null) MapearDesdeModelo(Item);
+        _codigoStr = _model.COD_TIPO_MEDIO_CONTACTO?.ToString();
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de SHOWBYID) hacia _model.</summary>
+    private void MapearDesdeModelo(TiposMedioContactoModel m)
+    {
+        _model.COD_TIPO_MEDIO_CONTACTO = m.COD_TIPO_MEDIO_CONTACTO;
+        _model.DES_TIPO_MEDIO_CONTACTO = m.DES_TIPO_MEDIO_CONTACTO;
+        _model.FLG_CORREO = m.FLG_CORREO;
+        _model.FLG_TELEFONO = m.FLG_TELEFONO;
+        _model.FLG_WEB = m.FLG_WEB;
+        _model.FLG_RED_SOCIAL = m.FLG_RED_SOCIAL;
+        _model.IMG_ICONO = m.IMG_ICONO;
+        _codigoStr = _model.COD_TIPO_MEDIO_CONTACTO?.ToString();
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear), para no mostrar datos desactualizados de la
+    /// grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposMedioContactoModel>($"{ApiRoutes.Comercial.TiposMedioContacto}/{_model.COD_TIPO_MEDIO_CONTACTO}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Comercial.TiposMedioContacto;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_TIPO_MEDIO_CONTACTO}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposMedioContactoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposMedioContactoDialog), nameof(Submit));
+    }
+}

@@ -1,0 +1,229 @@
+@page "/ingenieria/registro-items-tecnicos"
+@attribute [Authorize]
+@using TreeListModel = KONSolutions.Shared.Models.Comercial.EspecificacionesItemsTecnicosTreeList
+@using KONSolutions.Web.Pages.Comercial
+@using IngenieriaRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject AccessLogService AccessLog
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>Registro de Ítems Técnicos · @ConfigSvc.Current.NombreApp</PageTitle>
+
+@* ── Menú contextual (clic derecho) — mismos colores/tamaño que la config general ── *@
+@if (_ctxVisible && _ctxNodo is not null)
+{
+    <div style="position:fixed;left:@(_ctxX)px;top:@(_ctxY)px;z-index:9999;
+                background:var(--menu-back,#2b2622);color:var(--menu-fore,#fff);border:1px solid var(--line);border-radius:6px;
+                box-shadow:0 4px 20px rgba(0,0,0,.18);min-width:200px;padding:4px 0;"
+         @onclick:stopPropagation="true">
+        @if (_ctxNodo.COD_KEY_TYPE == "1")
+        {
+            <div class="d-flex align-center gap-2 px-3 py-2" style="cursor:pointer;font-size:.85rem;"
+                 @onclick="@(() => EjecutarContextMenu(CrudModo.Create))">
+                <MudIcon Icon="@Icons.Material.Filled.NoteAdd" Style="font-size:1rem;color:#2b6cb0;" />
+                <span>Nueva</span>
+            </div>
+        }
+        else if (_ctxNodo.COD_KEY_TYPE == "2")
+        {
+            <div class="d-flex align-center gap-2 px-3 py-2" style="cursor:pointer;font-size:.85rem;"
+                 @onclick="@(() => EjecutarContextMenu(CrudModo.Read))">
+                <MudIcon Icon="@Icons.Material.Filled.Visibility" Style="font-size:1rem;color:#2f855a;" />
+                <span>Ver</span>
+            </div>
+            <div class="d-flex align-center gap-2 px-3 py-2" style="cursor:pointer;font-size:.85rem;"
+                 @onclick="@(() => EjecutarContextMenu(CrudModo.Update))">
+                <MudIcon Icon="@Icons.Material.Filled.Edit" Style="font-size:1rem;color:#e6921a;" />
+                <span>Modificar</span>
+            </div>
+            <div class="d-flex align-center gap-2 px-3 py-2" style="cursor:pointer;font-size:.85rem;"
+                 @onclick="@(() => EjecutarContextMenu(CrudModo.Delete))">
+                <MudIcon Icon="@Icons.Material.Filled.Delete" Style="font-size:1rem;color:#e53e3e;" />
+                <span>Eliminar</span>
+            </div>
+        }
+    </div>
+}
+
+<div @onclick="CerrarContextMenu">
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Registro de Ítems Técnicos" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema INGENIERIA · listas (LST) por Especificación Técnica</MudText>
+    </div>
+    <AriaCombo TItem="ComboboxItem" Items="_especificaciones"
+               TextFunc="@(e => $"{e.Id} – {e.Texto}")" ValueFunc="@(e => e.Id)"
+               Value="_codEspecificacionTecnica" ValueChanged="@(v => OnEspecificacionChanged(v ?? ""))"
+               Label="Especificación Técnica" Class="grid-header-search" Style="max-width:400px;" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <MudToolBar Dense="true">
+        <MudButtonGroup Variant="Variant.Filled" Size="Size.Small">
+            <MudButton OnClick="ExpandirTodo" StartIcon="@Icons.Material.Filled.UnfoldMore"
+                       Style="font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">Expandir todo</MudButton>
+            <MudButton OnClick="ColapsarTodo" StartIcon="@Icons.Material.Filled.UnfoldLess"
+                       Style="font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">Colapsar todo</MudButton>
+        </MudButtonGroup>
+    </MudToolBar>
+    <div style="position:relative;padding:8px 4px;background:var(--grilla-fila-par,#1a1714);">
+        @if (_cargando)
+        {
+            <div class="d-flex justify-center pa-6"><MudProgressCircular Color="Color.Primary" Indeterminate="true" /></div>
+        }
+        else if (!_raices.Any())
+        {
+            <MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText>
+        }
+        else
+        {
+            <div class="tl-header-items px-2">
+                <div>Descripción</div>
+                <div>Color</div>
+                <div>Tipo</div>
+                <div>Valor</div>
+                <div>Unidad</div>
+                <div>Características</div>
+                <div>Orden</div>
+            </div>
+            @foreach (var raiz in _raices)
+            {
+                <NodoEspecificacionesItemsTecnicos Nodo="raiz" Nivel="0"
+                    NodoActual="_seleccionado"
+                    ForzarExpandido="_forzarExpandido"
+                    OnSeleccionar="@(n => _seleccionado = n)"
+                    OnContextMenu="MostrarContextMenu" />
+            }
+        }
+    </div>
+</MudPaper>
+
+</div>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<ComboboxItem> _especificaciones = new();
+    private string _codEspecificacionTecnica = "";
+    private List<TreeListModel> _items = new();
+    private List<TreeListModel> _raices = new();
+    private TreeListModel? _seleccionado;
+    private bool? _forzarExpandido;
+    private bool _cargando;
+
+    private bool _ctxVisible;
+    private double _ctxX, _ctxY;
+    private TreeListModel? _ctxNodo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("INGENIERIA", "RegistroItemsTecnicos");
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(IngenieriaRoute.EspecificacionesTecnicasCombobox);
+            _especificaciones = r?.Data ?? new();
+        }
+        catch { _especificaciones = new(); }
+
+        // A diferencia del módulo por Entidad, aquí la Especificación Técnica NO es
+        // obligatoria: se carga el árbol completo desde el inicio, sin exigir selección.
+        await Load();
+    }
+
+    private async Task OnEspecificacionChanged(string val)
+    {
+        _codEspecificacionTecnica = val;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _cargando = true;
+        StateHasChanged();
+        try
+        {
+            var query = string.IsNullOrEmpty(_codEspecificacionTecnica)
+                ? ""
+                : $"?codEspecificacionTecnica={Uri.EscapeDataString(_codEspecificacionTecnica)}";
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TreeListModel>>>(
+                $"{IngenieriaRoute.EspecificacionesItemsTecnicosTreelistPorEspecificacion}{query}");
+            _items = r?.Data ?? new();
+        }
+        catch { _items = new(); }
+        _cargando = false;
+        ConstruirArbol();
+    }
+
+    private void ConstruirArbol()
+    {
+        foreach (var it in _items) it.Hijos = new();
+        var porCodigo = _items.ToDictionary(x => x.COD_KEY);
+        _raices = new();
+        foreach (var it in _items)
+        {
+            var codPadre = it.COD_KEY_FATHER;
+            if (!string.IsNullOrEmpty(codPadre) && porCodigo.TryGetValue(codPadre, out var padre) && padre != it)
+                padre.Hijos.Add(it);
+            else
+                _raices.Add(it);
+        }
+    }
+
+    private void ExpandirTodo() { _forzarExpandido = true;  StateHasChanged(); }
+    private void ColapsarTodo() { _forzarExpandido = false; StateHasChanged(); }
+
+    private async Task MostrarContextMenu((TreeListModel Nodo, double X, double Y) args)
+    {
+        var scale = 1.0;
+        try { scale = await JS.InvokeAsync<double>("appZoom.getScale"); } catch { }
+        if (scale <= 0) scale = 1.0;
+        _ctxNodo = args.Nodo; _ctxX = args.X / scale; _ctxY = args.Y / scale; _ctxVisible = true;
+        StateHasChanged();
+    }
+
+    private void CerrarContextMenu() => _ctxVisible = false;
+
+    private Task EjecutarContextMenu(CrudModo modo)
+    {
+        _ctxVisible = false;
+        return _ctxNodo is not null ? AbrirDialog(_ctxNodo, modo) : Task.CompletedTask;
+    }
+
+    private async Task AbrirDialog(TreeListModel nodo, CrudModo modo)
+    {
+        // "Nueva" solo se activa sobre nodos tipo 1 (Especificación Técnica); las demás
+        // acciones (Ver/Modificar/Eliminar) solo sobre nodos tipo 2 (Ítem Técnico).
+        if (modo == CrudModo.Create && nodo.COD_KEY_TYPE != "1") return;
+        if (modo != CrudModo.Create && nodo.COD_KEY_TYPE != "2") return;
+
+        var parametros = new DialogParameters
+        {
+            ["Item"] = nodo,
+            ["CodEntidad"] = (decimal?)null,
+            ["Modo"] = modo
+        };
+        var opciones = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo Ítem Técnico",
+            CrudModo.Delete => "Eliminar Ítem Técnico",
+            CrudModo.Read   => "Ver Ítem Técnico",
+            _               => "Modificar Ítem Técnico"
+        };
+        var dialog = await DialogService.ShowAsync<EspecificacionesItemsTecnicosDialog>(titulo, parametros, opciones);
+        var resultado = await dialog.Result;
+        if (resultado is not null && !resultado.Canceled) await Load();
+    }
+
+    public void Dispose() { }
+}

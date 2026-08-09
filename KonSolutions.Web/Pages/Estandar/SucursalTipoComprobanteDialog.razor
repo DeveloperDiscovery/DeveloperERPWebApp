@@ -1,0 +1,131 @@
+@using ComprobanteModel = KONSolutions.Shared.Models.Estandar.SucursalesTiposComprobantePago
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_COMPROBANTE_PAGO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+            <MudGrid Spacing="2">
+                <MudItem xs="12">
+                    <MudTextField T="string" Value="@_desSucursal" Label="Sucursal" Variant="Variant.Outlined"
+                                  Margin="Margin.Dense" ReadOnly="true" Disabled="true" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12">
+                    @* El tipo de comprobante forma parte de la PK: solo se elige al crear. *@
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposComprobante"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               @bind-Value="_model.COD_TIPO_COMPROBANTE_PAGO"
+                               Label="Tipo de comprobante de pago"
+                               Disabled="@(!_esNuevo || _readonly)" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="short?" @bind-Value="_model.NUM_SERIE_COMPROBANTE" Label="Serie"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @* Último correlativo emitido: lo avanza la facturación, acá solo se ajusta. *@
+                    <MudNumericField T="int?" @bind-Value="_model.NUM_CORRELATIVO_ULTIMO" Label="Último correlativo"
+                                     Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+            </MudGrid>
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ComprobanteModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    /// <summary>Sucursal padre — obligatoria: la PK es compuesta y los SP filtran por ella.</summary>
+    [Parameter] public string CodSucursal { get; set; } = "";
+    [Parameter] public string DesSucursal { get; set; } = "";
+
+    private ComprobanteModel _model = new();
+    private List<ComboboxItem> _tiposComprobante = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+    private string _desSucursal => string.IsNullOrWhiteSpace(DesSucursal) ? CodSucursal : $"{CodSucursal} · {DesSucursal}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        _model.COD_SUCURSAL = CodSucursal;
+        _tiposComprobante = await CargarCombo(ApiRoutes.Estandar.TiposComprobantesPagoCombobox);
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private void MapearDesdeModelo(ComprobanteModel m)
+    {
+        _model = new ComprobanteModel
+        {
+            COD_SUCURSAL              = m.COD_SUCURSAL,
+            COD_TIPO_COMPROBANTE_PAGO = m.COD_TIPO_COMPROBANTE_PAGO,
+            NUM_SERIE_COMPROBANTE     = m.NUM_SERIE_COMPROBANTE,
+            NUM_CORRELATIVO_ULTIMO    = m.NUM_CORRELATIVO_ULTIMO
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID — evita mostrar datos desactualizados
+    /// de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<ComprobanteModel>(
+            $"{ApiRoutes.Estandar.SucursalesTiposComprobantePago}/{Uri.EscapeDataString(_model.COD_SUCURSAL)}/{Uri.EscapeDataString(_model.COD_TIPO_COMPROBANTE_PAGO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    private async Task<List<ComboboxItem>> CargarCombo(string ruta)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>(ruta);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(SucursalTipoComprobanteDialog), nameof(CargarCombo));
+            return new();
+        }
+    }
+
+    private async Task OnInvalidSubmit(EditContext ctx)
+    {
+        var errores = string.Join(" · ", ctx.GetValidationMessages());
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"]  = "Faltan datos obligatorios",
+                ["Mensaje"] = string.IsNullOrWhiteSpace(errores) ? "Hay campos obligatorios sin completar." : errores
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Estandar.SucursalesTiposComprobantePago;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_SUCURSAL)}/{Uri.EscapeDataString(_model.COD_TIPO_COMPROBANTE_PAGO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(SucursalTipoComprobanteDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        // El SP INSERT hace upsert por (sucursal, tipo): Crear y Modificar usan el mismo POST.
+        var resp = await Http.PostAsJsonAsync(ruta, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(SucursalTipoComprobanteDialog), nameof(Submit));
+    }
+}

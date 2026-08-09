@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- CS8669: false positive del Razor source generator en .NET 9 — el código
+         generado de templates no hereda #nullable aunque el proyecto lo tenga. -->
+    <NoWarn>$(NoWarn);CS8669;MUD0002</NoWarn>
+    <RootNamespace>KONSolutions.Web</RootNamespace>
+    <StaticWebAssetsEnabled>true</StaticWebAssetsEnabled>
+    <BlazorWebAssemblyLoadAllGlobalizationData>true</BlazorWebAssemblyLoadAllGlobalizationData>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <BlazorEnableLinkingDefaults>true</BlazorEnableLinkingDefaults>
+    <PublishTrimmed>true</PublishTrimmed>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="9.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="9.0.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="9.0.0" />
+    <PackageReference Include="Blazored.LocalStorage" Version="4.5.0" />
+    <PackageReference Include="MudBlazor" Version="7.15.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\KonSolutions.Shared\KonSolutions.Shared.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Models\Designer\" />
+    <Folder Include="Models\Developer\" />
+    <Folder Include="Pages\Controlcalidad\" />
+    <Folder Include="Pages\Developer\Components\" />
+    <Folder Include="Pages\Ingenieria\" />
+    <Folder Include="Pages\Costos\" />
+  </ItemGroup>
+</Project>

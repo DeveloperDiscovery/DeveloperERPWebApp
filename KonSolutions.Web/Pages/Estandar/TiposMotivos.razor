@@ -1,0 +1,475 @@
+@page "/estandar/tipos-motivos"
+@attribute [Authorize]
+@inject CatalogoService<TipoMotivo, TipoMotivoDto> TipoService
+@inject MotivoService MotivoService
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ConfigService ConfigSvc
+@inject MenuService MenuSvc
+@implements IDisposable
+
+<PageTitle>Tipos de Motivos · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Motivos" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_tipos.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTipo" OnSearch="HandleSearchTipo" Placeholder="Buscar tipo de motivo..." DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltrosTipo" HasFilters="@(_filtrosTipo.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="LoadTipos" />
+        <GridPrintButton Titulo="Tipos de Motivos" Headers="@_printHeaders" Rows="@PrintRows()" />
+        <AccionesBotones CodAplicacion="@_codApTipo"
+                         CodOpcionAplicacion="@_codOpTipo"
+                         Zona="@AccionesBotones.ZonaBotones.Header"
+                         OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+@* ── MAESTRO: Tipos de Motivos ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="mb-4">
+    <div data-resizable-grid="tipos-motivos-maestro" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="TipoMotivo" Items="_tiposVisibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre"
+                 RowClick="OnTipoRowClick" RowClassFunc="@FilaSeleccionada">
+        <Columns>
+            <TemplateColumn Title="Imagen" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <GridImage Image="context.Item.IMG_PICTURE" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Código" Width="@Limites.ColWidth("ESTANDAR.TIPOS_MOTIVOS","COD_TIPO_MOTIVO",60,150)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_TIPO_MOTIVO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TipoMotivo" ItemsBase="@BaseSinEstaColumnaTipo(0)"
+                                            ValorDe="@(x => x.COD_TIPO_MOTIVO?.ToString() ?? "")"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltroTipo(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_MOTIVO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("ESTANDAR.TIPOS_MOTIVOS","DES_TIPO_MOTIVO",120,350)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TIPO_MOTIVO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TipoMotivo" ItemsBase="@BaseSinEstaColumnaTipo(1)"
+                                            ValorDe="@(x => x.DES_TIPO_MOTIVO ?? "")"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltroTipo(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_MOTIVO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var tipo = context.Item; }
+                    <AccionesBotones CodAplicacion="@_codApTipo"
+                                     CodOpcionAplicacion="@_codOpTipo"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                     OnAccion="@(b => OnAccionGrillaTipo(tipo, b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin tipos de motivo.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TipoMotivo" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@* ── DETALLE: Motivos del tipo seleccionado ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div class="d-flex align-center justify-space-between pa-3" style="border-bottom:1px solid var(--line);">
+        <div class="d-flex align-center gap-3">
+            @if (_tipoSel is not null && _tipoSel.IMG_PICTURE is { Length: > 0 })
+            {
+                <MudImage Src="@($"data:image/png;base64,{Convert.ToBase64String(_tipoSel.IMG_PICTURE)}")"
+                          Width="48" Height="48" Style="object-fit:contain;border-radius:6px;" />
+            }
+            <div>
+                <MudText Typo="Typo.h6">Motivos</MudText>
+                <MudText Class="mono" Style="opacity:.5;font-size:.78rem;">
+                    @if (_tipoSel is not null) { <text>Tipo: @_tipoSel.DES_TIPO_MOTIVO · @_motivos.Count motivos</text> }
+                    else { <text>Seleccione un tipo de motivo arriba</text> }
+                </MudText>
+            </div>
+        </div>
+        <div class="d-flex gap-2">
+            <GridRefreshButton OnRefresh="LoadMotivos" />
+            <GridClearFiltersButton OnClear="LimpiarFiltrosMotivo" HasFilters="@(_filtrosMotivo.Any(f => f.Value is not null))" />
+            <MudButton Variant="Variant.Text" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.ContentCopy"
+                       Disabled="@(_motivosSeleccionados is null || !_motivosSeleccionados.Any())"
+                       OnClick="OpenCopiarMotivos" Size="Size.Small">Copiar a otro tipo (@(_motivosSeleccionados?.Count ?? 0))</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       Disabled="_tipoSel is null" OnClick="@(() => OpenMotivo(null))" Size="Size.Small">Nuevo motivo</MudButton>
+        </div>
+    </div>
+
+    @if (_tipoSel is null)
+    {
+        <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione un tipo de motivo para ver sus motivos.</MudText>
+    }
+    else if (_loadingMotivos)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else
+    {
+        <div data-resizable-grid="tipos-motivos-hija" style="position:relative;">
+        <MudDataGrid T="Motivo" Items="_motivosVisibles" Dense="true" Hover="true" Striped="true"
+                     Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo"
+                     MultiSelection="true" SelectedItems="_motivosSeleccionados"
+                     SelectedItemsChanged="OnMotivosSeleccionadosChanged"
+                     SelectOnRowClick="false"
+                     RowClick="@(args => _motivoSel = args.Item)"
+                     RowClassFunc="@FilaFocoMotivo">
+            <Columns>
+                <SelectColumn T="Motivo" />
+                <TemplateColumn Title="Imagen" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <CellTemplate>
+                        <GridImage Image="context.Item.IMG_PICTURE" />
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Cód" Width="@Limites.ColWidth("ESTANDAR.MOTIVOS","COD_MOTIVO",60,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="COD_MOTIVO" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                            <FiltroExcelColumna T="Motivo" ItemsBase="@BaseSinEstaColumnaMotivo(0)"
+                                                ValorDe="@(x => x.COD_MOTIVO?.ToString() ?? "")"
+                                                ValoresActivos="_filtrosMotivo.GetValueOrDefault(0)"
+                                                ValoresActivosChanged="@(v => AplicarFiltroMotivo(0, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.COD_MOTIVO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Motivo" Width="@Limites.ColWidth("ESTANDAR.MOTIVOS","DES_MOTIVO",120,350)">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="DES_MOTIVO" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                            <FiltroExcelColumna T="Motivo" ItemsBase="@BaseSinEstaColumnaMotivo(1)"
+                                                ValorDe="@(x => x.DES_MOTIVO ?? "")"
+                                                ValoresActivos="_filtrosMotivo.GetValueOrDefault(1)"
+                                                ValoresActivosChanged="@(v => AplicarFiltroMotivo(1, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.DES_MOTIVO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Default" SortBy="x => x.FLG_DEFAULT">
+                    <CellTemplate>
+                        @if (context.Item.FLG_DEFAULT) { <MudIcon Icon="@Icons.Material.Filled.Star" Color="Color.Warning" Size="Size.Small" /> }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Orden">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="NUM_ORDEN_PRESENTACION" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                            <FiltroExcelColumna T="Motivo" ItemsBase="@BaseSinEstaColumnaMotivo(2)"
+                                                ValorDe="@(x => x.NUM_ORDEN_PRESENTACION?.ToString() ?? "")"
+                                                ValoresActivos="_filtrosMotivo.GetValueOrDefault(2)"
+                                                ValoresActivosChanged="@(v => AplicarFiltroMotivo(2, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.NUM_ORDEN_PRESENTACION</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false">
+                    <CellTemplate>
+                        @{ var motivo = context.Item; }
+                        <AccionesBotones CodAplicacion="@_codApMotivo"
+                                         CodOpcionAplicacion="@_codOpMotivo"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                         OnAccion="@(b => OnAccionGrillaMotivo(motivo, b))" />
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;">Este tipo no tiene motivos aún.</MudText></NoRecordsContent>
+            <PagerContent><MudDataGridPager T="Motivo" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    }
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private string _codApTipo = "", _codOpTipo = "";
+    private string _codApMotivo = "", _codOpMotivo = "";
+
+    private void ResolverCodigosPorSeccion()
+    {
+        (_codApTipo, _codOpTipo)     = ResolverCod("Estandar/TiposMotivos.razor");
+        (_codApMotivo, _codOpMotivo) = ResolverCod("Estandar/Motivos.razor");
+    }
+
+    private (string App, string Opcion) ResolverCod(string formulario)
+    {
+        var r = MenuSvc.BuscarCodigosPorFormulario(formulario);
+        return r is null ? (CodAplicacion, CodOpcionAplicacion) : (r.Value.CodAplicacion, r.Value.CodOpcionAplicacion);
+    }
+
+    private List<TipoMotivo> _tipos = new();
+    private List<Motivo> _motivos = new();
+    private HashSet<Motivo> _motivosSeleccionados = new();
+    private Motivo? _motivoSel;
+    private TipoMotivo? _tipoSel;
+    private string _searchTipo = string.Empty;
+    private bool _loadingMotivos;
+
+    // Filtros maestro (TipoMotivo)
+    private readonly Dictionary<int, HashSet<string>?> _filtrosTipo = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<TipoMotivo> Ordenar_g0(List<TipoMotivo> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_MOTIVO).ToList() : items.OrderByDescending(x => x.COD_TIPO_MOTIVO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_MOTIVO).ToList() : items.OrderByDescending(x => x.DES_TIPO_MOTIVO).ToList(),
+        _ => items
+    };
+    private List<Motivo> Ordenar_g1(List<Motivo> items) => _ordenColumna switch
+    {
+        2 => _ordenAscendente ? items.OrderBy(x => x.COD_MOTIVO).ToList() : items.OrderByDescending(x => x.COD_MOTIVO).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_MOTIVO).ToList() : items.OrderByDescending(x => x.DES_MOTIVO).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.NUM_ORDEN_PRESENTACION).ToList() : items.OrderByDescending(x => x.NUM_ORDEN_PRESENTACION).ToList(),
+        _ => items
+    };
+    private List<TipoMotivo> _tiposVisibles => Ordenar_g0(AplicarTodosTipo(_tipos, -1));
+    private List<TipoMotivo> BaseSinEstaColumnaTipo(int col) => AplicarTodosTipo(_tipos, col);
+
+    private List<TipoMotivo> AplicarTodosTipo(List<TipoMotivo> origen, int excluir)
+    {
+        IEnumerable<TipoMotivo> q = origen;
+        foreach (var (col, vals) in _filtrosTipo)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.COD_TIPO_MOTIVO?.ToString() ?? "")),
+                1 => q.Where(x => vals.Contains(x.DES_TIPO_MOTIVO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltroTipo(int col, HashSet<string>? vals)
+    {
+        _filtrosTipo[col] = vals;
+        if (_tipoSel is not null && !_tiposVisibles.Contains(_tipoSel))
+        { _tipoSel = null; _motivos = new(); }
+        StateHasChanged();
+    }
+    private void LimpiarFiltrosTipo() { foreach (var k in _filtrosTipo.Keys.ToList()) _filtrosTipo[k] = null; StateHasChanged(); }
+
+    // Filtros hijo (Motivo)
+    private readonly Dictionary<int, HashSet<string>?> _filtrosMotivo = new();
+    private List<Motivo> _motivosVisibles => Ordenar_g1(AplicarTodosMotivo(_motivos, -1));
+    private List<Motivo> BaseSinEstaColumnaMotivo(int col) => AplicarTodosMotivo(_motivos, col);
+
+    private List<Motivo> AplicarTodosMotivo(List<Motivo> origen, int excluir)
+    {
+        IEnumerable<Motivo> q = origen;
+        foreach (var (col, vals) in _filtrosMotivo)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.COD_MOTIVO?.ToString() ?? "")),
+                1 => q.Where(x => vals.Contains(x.DES_MOTIVO ?? "")),
+                2 => q.Where(x => vals.Contains(x.NUM_ORDEN_PRESENTACION?.ToString() ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltroMotivo(int col, HashSet<string>? vals) { _filtrosMotivo[col] = vals; StateHasChanged(); }
+    private void LimpiarFiltrosMotivo() { foreach (var k in _filtrosMotivo.Keys.ToList()) _filtrosMotivo[k] = null; StateHasChanged(); }
+
+    private readonly List<string> _printHeaders = new() { "Código", "Descripción" };
+    private List<List<string>> PrintRows() => _tipos.Select(t => new List<string>
+    {
+        t.COD_TIPO_MOTIVO?.ToString() ?? "", t.DES_TIPO_MOTIVO ?? ""
+    }).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        ResolverCodigosPorSeccion();
+        await AccessLog.LogNavegacionAsync("ESTANDAR", "TiposMotivos");
+        await LoadTipos();
+        Cambios.Suscribir("ESTANDAR.TIPOS_MOTIVOS", RefrescarPorCambio);
+    }
+
+    private async Task LoadTipos()
+    {
+        _tipos = await TipoService.GetAllAsync();
+        if (_tipos.Any() && _tipoSel is null)
+        {
+            _tipoSel = _tipos.First();
+            await LoadMotivos();
+        }
+    }
+
+    private async Task HandleSearchTipo()
+    {
+        _tipos = string.IsNullOrWhiteSpace(_searchTipo)
+            ? await TipoService.GetAllAsync()
+            : await TipoService.SearchAsync(_searchTipo);
+    }
+
+    private async Task OnTipoRowClick(DataGridRowClickEventArgs<TipoMotivo> args) => await SelectTipo(args.Item);
+
+    private string FilaSeleccionada(TipoMotivo item, int _)
+        => _tipoSel is not null && item.COD_TIPO_MOTIVO == _tipoSel.COD_TIPO_MOTIVO ? "fila-seleccionada" : "";
+
+    private async Task SelectTipo(TipoMotivo t)
+    {
+        _tipoSel = t;
+        await LoadMotivos();
+    }
+
+    private async Task LoadMotivos()
+    {
+        if (_tipoSel?.COD_TIPO_MOTIVO is null) { _motivos = new(); return; }
+        _loadingMotivos = true;
+        _motivos = await MotivoService.GetByTipoAsync(_tipoSel.COD_TIPO_MOTIVO.Value);
+        _loadingMotivos = false;
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return OpenTipo(null);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaTipo(TipoMotivo item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return VerTipo(item);
+        if (b.FLG_ACCION_PUT    == true) return OpenTipo(item);
+        if (b.FLG_ACCION_DELETE == true) return DeleteTipo(item);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaMotivo(Motivo item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return VerMotivo(item);
+        if (b.FLG_ACCION_PUT    == true) return OpenMotivo(item);
+        if (b.FLG_ACCION_DELETE == true) return DeleteMotivo(item);
+        return Task.CompletedTask;
+    }
+
+    private async Task VerTipo(TipoMotivo t)
+    {
+        var campos = new List<(string, object?)>
+        {
+            ("Código", t.COD_TIPO_MOTIVO), ("Descripción", t.DES_TIPO_MOTIVO), ("Imagen", t.IMG_PICTURE)
+        };
+        await DialogService.ShowAsync<VerRegistroDialog>("Tipo de motivo",
+            new DialogParameters { ["Campos"] = campos }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task OpenTipo(TipoMotivo? t)
+    {
+        var dlg = await DialogService.ShowAsync<TipoMotivoDialog>(
+            t is null ? "Nuevo tipo de motivo" : $"Editar · {t.DES_TIPO_MOTIVO}",
+            new DialogParameters { ["Item"] = t },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var r = await dlg.Result;
+        if (r is not null && !r.Canceled) await LoadTipos();
+    }
+
+    private async Task DeleteTipo(TipoMotivo t)
+    {
+        var confirm = await DialogService.ShowMessageBox("Confirmar",
+            $"¿Eliminar el tipo '{t.DES_TIPO_MOTIVO}'?", yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirm == true && t.COD_TIPO_MOTIVO is not null)
+        {
+            var (ok, msg) = await TipoService.EliminarAsync(t.COD_TIPO_MOTIVO.Value.ToString());
+            if (ok) { Snackbar.Add("Tipo eliminado.", Severity.Success); if (_tipoSel == t) { _tipoSel = null; _motivos = new(); } await LoadTipos(); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(TiposMotivos));
+        }
+    }
+
+    private async Task VerMotivo(Motivo m)
+    {
+        var campos = new List<(string, object?)>
+        {
+            ("Tipo", m.COD_TIPO_MOTIVO), ("Código", m.COD_MOTIVO), ("Descripción", m.DES_MOTIVO),
+            ("Por defecto", m.FLG_DEFAULT), ("Explicar", m.FLG_EXPLICAR), ("Automático", m.FLG_AUTOMATICO),
+            ("Orden", m.NUM_ORDEN_PRESENTACION), ("Imagen", m.IMG_PICTURE)
+        };
+        await DialogService.ShowAsync<VerRegistroDialog>("Motivo",
+            new DialogParameters { ["Campos"] = campos }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task OpenMotivo(Motivo? m)
+    {
+        if (_tipoSel?.COD_TIPO_MOTIVO is null) return;
+        var dlg = await DialogService.ShowAsync<MotivoDialog>(
+            m is null ? "Nuevo motivo" : $"Editar · {m.DES_MOTIVO}",
+            new DialogParameters { ["Item"] = m, ["CodTipoMotivo"] = _tipoSel.COD_TIPO_MOTIVO.Value },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var r = await dlg.Result;
+        if (r is not null && !r.Canceled) await LoadMotivos();
+    }
+
+    private async Task DeleteMotivo(Motivo m)
+    {
+        var confirm = await DialogService.ShowMessageBox("Confirmar",
+            $"¿Eliminar el motivo '{m.DES_MOTIVO}'?", yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirm == true && m.COD_TIPO_MOTIVO is not null && m.COD_MOTIVO is not null)
+        {
+            var (ok, msg) = await MotivoService.EliminarAsync(m.COD_TIPO_MOTIVO.Value, m.COD_MOTIVO.Value);
+            if (ok) { Snackbar.Add("Motivo eliminado.", Severity.Success); await LoadMotivos(); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(TiposMotivos));
+        }
+    }
+
+    private void OnMotivosSeleccionadosChanged(HashSet<Motivo> seleccionados)
+    {
+        _motivosSeleccionados = seleccionados;
+        StateHasChanged();
+    }
+
+    private string FilaFocoMotivo(Motivo item, int _)
+        => _motivoSel is not null && item.COD_TIPO_MOTIVO == _motivoSel.COD_TIPO_MOTIVO
+           && item.COD_MOTIVO == _motivoSel.COD_MOTIVO ? "fila-foco" : "";
+
+    private async Task OpenCopiarMotivos()
+    {
+        if (_motivosSeleccionados is null || !_motivosSeleccionados.Any()) return;
+        var destinos = _tipos.Where(t => t.COD_TIPO_MOTIVO != _tipoSel?.COD_TIPO_MOTIVO).ToList();
+
+        var dlg = await DialogService.ShowAsync<CopiarMotivosDialog>(
+            "Copiar motivos a otro tipo",
+            new DialogParameters
+            {
+                ["Motivos"] = _motivosSeleccionados.ToList(),
+                ["TiposDestino"] = destinos
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var r = await dlg.Result;
+        if (r is not null && !r.Canceled)
+        {
+            _motivosSeleccionados.Clear();
+            await LoadMotivos();
+        }
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await LoadTipos(); StateHasChanged(); });
+
+    public void Dispose() => Cambios.Desuscribir("ESTANDAR.TIPOS_MOTIVOS", RefrescarPorCambio);
+}

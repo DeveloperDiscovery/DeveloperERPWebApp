@@ -1,0 +1,133 @@
+@* MapaUbicacion.razor — mapa interactivo (Leaflet + OpenStreetMap, sin API key) para
+   elegir Latitud/Longitud haciendo click o arrastrando el marcador. Pensado para
+   VAL_LATITUD/VAL_LONGITUD de EntidadesDireccionesDialog, pero reutilizable en cualquier
+   otro lado que necesite las mismas dos coordenadas. *@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="mapa-ubicacion">
+    @if (!Disabled)
+    {
+        <div class="d-flex gap-2 mb-2">
+            <CampoTextoEstable @bind-Value="_busqueda" Label="Buscar dirección en el mapa"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1"
+                          Style="font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);"
+                          OnKeyDown="@(async e => { if (e.Key == "Enter") await BuscarAsync(); })" />
+            <MudButton Variant="Variant.Filled" Style="@EstiloBoton" Disabled="_buscando" OnClick="BuscarAsync">
+                @(_buscando ? "Buscando..." : "Buscar")
+            </MudButton>
+        </div>
+    }
+    @if (_errorCarga)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true">
+            No se pudo cargar el mapa (revisa la conexión a internet). Puedes seguir escribiendo Latitud/Longitud a mano.
+        </MudAlert>
+    }
+    <div @ref="_mapEl" style="height:@Height;border-radius:8px;border:1px solid var(--line, #3a342c);display:@(_errorCarga ? "none" : "block");"></div>
+    <div class="d-flex gap-3 mt-2">
+        <MudNumericField T="decimal?" Value="Latitud" ValueChanged="OnLatitudChanged" Label="Latitud"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="Disabled" Format="F6" Class="flex-grow-1" />
+        <MudNumericField T="decimal?" Value="Longitud" ValueChanged="OnLongitudChanged" Label="Longitud"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="Disabled" Format="F6" Class="flex-grow-1" />
+    </div>
+</div>
+
+@code {
+    [Parameter] public decimal? Latitud { get; set; }
+    [Parameter] public EventCallback<decimal?> LatitudChanged { get; set; }
+    [Parameter] public decimal? Longitud { get; set; }
+    [Parameter] public EventCallback<decimal?> LongitudChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string Height { get; set; } = "320px";
+
+    private const string EstiloBoton =
+        "font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));";
+
+    private ElementReference _mapEl;
+    private DotNetObjectReference<MapaUbicacion>? _selfRef;
+    private string _busqueda = "";
+    private bool _buscando;
+    private bool _inicializado;
+    private bool _errorCarga;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            // Si mapaUbicacion.js/Leaflet no llegaron a cargar (CDN caído/bloqueado), que
+            // no truene el diálogo entero — el resto de los campos de Dirección deben
+            // seguir usables aunque el mapa no aparezca.
+            try
+            {
+                await JS.InvokeVoidAsync("mapaUbicacion.init", _mapEl, _selfRef, Latitud, Longitud);
+                _inicializado = true;
+            }
+            catch { _errorCarga = true; }
+        }
+    }
+
+    // Si el padre cambia Latitud/Longitud DESPUÉS del render inicial (ej. al terminar de
+    // cargar SHOWBYID de una dirección existente), se mueve el marcador — sin esto, el
+    // mapa quedaba centrado en el default (Lima) aunque la dirección ya tuviera coordenadas.
+    private decimal? _prevLat, _prevLng;
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_inicializado && (Latitud != _prevLat || Longitud != _prevLng) && Latitud is not null && Longitud is not null)
+            await JS.InvokeVoidAsync("mapaUbicacion.actualizarMarcador", _mapEl, Latitud, Longitud);
+        _prevLat = Latitud;
+        _prevLng = Longitud;
+    }
+
+    [JSInvokable]
+    public async Task OnMapaClick(double lat, double lng)
+    {
+        await OnLatitudChanged((decimal)Math.Round(lat, 6));
+        await OnLongitudChanged((decimal)Math.Round(lng, 6));
+    }
+
+    private async Task OnLatitudChanged(decimal? v)
+    {
+        Latitud = v;
+        _prevLat = v;
+        await LatitudChanged.InvokeAsync(v);
+        if (v is not null && Longitud is not null)
+            await JS.InvokeVoidAsync("mapaUbicacion.actualizarMarcador", _mapEl, v, Longitud);
+    }
+
+    private async Task OnLongitudChanged(decimal? v)
+    {
+        Longitud = v;
+        _prevLng = v;
+        await LongitudChanged.InvokeAsync(v);
+        if (Latitud is not null && v is not null)
+            await JS.InvokeVoidAsync("mapaUbicacion.actualizarMarcador", _mapEl, Latitud, v);
+    }
+
+    private async Task BuscarAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_busqueda)) return;
+        _buscando = true;
+        try
+        {
+            // No mueve el marcador solo: el usuario confirma la ubicación exacta con un
+            // click sobre el mapa ya centrado — evita guardar coordenadas erróneas por una
+            // búsqueda de texto ambigua/incorrecta.
+            await JS.InvokeAsync<PuntoJs?>("mapaUbicacion.buscarDireccion", _mapEl, _busqueda);
+        }
+        finally { _buscando = false; }
+    }
+
+    private class PuntoJs
+    {
+        public double Lat { get; set; }
+        public double Lng { get; set; }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("mapaUbicacion.dispose", _mapEl); } catch { }
+        _selfRef?.Dispose();
+    }
+}

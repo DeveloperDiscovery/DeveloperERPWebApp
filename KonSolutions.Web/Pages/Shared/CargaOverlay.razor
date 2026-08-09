@@ -1,0 +1,48 @@
+@* El contenido de la pantalla se dibuja completo detrás, tapado por un anillo dorado
+   que se dibuja en círculo mientras el logo real de la app (redondo) se va revelando
+   en abanico al mismo ritmo — hasta que Show=false, momento en que se desvanece de
+   golpe revelando el contenido ya completo. Uso:
+   <CargaOverlay Show="_cargando">
+       ...grilla o panel real...
+   </CargaOverlay> *@
+@inject ConfigService ConfigSvc
+
+<div style="position:relative;min-height:120px;">
+    @ChildContent
+
+    @if (Show)
+    {
+        <div class="carga-overlay">
+            <div class="carga-badge">
+                <div class="carga-ring">
+                    <svg viewBox="0 0 64 64">
+                        <circle class="carga-bg" cx="32" cy="32" r="26"></circle>
+                        <circle class="carga-fg" cx="32" cy="32" r="26"></circle>
+                    </svg>
+                </div>
+                <div class="carga-logo-wrap">
+                    @{ var icono = IconoBase64 ?? ConfigSvc.Current.LogoApp; }
+                    @if (!string.IsNullOrWhiteSpace(icono))
+                    {
+                        <img class="carga-logo-img" src="@($"data:image/png;base64,{icono}")" alt="" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Bolt" Class="carga-logo-fallback" />
+                    }
+                </div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(Texto))
+            {
+                <span class="carga-texto">@Texto</span>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public bool Show { get; set; }
+    [Parameter] public string? Texto { get; set; }
+    [Parameter] public string? IconoBase64 { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

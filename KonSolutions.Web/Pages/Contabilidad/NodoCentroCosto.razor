@@ -1,0 +1,103 @@
+@using KONSolutions.Shared.Models.Contabilidad
+@using Microsoft.AspNetCore.Components.Web
+
+@* Nodo recursivo del árbol de Centros de Costo. *@
+
+<div>
+    <div class="tl-row-spec @(EsActual ? "tl-row-seleccionada" : "")"
+         style="cursor:pointer;user-select:none;"
+         @onclick="ToggleYSeleccionar"
+         @oncontextmenu="OnRightClick"
+         @oncontextmenu:preventDefault="true"
+         @oncontextmenu:stopPropagation="true">
+
+        <div class="d-flex align-center gap-1" style="@($"padding-left:{8 + Nivel * 18}px;")">
+            @if (Nodo.Hijos.Any())
+            {
+                <MudIcon Icon="@(_expandido ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                         Style="font-size:1rem;opacity:.6;flex-shrink:0;" />
+            }
+            else
+            {
+                <span style="width:20px;flex-shrink:0;"></span>
+            }
+
+            <MudIcon Icon="@(Nodo.FLG_GENERA_ASIENTO == true ? Icons.Material.Filled.RequestQuote : Icons.Material.Filled.Folder)"
+                     Style="font-size:.95rem;opacity:.7;flex-shrink:0;" />
+
+            <span style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                <b>@Nodo.COD_CENTRO_COSTO</b> — @Nodo.DES_CENTRO_COSTO
+            </span>
+        </div>
+
+        <div class="mono" style="font-size:.74rem;opacity:.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            @Nodo.DES_TIPO_CENTRO_COSTO
+        </div>
+
+        <div>
+            @if (!string.IsNullOrEmpty(Nodo.DES_ESTADO))
+            {
+                <EstadoChip Estado="@Nodo.DES_ESTADO" BackColor="@Nodo.DES_BACKCOLOR" ForeColor="@Nodo.DES_FORECOLOR" />
+            }
+        </div>
+
+        <div @onclick:stopPropagation="true" style="justify-self:end;">
+            <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                             Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b => OnAccion.InvokeAsync((Nodo, b)))" />
+        </div>
+    </div>
+
+    @if (_expandido && Nodo.Hijos.Any())
+    {
+        @foreach (var hijo in Nodo.Hijos)
+        {
+            <NodoCentroCosto Nodo="hijo"
+                             Nivel="@(Nivel + 1)"
+                             NodoActual="NodoActual"
+                             CodAplicacion="CodAplicacion"
+                             CodOpcionAplicacion="CodOpcionAplicacion"
+                             ForzarExpandido="ForzarExpandido"
+                             OnSeleccionar="OnSeleccionar"
+                             OnAccion="OnAccion"
+                             OnContextMenu="OnContextMenu" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public CentroCosto Nodo { get; set; } = null!;
+    [Parameter] public int Nivel { get; set; } = 0;
+    [Parameter] public CentroCosto? NodoActual { get; set; }
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+    [Parameter] public EventCallback<CentroCosto> OnSeleccionar { get; set; }
+    [Parameter] public EventCallback<(CentroCosto Nodo, BotonTreeviewItem Boton)> OnAccion { get; set; }
+    [Parameter] public EventCallback<(CentroCosto Nodo, double X, double Y)> OnContextMenu { get; set; }
+    [Parameter] public bool? ForzarExpandido { get; set; }
+
+    private bool _expandido = true;
+    private bool? _ultimoForzado;
+
+    protected override void OnParametersSet()
+    {
+        if (ForzarExpandido.HasValue && ForzarExpandido != _ultimoForzado)
+        {
+            _expandido = ForzarExpandido.Value;
+            _ultimoForzado = ForzarExpandido;
+        }
+    }
+
+    private bool EsActual => NodoActual?.COD_CENTRO_COSTO == Nodo.COD_CENTRO_COSTO;
+
+    private void ToggleYSeleccionar()
+    {
+        if (Nodo.Hijos.Any()) _expandido = !_expandido;
+        OnSeleccionar.InvokeAsync(Nodo);
+    }
+
+    private Task OnRightClick(MouseEventArgs e)
+    {
+        OnSeleccionar.InvokeAsync(Nodo);
+        return OnContextMenu.InvokeAsync((Nodo, e.ClientX, e.ClientY));
+    }
+}

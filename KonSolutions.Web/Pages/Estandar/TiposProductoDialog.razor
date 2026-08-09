@@ -1,0 +1,160 @@
+@using TiposProductoModel = KONSolutions.Shared.Models.Estandar.TiposProducto
+@using EstadoModel = KONSolutions.Shared.Models.Estandar.Estado
+@using TiposProductoRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_PRODUCTO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="ESTANDAR.TIPOS_PRODUCTO" Columna="COD_TIPO_PRODUCTO"
+                        @bind-Value="_model.COD_TIPO_PRODUCTO"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="ESTANDAR.TIPOS_PRODUCTO" Columna="DES_TIPO_PRODUCTO"
+                        @bind-Value="_model.DES_TIPO_PRODUCTO"
+                        Disabled="_readonly" Obligatorio="true" />
+            <MudGrid Class="mt-1">
+                <MudItem xs="6">
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.ShoppingCart" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_COMPRADO" Label="Comprado" Disabled="_readonly" /></div>
+                </MudItem>
+                <MudItem xs="6">
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.MiscellaneousServices" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_SERVICIO" Label="Servicio" Disabled="_readonly" /></div>
+                </MudItem>
+                <MudItem xs="6">
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.AccountBalance" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_GASTOS" Label="Gastos" Disabled="_readonly" /></div>
+                </MudItem>
+                <MudItem xs="6">
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Factory" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_INDUSTRIALIZADO" Label="Industrializado" Disabled="_readonly" /></div>
+                </MudItem>
+                <MudItem xs="6">
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.AllInclusive" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_GENERICO" Label="Genérico" Disabled="_readonly" /></div>
+                </MudItem>
+                <MudItem xs="6">
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Construction" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_DESARROLLO" Label="En Desarrollo" Disabled="_readonly" /></div>
+                </MudItem>
+            </MudGrid>
+            <AriaCombo TItem="ComboboxItem" Items="_tiposEstado"
+                       TextFunc="@(t => t.Texto)" ValueFunc="@(t => t.Id)"
+                       Value="@(_model.COD_TIPO_ESTADO_INICIAL?.ToString())"
+                       ValueChanged="OnTipoEstadoChanged"
+                       Label="Tipo de Estado" Disabled="_readonly" />
+            <AriaCombo TItem="EstadoModel" Items="_estados"
+                       TextFunc="@(e => e.DES_ESTADO ?? "")" ValueFunc="@(e => e.COD_ESTADO?.ToString() ?? "")"
+                       Value="@(_model.COD_ESTADO_INICIAL?.ToString())"
+                       ValueChanged="@(v => _model.COD_ESTADO_INICIAL = int.TryParse(v, out var n) ? n : null)"
+                       Label="Estado" Disabled="@(_readonly || _model.COD_TIPO_ESTADO_INICIAL is null)">
+                <OptionTemplate Context="e">
+                    <div class="d-flex align-center gap-2">
+                        @if (!string.IsNullOrEmpty(e.DES_BACKCOLOR))
+                        { <div style="width:10px;height:10px;border-radius:50%;background:@e.DES_BACKCOLOR;flex-shrink:0;"></div> }
+                        <span>@e.DES_ESTADO</span>
+                    </div>
+                </OptionTemplate>
+            </AriaCombo>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposProductoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposProductoModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _tiposEstado = new();
+    private List<EstadoModel> _estados = new();
+
+    private void MapearDesdeModelo(TiposProductoModel m) =>
+        _model = new TiposProductoModel
+        {
+            COD_TIPO_PRODUCTO   = m.COD_TIPO_PRODUCTO,
+            DES_TIPO_PRODUCTO   = m.DES_TIPO_PRODUCTO,
+            FLG_COMPRADO        = m.FLG_COMPRADO,
+            FLG_SERVICIO        = m.FLG_SERVICIO,
+            FLG_GASTOS          = m.FLG_GASTOS,
+            FLG_INDUSTRIALIZADO = m.FLG_INDUSTRIALIZADO,
+            FLG_GENERICO        = m.FLG_GENERICO,
+            FLG_DESARROLLO      = m.FLG_DESARROLLO,
+            COD_TIPO_ESTADO_INICIAL = m.COD_TIPO_ESTADO_INICIAL,
+            COD_ESTADO_INICIAL  = m.COD_ESTADO_INICIAL
+        };
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposProductoModel>($"{TiposProductoRoute.TiposProducto}/{Uri.EscapeDataString(_model.COD_TIPO_PRODUCTO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(TiposProductoRoute.TiposEstadosCombobox);
+            _tiposEstado = r?.Data ?? new();
+        }
+        catch { _tiposEstado = new(); }
+
+        if (_model.COD_TIPO_ESTADO_INICIAL is not null)
+            await CargarEstados(_model.COD_TIPO_ESTADO_INICIAL.Value);
+    }
+
+    private async Task OnTipoEstadoChanged(string? val)
+    {
+        _model.COD_TIPO_ESTADO_INICIAL = int.TryParse(val, out var n) ? n : null;
+        _model.COD_ESTADO_INICIAL = null;
+        _estados = new();
+        if (_model.COD_TIPO_ESTADO_INICIAL is not null)
+            await CargarEstados(_model.COD_TIPO_ESTADO_INICIAL.Value);
+    }
+
+    private async Task CargarEstados(int codTipoEstado)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<EstadoModel>>>(
+                $"{TiposProductoRoute.EstadosPorTipo}/{codTipoEstado}");
+            _estados = r?.Data ?? new();
+        }
+        catch { _estados = new(); }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = TiposProductoRoute.TiposProducto;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_TIPO_PRODUCTO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposProductoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // El SP hace upsert (UPDATE, si no encuentra -> INSERT) — ya no existe un PUT
+        // separado, tanto crear como modificar van por POST, igual que el resto del sistema.
+        var resp = await Http.PostAsJsonAsync(ruta, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposProductoDialog), nameof(Submit));
+    }
+}

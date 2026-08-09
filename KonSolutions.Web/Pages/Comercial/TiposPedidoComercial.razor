@@ -1,0 +1,275 @@
+@page "/comercial/tipos-pedido-comercial"
+@attribute [Authorize]
+@using TiposPedidoComercialModel = KONSolutions.Shared.Models.Comercial.TiposPedidoComercial
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Tipos de Pedido Comercial · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Pedido Comercial" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema COMERCIAL · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar tipo de pedido..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="tipos-pedido-comercial" style="position:relative;">
+    <MudDataGrid T="TiposPedidoComercialModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false"
+                            Width="@Limites.ColWidth("COMERCIAL.TIPOS_PEDIDO_COMERCIAL","COD_TIPO_PEDIDO_COMERCIAL",60,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_TIPO_PEDIDO_COMERCIAL" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TiposPedidoComercialModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_TIPO_PEDIDO_COMERCIAL?.ToString())"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_PEDIDO_COMERCIAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false"
+                            Width="@Limites.ColWidth("COMERCIAL.TIPOS_PEDIDO_COMERCIAL","DES_TIPO_PEDIDO_COMERCIAL",150,400)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TIPO_PEDIDO_COMERCIAL" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TiposPedidoComercialModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_TIPO_PEDIDO_COMERCIAL)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_PEDIDO_COMERCIAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TIPO_ENTIDAD" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="TiposPedidoComercialModel" ItemsBase="@Base(2)" ValorDe="@(x=>x.DES_TIPO_ENTIDAD ?? x.COD_TIPO_ENTIDAD ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_TIPO_ENTIDAD ?? context.Item.COD_TIPO_ENTIDAD)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TIPO_ENTIDAD_VENDEDORA" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="TiposPedidoComercialModel" ItemsBase="@Base(3)" ValorDe="@(x=>x.DES_TIPO_ENTIDAD_VENDEDORA ?? x.COD_TIPO_ENTIDAD_VENDEDORA ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_TIPO_ENTIDAD_VENDEDORA ?? context.Item.COD_TIPO_ENTIDAD_VENDEDORA)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TIPO_COMPROBANTE_PAGO" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="TiposPedidoComercialModel" ItemsBase="@Base(4)" ValorDe="@(x=>x.DES_TIPO_COMPROBANTE_PAGO ?? x.COD_TIPO_COMPROBANTE_PAGO_INTERNO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(4)" ValoresActivosChanged="@(v=>Filtro(4,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_TIPO_COMPROBANTE_PAGO ?? context.Item.COD_TIPO_COMPROBANTE_PAGO_INTERNO)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Características" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <div class="d-flex align-center justify-center gap-2">
+                        <MudTooltip Text="Pedido formal">
+                            <MudIcon Icon="@Icons.Material.Filled.Gavel" Color="@(context.Item.FLG_PEDIDO_FORMAL == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_PEDIDO_FORMAL == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                        <MudTooltip Text="Involucra bienes">
+                            <MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="@(context.Item.FLG_BIENES == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_BIENES == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TiposPedidoComercialModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<TiposPedidoComercialModel> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private List<TiposPedidoComercialModel> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<TiposPedidoComercialModel> Base(int col) => Aplicar(_items, col);
+
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+
+    private List<TiposPedidoComercialModel> Ordenar(List<TiposPedidoComercialModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_PEDIDO_COMERCIAL).ToList() : items.OrderByDescending(x => x.COD_TIPO_PEDIDO_COMERCIAL).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_PEDIDO_COMERCIAL).ToList() : items.OrderByDescending(x => x.DES_TIPO_PEDIDO_COMERCIAL).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_ENTIDAD ?? x.COD_TIPO_ENTIDAD).ToList() : items.OrderByDescending(x => x.DES_TIPO_ENTIDAD ?? x.COD_TIPO_ENTIDAD).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_ENTIDAD_VENDEDORA ?? x.COD_TIPO_ENTIDAD_VENDEDORA).ToList() : items.OrderByDescending(x => x.DES_TIPO_ENTIDAD_VENDEDORA ?? x.COD_TIPO_ENTIDAD_VENDEDORA).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_COMPROBANTE_PAGO ?? x.COD_TIPO_COMPROBANTE_PAGO_INTERNO).ToList() : items.OrderByDescending(x => x.DES_TIPO_COMPROBANTE_PAGO ?? x.COD_TIPO_COMPROBANTE_PAGO_INTERNO).ToList(),
+        _ => items
+    };
+
+    private List<TiposPedidoComercialModel> Aplicar(List<TiposPedidoComercialModel> src, int ex)
+    {
+        IEnumerable<TiposPedidoComercialModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_TIPO_PEDIDO_COMERCIAL?.ToString() ?? "")),
+                1 => q.Where(x => v.Contains(x.DES_TIPO_PEDIDO_COMERCIAL)),
+                2 => q.Where(x => v.Contains(x.DES_TIPO_ENTIDAD ?? x.COD_TIPO_ENTIDAD ?? "")),
+                3 => q.Where(x => v.Contains(x.DES_TIPO_ENTIDAD_VENDEDORA ?? x.COD_TIPO_ENTIDAD_VENDEDORA ?? "")),
+                4 => q.Where(x => v.Contains(x.DES_TIPO_COMPROBANTE_PAGO ?? x.COD_TIPO_COMPROBANTE_PAGO_INTERNO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private async Task Buscar()
+    {
+        _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+        ResolverEntidadVendedora();
+    }
+
+    private Dictionary<string, string> _entidades = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("COMERCIAL", "TiposPedidoComercial");
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<KONSolutions.Shared.Common.ComboboxItem>>>(
+                ApiRoutes.Estandar.TiposEntidadesCombobox);
+            _entidades = (r?.Data ?? new()).ToDictionary(e => e.Id, e => e.Texto, StringComparer.OrdinalIgnoreCase);
+        }
+        catch { }
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("COMERCIAL.TIPOS_PEDIDO_COMERCIAL", _onCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load()
+    {
+        _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+        ResolverEntidadVendedora();
+    }
+
+    // El SP ya trae DES_TIPO_ENTIDAD_VENDEDORA; esto es solo un respaldo por si algún
+    // registro llega sin ella (fallback contra el combo de Tipos de Entidad).
+    private void ResolverEntidadVendedora()
+    {
+        foreach (var it in _items.Where(it => string.IsNullOrEmpty(it.DES_TIPO_ENTIDAD_VENDEDORA)))
+            it.DES_TIPO_ENTIDAD_VENDEDORA = _entidades.GetValueOrDefault(it.COD_TIPO_ENTIDAD_VENDEDORA);
+    }
+
+    private async Task<List<TiposPedidoComercialModel>> Fetch()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposPedidoComercialModel>>>(
+                ApiRoutes.Comercial.TiposPedidoComercial);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(TiposPedidoComercial), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<TiposPedidoComercialModel>> FetchSearch(string s)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposPedidoComercialModel>>>(
+                $"{ApiRoutes.Comercial.TiposPedidoComercial}/search?search={Uri.EscapeDataString(s)}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(TiposPedidoComercial), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(TiposPedidoComercialModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(TiposPedidoComercialModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de pedido comercial",
+            CrudModo.Delete => $"Eliminar · {item?.DES_TIPO_PEDIDO_COMERCIAL}",
+            _               => $"Editar · {item?.DES_TIPO_PEDIDO_COMERCIAL}"
+        };
+        var dlg = await DialogService.ShowAsync<TiposPedidoComercialDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("COMERCIAL.TIPOS_PEDIDO_COMERCIAL", _onCambio ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

@@ -1,0 +1,327 @@
+@inject AplicacionesOpcionesBotonesService Service
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@using KONSolutions.Shared.Models.Seguridad
+@using KONSolutions.Shared.Common
+
+@* Diálogo CRUD para un botón de una opción de aplicación.
+   Clave compuesta: COD_APLICACION + COD_OPCION_APLICACION + COD_BOTON_OPCION.
+   COD_BOTON_OPCION se genera automáticamente en el servidor — siempre deshabilitado. *@
+
+<MudDialog Style="width:min(1280px,95vw);min-height:calc(min(90vh, 720px) * 1.1);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo"
+                         Codigo="@_model.COD_BOTON_OPCION"
+                         Descripcion="@_model.DES_BOTON_OPCION" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            <div style="display:flex;gap:16px;align-items:flex-start;">
+
+            <div style="flex:1;min-width:0;">
+
+                @* ── Cabecera: Aplicación / Padre / Opción ── *@
+                <div class="d-flex align-center gap-2 mb-3">
+                    <div style="width:130px;flex-shrink:0;">
+                        <MudTextField Value="@CodAplicacion" Label="Aplicación"
+                                      Variant="Variant.Outlined" Disabled="true" Margin="Margin.Dense" />
+                    </div>
+                    <div style="flex:1;min-width:0;">
+                        <MudTextField Value="@DesAplicacion" Label="Descripción aplicación"
+                                      Variant="Variant.Outlined" Disabled="true" Margin="Margin.Dense" />
+                    </div>
+                </div>
+
+                <div class="d-flex align-center gap-2 mb-3">
+                    <div style="width:130px;flex-shrink:0;">
+                        <MudTextField Value="@CodOpcionPadre" Label="Código padre"
+                                      Variant="Variant.Outlined" Disabled="true" Margin="Margin.Dense" />
+                    </div>
+                    <div style="flex:1;min-width:0;">
+                        <MudTextField Value="@DesOpcionPadre" Label="Descripción padre"
+                                      Variant="Variant.Outlined" Disabled="true" Margin="Margin.Dense" />
+                    </div>
+                </div>
+
+                <div class="d-flex align-center gap-2 mb-3">
+                    <div style="width:130px;flex-shrink:0;">
+                        <MudTextField Value="@CodOpcionAplicacion" Label="Código de opción"
+                                      Variant="Variant.Outlined" Disabled="true" Margin="Margin.Dense" />
+                    </div>
+                    <div style="flex:1;min-width:0;">
+                        <MudTextField Value="@DesOpcion" Label="Descripción"
+                                      Variant="Variant.Outlined" Disabled="true" Margin="Margin.Dense" />
+                    </div>
+                </div>
+
+                <MudDivider Class="mb-3" />
+
+                <div class="d-flex align-center gap-2 mb-3">
+                    <div style="width:140px;flex-shrink:0;">
+                        <MudTextField Label="Código (auto)" Value="@_model.COD_BOTON_OPCION"
+                                      Disabled="true" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </div>
+                    <div style="flex:1;min-width:0;">
+                        <CampoTexto Tabla="SEGURIDAD.APLICACIONES_OPCIONES_BOTONES" Columna="DES_BOTON_OPCION"
+                                    @bind-Value="_model.DES_BOTON_OPCION"
+                                    Disabled="_readonly" Obligatorio="true" Class="" Margin="Margin.Dense" />
+                    </div>
+                </div>
+
+                <CampoTexto Tabla="SEGURIDAD.APLICACIONES_OPCIONES_BOTONES" Columna="DES_ALIAS"
+                            @bind-Value="_model.DES_ALIAS" Disabled="_readonly" />
+
+                <CampoTexto Tabla="SEGURIDAD.APLICACIONES_OPCIONES_BOTONES" Columna="DES_TOOLTIPTEXT"
+                            @bind-Value="_model.DES_TOOLTIPTEXT" Disabled="_readonly"
+                            IgnorarModoTexto="true" />
+
+                <AriaCombo TItem="ComboboxItem"
+                             Items="_botonesEstandar"
+                             TextFunc="@(t => t.Texto)"
+                             ValueFunc="@(t => t.Id)"
+                             @bind-Value="_model.COD_BOTON_OPCION_ESTANDAR"
+                             Label="Botón estándar (opcional)"
+                             Disabled="_readonly"
+                             Class="mb-3" />
+
+                <div class="d-flex gap-4 mb-3">
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.TableRows" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@_model.FLG_GRILLA" ValueChanged="@(v => _model.FLG_GRILLA = v)"
+                                 Disabled="_readonly" Label="Mostrar en grilla" Color="Color.Primary" /></div>
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.ViewHeadline" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@_model.FLG_HEADER" ValueChanged="@(v => _model.FLG_HEADER = v)"
+                                 Disabled="_readonly" Label="Mostrar en cabecera" Color="Color.Primary" /></div>
+                </div>
+
+                <MudText Typo="Typo.caption" Class="mono mb-1" Style="opacity:.55;">
+                    VERBOS HTTP HABILITADOS (autorización por rol)
+                </MudText>
+                <div class="d-flex gap-4 mb-3">
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Visibility" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_ACCION_GET ?? false)" ValueChanged="@(v => _model.FLG_ACCION_GET = v)"
+                                 Disabled="_readonly" Label="GET" Color="Color.Info" /></div>
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_ACCION_POST ?? false)" ValueChanged="@(v => _model.FLG_ACCION_POST = v)"
+                                 Disabled="_readonly" Label="POST" Color="Color.Success" /></div>
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Edit" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_ACCION_PUT ?? false)" ValueChanged="@(v => _model.FLG_ACCION_PUT = v)"
+                                 Disabled="_readonly" Label="PUT" Color="Color.Warning" /></div>
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Delete" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_ACCION_DELETE ?? false)" ValueChanged="@(v => _model.FLG_ACCION_DELETE = v)"
+                                 Disabled="_readonly" Label="DELETE" Color="Color.Error" /></div>
+                </div>
+
+                <AriaCombo TItem="ComboboxItem" Items="_metodosApi"
+                           TextFunc="@(m => m.Texto)" ValueFunc="@(m => m.Id)"
+                           @bind-Value="_model.DES_METODO"
+                           PermitirTextoLibre="true"
+                           IgnorarModoTexto="true"
+                           Label="Método de la API (DES_METODO)" Disabled="_readonly" />
+                <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.55;display:block;margin-top:-8px;">
+                    Nombre exacto del método del Controller a invocar (ej. Insert, Delete, GetById) — sin schema ni tabla por delante.
+                    @(_metodosApi.Count == 0 ? " (No se encontró el Controller por convención de nombre — se puede escribir manualmente.)" : "")
+                </MudText>
+
+                <EstadoCombo DesTabla="SEGURIDAD.APLICACIONES_OPCIONES"
+                             @bind-Value="_model.COD_ESTADO"
+                             CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                             Disabled="_readonly" />
+
+            </div>
+
+            <div style="flex-shrink:0;padding-left:8px;border-left:1px solid rgba(0,0,0,.1);">
+                <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)"
+                             Label="Icono del botón" ReadOnly="_readonly" />
+            </div>
+
+            </div>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    @if (_isEdit && Item is not null)
+                    {
+                        <PanelAuditoria CodUsuarioRegistro="@Item.COD_USUARIO_REGISTRO"
+                                        CodEstacionRegistro="@Item.COD_ESTACION_REGISTRO"
+                                        FecRegistro="@Item.FEC_REGISTRO"
+                                        CodUsuarioActualizacion="@Item.COD_USUARIO_ACTUALIZACION"
+                                        CodEstacionActualizacion="@Item.COD_ESTACION_ACTUALIZACION"
+                                        FecActualizacion="@Item.FEC_ACTUALIZACION" />
+                    }
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public AplicacionesOpcionesBotones? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+    [Parameter] public string DesAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionPadre      { get; set; } = "";
+    [Parameter] public string DesOpcionPadre      { get; set; } = "";
+    [Parameter] public string DesOpcion           { get; set; } = "";
+
+    private AplicacionesOpcionesBotonesInsertDto _model = new();
+    private List<ComboboxItem> _botonesEstandar = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private string _descEstado = "";
+    private string _backColor  = "#FFFFFF";
+    private string _foreColor  = "#000000";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isEdit = Modo == CrudModo.Update || Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+        // Inicializar _model ANTES del primer await para que EstadoCombo reciba COD_ESTADO en el primer render
+        if (Item is not null)
+        {
+            MapearDesdeModelo(Item);
+        }
+        else
+        {
+            _model.COD_APLICACION        = CodAplicacion;
+            _model.COD_OPCION_APLICACION = CodOpcionAplicacion;
+            _model.COD_BOTON_OPCION      = "";
+            _model.COD_BOTON_OPCION_ESTANDAR = null;
+        }
+
+        if (Modo != CrudModo.Create && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<BotonEstandar>>>(
+                ApiRoutes.Seguridad.BotonesEstandar);
+            _botonesEstandar = r?.Data
+                ?.Select(b => new ComboboxItem
+                {
+                    Id = b.COD_BOTON_OPCION_ESTANDAR ?? "",
+                    Texto = string.IsNullOrWhiteSpace(b.DES_BOTON_OPCION_ESTANDAR)
+                        ? (b.COD_BOTON_OPCION_ESTANDAR ?? "")
+                        : $"{b.COD_BOTON_OPCION_ESTANDAR} · {b.DES_BOTON_OPCION_ESTANDAR}"
+                })
+                .ToList() ?? new();
+        }
+        catch { _botonesEstandar = new(); }
+
+        // Inventario de métodos del Controller de la opción padre (por reflexión, ver
+        // DeveloperMetadataController.GetMetodosController) — se arma el nombre de entidad
+        // a partir de la descripción de la opción (ej. "Tipos de Opciones" → "TiposOpciones"),
+        // asumiendo la convención "{Entidad}Controller" que siguen todos los Controllers de la API.
+        // Si no se encuentra (nombre no calza con la convención), el campo sigue siendo editable
+        // a mano — no bloquea el guardado.
+        try
+        {
+            var entidad = PascalizarEntidad(DesOpcion);
+            if (!string.IsNullOrWhiteSpace(entidad))
+            {
+                var rm = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>(
+                    $"{ApiRoutes.Developer.MetadataMetodosController}?entidad={Uri.EscapeDataString(entidad)}");
+                _metodosApi = rm?.Data ?? new();
+            }
+        }
+        catch { _metodosApi = new(); }
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de GetById) hacia _model.</summary>
+    private void MapearDesdeModelo(AplicacionesOpcionesBotones m)
+    {
+        _model = new AplicacionesOpcionesBotonesInsertDto
+        {
+            COD_APLICACION             = m.COD_APLICACION,
+            COD_OPCION_APLICACION      = m.COD_OPCION_APLICACION,
+            COD_BOTON_OPCION           = m.COD_BOTON_OPCION,
+            DES_BOTON_OPCION           = m.DES_BOTON_OPCION,
+            DES_TOOLTIPTEXT            = m.DES_TOOLTIPTEXT,
+            DES_ALIAS                  = m.DES_ALIAS,
+            COD_BOTON_OPCION_ESTANDAR  = string.IsNullOrWhiteSpace(m.COD_BOTON_OPCION_ESTANDAR) ? null : m.COD_BOTON_OPCION_ESTANDAR,
+            IMG_ICONO                  = m.IMG_ICONO,
+            FLG_GRILLA                 = m.FLG_GRILLA,
+            FLG_HEADER                 = m.FLG_HEADER,
+            FLG_ACCION_GET             = m.FLG_ACCION_GET,
+            FLG_ACCION_POST            = m.FLG_ACCION_POST,
+            FLG_ACCION_PUT             = m.FLG_ACCION_PUT,
+            FLG_ACCION_DELETE          = m.FLG_ACCION_DELETE,
+            DES_METODO                 = m.DES_METODO,
+            COD_TIPO_ESTADO            = m.COD_TIPO_ESTADO,
+            COD_ESTADO                 = m.COD_ESTADO
+        };
+        _descEstado = m.DES_ESTADO;
+        _backColor  = string.IsNullOrWhiteSpace(m.DES_BACKCOLOR) ? "#FFFFFF" : m.DES_BACKCOLOR;
+        _foreColor  = string.IsNullOrWhiteSpace(m.DES_FORECOLOR) ? "#000000" : m.DES_FORECOLOR;
+    }
+
+    /// <summary>Trae el registro fresco desde GetById (clave compuesta) — se usa al abrir el
+    /// diálogo (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<AplicacionesOpcionesBotones>(
+            $"{ApiRoutes.Seguridad.AplicacionesOpcionesBotones}/{Uri.EscapeDataString(_model.COD_APLICACION)}" +
+            $"/{Uri.EscapeDataString(_model.COD_OPCION_APLICACION)}/{Uri.EscapeDataString(_model.COD_BOTON_OPCION)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+    private List<ComboboxItem> _metodosApi = new();
+
+    /// <summary>"Tipos de Opciones" → "TiposOpciones" (quita palabras de enlace en español
+    /// y arma PascalCase), igual convención que usan los nombres de Controller de la API.</summary>
+    private static string PascalizarEntidad(string des)
+    {
+        if (string.IsNullOrWhiteSpace(des)) return "";
+        var stop = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "de", "del", "la", "el", "los", "las", "y", "a", "en" };
+        var normalizado = des.Normalize(System.Text.NormalizationForm.FormD);
+        var sinTildes = new string(normalizado.Where(c =>
+            System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark).ToArray());
+        var tokens = sinTildes.Split(new[] { ' ', '-', '_', '/', '(', ')' }, StringSplitOptions.RemoveEmptyEntries)
+            .Where(t => !stop.Contains(t));
+        var sb = new System.Text.StringBuilder();
+        foreach (var t in tokens)
+        {
+            var limpio = new string(t.Where(char.IsLetterOrDigit).ToArray());
+            if (limpio.Length == 0) continue;
+            sb.Append(char.ToUpperInvariant(limpio[0]));
+            if (limpio.Length > 1) sb.Append(limpio[1..].ToLowerInvariant());
+        }
+        return sb.ToString();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd, numd, procd, lined) = await Service.EliminarDetalladoAsync(_model.COD_APLICACION, _model.COD_OPCION_APLICACION, _model.COD_BOTON_OPCION);
+            _saving = false;
+            if (okd) { Snackbar.Add("Botón eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await MostrarErrorAsync("No se pudo eliminar el registro", msgd, numd, procd, lined);
+            return;
+        }
+
+        var (ok, msg, num, proc, line) = await Service.GuardarDetalladoAsync(_model);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Botón actualizado." : "Botón creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await MostrarErrorAsync("No se pudo guardar el registro", msg, num, proc, line);
+    }
+
+    // Diálogo modal separado (no un bloque dentro del formulario) — se abre ENCIMA
+    // de este diálogo y el usuario lo cierra manualmente con la X.
+    private async Task MostrarErrorAsync(string titulo, string mensaje, int? num, string? proc, int? line)
+    {
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"] = titulo, ["Mensaje"] = mensaje,
+                ["ErrorNumber"] = num, ["ErrorProcedure"] = proc, ["ErrorLine"] = line
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+}

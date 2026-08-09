@@ -1,0 +1,367 @@
+@using KONSolutions.Shared.Models.Ingenieria
+@using EspecificacionesTecnicasModel = KONSolutions.Shared.Models.Ingenieria.EspecificacionesTecnicas
+@using TiposDefectosTecnicosModel = KONSolutions.Shared.Models.Controlcalidad.TiposDefectosTecnicos
+@using IngenieriaRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@using ControlcalidadRoute = KONSolutions.Web.Services.ApiRoutes.Controlcalidad
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_ESPECIFICACION_TECNICA" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            <MudGrid>
+            <MudItem xs="12" sm="8">
+
+            <MudTextField T="string" Label="Dependencia Padre" Value="@_padreTexto" ValueChanged="@((string _) => { })"
+                          Variant="Variant.Outlined" Disabled="true" Class="mb-3" ReadOnly="true" />
+
+            <CampoTexto Tabla="INGENIERIA.ESPECIFICACIONES_TECNICAS" Columna="COD_ESPECIFICACION_TECNICA"
+                        @bind-Value="_model.COD_ESPECIFICACION_TECNICA"
+                        Disabled="true" />
+
+            <CampoTexto Tabla="INGENIERIA.ESPECIFICACIONES_TECNICAS" Columna="DES_ESPECIFICACION_TECNICA"
+                        @bind-Value="_model.DES_ESPECIFICACION_TECNICA"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="INGENIERIA.ESPECIFICACIONES_TECNICAS" Columna="DES_ESPECIFICACION_TECNICA_SINGULAR"
+                                @bind-Value="_model.DES_ESPECIFICACION_TECNICA_SINGULAR"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposEspecificacion"
+                               TextFunc="@(t => $"{t.Id} – {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               Value="@_model.COD_TIPO_ESPECIFICACION_TECNICA"
+                               ValueChanged="@(v => OnTipoEspecificacionChanged(v ?? ""))"
+                               Label="Tipo de Especificación Técnica" Disabled="_readonly" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_clasesDefecto"
+                               TextFunc="@(c => $"{c.Id} – {c.Texto}")" ValueFunc="@(c => c.Id)"
+                               Value="@_model.COD_CLASE_DEFECTO_TECNICO" ValueChanged="@(v => OnClaseChanged(v ?? ""))"
+                               Label="Clase de Defecto Técnico" Disabled="@(_readonly || _model.FLG_QUALITY_CONTROL != true)" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="TiposDefectosTecnicosModel" Items="_tiposDefecto"
+                               TextFunc="@(t => $"{t.COD_TIPO_DEFECTO_TECNICO} – {t.DES_DEFECTO_TECNICO}")"
+                               ValueFunc="@(t => t.COD_TIPO_DEFECTO_TECNICO)"
+                               @bind-Value="_model.COD_TIPO_DEFECTO_TECNICO_DEFECTO"
+                               Label="Tipo de Defecto Técnico por Default"
+                               Disabled="@(_readonly || _model.FLG_QUALITY_CONTROL != true || string.IsNullOrEmpty(_model.COD_CLASE_DEFECTO_TECNICO))" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid>
+                <MudItem xs="12" sm="4">
+                    @if (_model.FLG_LIST == true)
+                    {
+                        <MudTextField T="string" Value="@("LISTA – LISTA")" ValueChanged="@((string _) => { })"
+                                      Label="Unidad de Medida" Variant="Variant.Outlined" Disabled="true" Class="mb-3" ReadOnly="true" />
+                    }
+                    else
+                    {
+                        <AriaCombo TItem="ComboboxItem" Items="_unidadesMedida"
+                                   TextFunc="@(u => $"{u.Id} – {u.Texto}")" ValueFunc="@(u => u.Id)"
+                                   @bind-Value="_model.COD_UNIDAD_MEDIDA"
+                                   Label="Unidad de Medida" Disabled="@(_readonly || !_habilitaUnidadMedida)" />
+                    }
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <AriaCombo TItem="ComboboxItem" Items="_unidadesMedida"
+                               TextFunc="@(u => $"{u.Id} – {u.Texto}")" ValueFunc="@(u => u.Id)"
+                               @bind-Value="_model.COD_UNIDAD_MEDIDA_DIVISORA"
+                               Label="Unidad de Medida Divisora" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <AriaCombo TItem="ComboboxItem" Items="_unidadesMedida"
+                               TextFunc="@(u => $"{u.Id} – {u.Texto}")" ValueFunc="@(u => u.Id)"
+                               @bind-Value="_model.COD_UNIDAD_MEDIDA_ITEM"
+                               Label="Unidad de Medida Ítem" Disabled="@(_readonly || _model.FLG_ITEMS_WITH_VALUE != true)" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid>
+                <MudItem xs="4" sm="4">
+                    <MudNumericField T="int?" @bind-Value="_model.CAN_ENTERO" Label="Entero" Variant="Variant.Outlined"
+                                     Disabled="@(_readonly || !_habilitaEntero)" Class="mb-3"
+                                     Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </MudItem>
+                <MudItem xs="4" sm="4">
+                    <MudNumericField T="int?" @bind-Value="_model.CAN_DECIMAL" Label="Decimal" Variant="Variant.Outlined"
+                                     Disabled="@(_readonly || !_habilitaDecimal)" Class="mb-3"
+                                     Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </MudItem>
+                <MudItem xs="4" sm="4">
+                    <MudNumericField T="int?" @bind-Value="_model.NUM_ORDEN_PRESENTACION" Label="Orden de Presentación" Variant="Variant.Outlined"
+                                     Disabled="@(_readonly || _padre is null)" Class="mb-3"
+                                     Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="INGENIERIA.ESPECIFICACIONES_TECNICAS" Columna="DES_PREFIJO"
+                                @bind-Value="_model.DES_PREFIJO" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="INGENIERIA.ESPECIFICACIONES_TECNICAS" Columna="DES_SUFIJO"
+                                @bind-Value="_model.DES_SUFIJO" Disabled="_readonly" />
+                </MudItem>
+            </MudGrid>
+
+            <EstadoCombo DesTabla="INGENIERIA.ESPECIFICACIONES_TECNICAS" @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _codTipoEstado = v ?? 0)" Disabled="_readonly" Class="mb-3" />
+
+            </MudItem>
+
+            @* Imagen a la derecha, y ambos bloques de check debajo de ella
+               (izquierdo completo primero, luego el derecho). *@
+            <MudItem xs="12" sm="4">
+                <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)"
+                             Label="Ícono de la especificación" ReadOnly="_readonly" />
+
+                <div class="mb-2 mt-3">
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.List" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Lista</MudText></div>
+                        <MudSwitch T="bool?" Value="_model.FLG_LIST" ValueChanged="@((bool? v) => _model.FLG_LIST = v)" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.Construction" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Dato de Ensamblaje</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_PRODUCT_ASSEMBLY" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.Straighten" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Requiere Rango de Valores</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_RANGE" Color="Color.Primary" Disabled="@(_readonly || _model.FLG_LIST != true)" />
+                    </div>
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.EditNote" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Se Edita en el momento de la Toma de Pedido</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_EDITABLE_ORDER_TAKING" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.Comment" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Requiere Observaciones</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_OBSERVACION" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Control de Calidad</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_QUALITY_CONTROL" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.Palette" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Es un Color</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_IS_COLOR" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.AccountTree" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Tiene Hijos</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_HAS_CHILDREN" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.SubdirectoryArrowRight" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Es Especificación Técnica Hija</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_IS_CHILDREN" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.Business" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Depende de Entidad</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_DEPENDS_ENTITY" Color="Color.Primary" Disabled="@(_readonly || _model.FLG_LIST != true || _padreDependeEntidad)" />
+                    </div>
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.Checklist" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Selección Múltiple</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_MULTIPLE_CHOICE" Color="Color.Primary" Disabled="@(_readonly || _model.FLG_LIST != true)" />
+                    </div>
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.AttachMoney" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Es Ítem con Valor</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_ITEMS_WITH_VALUE" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                </div>
+            </MudItem>
+            </MudGrid>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public EspecificacionesTecnicasModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public List<EspecificacionesTecnicasModel> Universo { get; set; } = new();
+
+    private EspecificacionesTecnicasModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _clasesDefecto       = new();
+    private List<ComboboxItem> _tiposEspecificacion = new();
+    private List<ComboboxItem> _unidadesMedida      = new();
+    private List<EstadoItem>   _estados             = new();
+    private List<TiposDefectosTecnicosModel> _tiposDefecto = new();
+    private int _codTipoEstado;
+
+    private EspecificacionesTecnicasModel? _padre =>
+        Universo.FirstOrDefault(x => x.COD_ESPECIFICACION_TECNICA == _model.COD_ESPECIFICACION_TECNICA_PADRE);
+
+    private string _padreTexto => _padre is null ? "— Ninguna (raíz) —" : $"{_padre.COD_ESPECIFICACION_TECNICA} – {_padre.DES_ESPECIFICACION_TECNICA}";
+    private string _padreTipo => _padre?.COD_TIPO_ESPECIFICACION_TECNICA ?? "";
+    private bool _padreEsLista => _padreTipo == "LST";
+    private bool _padreEsListaOItem => _padreTipo is "LST" or "ITM";
+    private bool _habilitaEntero => _model.COD_TIPO_ESPECIFICACION_TECNICA is "ENT" or "NUM";
+    private bool _habilitaDecimal => _model.COD_TIPO_ESPECIFICACION_TECNICA is "NUM";
+    private bool _habilitaUnidadMedida => _model.COD_TIPO_ESPECIFICACION_TECNICA is "ENT" or "NUM" || _model.FLG_ITEMS_WITH_VALUE == true;
+    private bool _padreDependeEntidad => _padre?.FLG_DEPENDS_ENTITY == true;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+
+        // Si el padre depende de entidad, el hijo hereda la misma característica
+        // (el switch queda bloqueado en true — ver _padreDependeEntidad).
+        if (_padreDependeEntidad) _model.FLG_DEPENDS_ENTITY = true;
+    }
+
+    private void MapearDesdeModelo(EspecificacionesTecnicasModel m)
+    {
+        _model = new EspecificacionesTecnicasModel
+        {
+            COD_ESPECIFICACION_TECNICA         = m.COD_ESPECIFICACION_TECNICA,
+            DES_ESPECIFICACION_TECNICA         = m.DES_ESPECIFICACION_TECNICA,
+            DES_ESPECIFICACION_TECNICA_SINGULAR = m.DES_ESPECIFICACION_TECNICA_SINGULAR,
+            COD_ESPECIFICACION_TECNICA_PADRE   = m.COD_ESPECIFICACION_TECNICA_PADRE,
+            COD_TIPO_ESPECIFICACION_TECNICA    = m.COD_TIPO_ESPECIFICACION_TECNICA,
+            FLG_HAS_CHILDREN         = m.FLG_HAS_CHILDREN,
+            FLG_LIST                 = m.FLG_LIST,
+            FLG_IS_CHILDREN          = m.FLG_IS_CHILDREN,
+            FLG_DEPENDS_ENTITY       = m.FLG_DEPENDS_ENTITY,
+            FLG_MULTIPLE_CHOICE      = m.FLG_MULTIPLE_CHOICE,
+            FLG_ITEMS_WITH_VALUE     = m.FLG_ITEMS_WITH_VALUE,
+            FLG_PRODUCT_ASSEMBLY     = m.FLG_PRODUCT_ASSEMBLY,
+            FLG_QUALITY_CONTROL      = m.FLG_QUALITY_CONTROL,
+            FLG_OBSERVACION          = m.FLG_OBSERVACION,
+            FLG_RANGE                = m.FLG_RANGE,
+            FLG_EDITABLE_ORDER_TAKING = m.FLG_EDITABLE_ORDER_TAKING,
+            FLG_IS_COLOR             = m.FLG_IS_COLOR,
+            COD_CLASE_DEFECTO_TECNICO        = m.COD_CLASE_DEFECTO_TECNICO,
+            COD_TIPO_DEFECTO_TECNICO_DEFECTO = m.COD_TIPO_DEFECTO_TECNICO_DEFECTO,
+            DES_PREFIJO = m.DES_PREFIJO,
+            DES_SUFIJO  = m.DES_SUFIJO,
+            CAN_ENTERO  = m.CAN_ENTERO,
+            CAN_DECIMAL = m.CAN_DECIMAL,
+            COD_UNIDAD_MEDIDA          = m.COD_UNIDAD_MEDIDA,
+            COD_UNIDAD_MEDIDA_DIVISORA = m.COD_UNIDAD_MEDIDA_DIVISORA,
+            COD_UNIDAD_MEDIDA_ITEM = m.COD_UNIDAD_MEDIDA_ITEM,
+            NUM_ORDEN_PRESENTACION = m.NUM_ORDEN_PRESENTACION,
+            IMG_ICONO       = m.IMG_ICONO,
+            COD_TIPO_ESTADO = m.COD_TIPO_ESTADO,
+            COD_ESTADO      = m.COD_ESTADO,
+        };
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<EspecificacionesTecnicasModel>(
+            $"{IngenieriaRoute.EspecificacionesTecnicas}/{Uri.EscapeDataString(_model.COD_ESPECIFICACION_TECNICA)}");
+        if (fresco is not null)
+        {
+            MapearDesdeModelo(fresco);
+            if (_padreDependeEntidad) _model.FLG_DEPENDS_ENTITY = true;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        var tLoadcombos   = Http.SafeGetAsync<EspecificacionesTecnicasLoadCombosResult>(IngenieriaRoute.EspecificacionesTecnicasLoadcombos);
+        await Task.WhenAll(tLoadcombos);
+
+        if (!string.IsNullOrEmpty(_model.COD_CLASE_DEFECTO_TECNICO)) await LoadTiposDefecto();
+
+        var lc = await tLoadcombos;
+        if (lc is not null)
+        {
+            _codTipoEstado       = lc.CodTipoEstado;
+            _clasesDefecto       = lc.ClasesDefecto;
+            _tiposEspecificacion = lc.TiposEspecificacion;
+            _estados             = lc.Estados;
+            _unidadesMedida      = lc.UnidadesMedida;
+            if (_esNuevo && _model.COD_ESTADO is null && _estados.Any())
+            {
+                var def = _estados.FirstOrDefault(e => e.EsDefault) ?? _estados.First();
+                _model.COD_ESTADO      = def.CodEstado;
+                _model.COD_TIPO_ESTADO = _codTipoEstado;
+            }
+        }
+    }
+    private void OnTipoEspecificacionChanged(string val)
+    {
+        _model.COD_TIPO_ESPECIFICACION_TECNICA = val;
+        if (val == "LST") _model.FLG_LIST = true;
+        if (val == "ITM") _model.FLG_IS_CHILDREN = true;
+    }
+
+    private async Task OnClaseChanged(string val)
+    {
+        _model.COD_CLASE_DEFECTO_TECNICO = val;
+        _model.COD_TIPO_DEFECTO_TECNICO_DEFECTO = "";
+        await LoadTiposDefecto();
+    }
+
+    private async Task LoadTiposDefecto()
+    {
+        if (string.IsNullOrEmpty(_model.COD_CLASE_DEFECTO_TECNICO)) { _tiposDefecto = new(); return; }
+        _tiposDefecto = await Http.SafeGetAsync<List<TiposDefectosTecnicosModel>>(
+            $"{ControlcalidadRoute.TiposDefectosTecnicos}?codClaseDefectoTecnico={Uri.EscapeDataString(_model.COD_CLASE_DEFECTO_TECNICO)}") ?? new();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = IngenieriaRoute.EspecificacionesTecnicas;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_ESPECIFICACION_TECNICA}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(EspecificacionesTecnicasDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        _model.COD_TIPO_ESTADO = _codTipoEstado;
+        var dto = new
+        {
+            _model.COD_ESPECIFICACION_TECNICA, _model.DES_ESPECIFICACION_TECNICA, _model.DES_ESPECIFICACION_TECNICA_SINGULAR,
+            _model.COD_ESPECIFICACION_TECNICA_PADRE, _model.COD_TIPO_ESPECIFICACION_TECNICA,
+            _model.FLG_HAS_CHILDREN, _model.FLG_LIST, _model.FLG_IS_CHILDREN, _model.FLG_DEPENDS_ENTITY, _model.FLG_MULTIPLE_CHOICE,
+            _model.FLG_ITEMS_WITH_VALUE, _model.FLG_PRODUCT_ASSEMBLY, _model.FLG_QUALITY_CONTROL,
+            _model.FLG_OBSERVACION, _model.FLG_RANGE, _model.FLG_EDITABLE_ORDER_TAKING, _model.FLG_IS_COLOR,
+            _model.COD_CLASE_DEFECTO_TECNICO, _model.COD_TIPO_DEFECTO_TECNICO_DEFECTO,
+            _model.DES_PREFIJO, _model.DES_SUFIJO, _model.CAN_ENTERO, _model.CAN_DECIMAL,
+            _model.COD_UNIDAD_MEDIDA, _model.COD_UNIDAD_MEDIDA_DIVISORA, _model.COD_UNIDAD_MEDIDA_ITEM, _model.NUM_ORDEN_PRESENTACION,
+            _model.IMG_ICONO, _model.COD_TIPO_ESTADO, _model.COD_ESTADO
+        };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EspecificacionesTecnicasDialog), nameof(Submit));
+    }
+}

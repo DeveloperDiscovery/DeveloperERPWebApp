@@ -1,0 +1,72 @@
+@using KONSolutions.Shared.Models.Estandar
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_ENTIDAD" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="ESTANDAR.TIPOS_ENTIDADES" Columna="COD_TIPO_ENTIDAD"
+                        @bind-Value="_model.COD_TIPO_ENTIDAD"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="ESTANDAR.TIPOS_ENTIDADES" Columna="DES_TIPO_ENTIDAD"
+                        @bind-Value="_model.DES_TIPO_ENTIDAD"
+                        Disabled="_readonly" Obligatorio="true" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposEntidades? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposEntidades _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(TiposEntidades m) =>
+        _model = new TiposEntidades { COD_TIPO_ENTIDAD = m.COD_TIPO_ENTIDAD, DES_TIPO_ENTIDAD = m.DES_TIPO_ENTIDAD };
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposEntidades>($"{ApiRoutes.Estandar.TiposEntidades}/{Uri.EscapeDataString(_model.COD_TIPO_ENTIDAD)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Estandar.TiposEntidades}/{Uri.EscapeDataString(_model.COD_TIPO_ENTIDAD)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposEntidadDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // El controller solo expone POST (el SP hace upsert: inserta o actualiza según
+        // el código); no existe endpoint PUT — usar PUT aquí devolvía 405.
+        var resp = await Http.GuardarAsync(ApiRoutes.Estandar.TiposEntidades, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposEntidadDialog), nameof(Submit));
+    }
+}

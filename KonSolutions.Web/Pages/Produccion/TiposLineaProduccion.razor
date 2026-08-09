@@ -1,0 +1,200 @@
+@page "/produccion/tipos-linea-produccion"
+@attribute [Authorize]
+@using TiposLineaProduccionModel = KONSolutions.Shared.Models.Produccion.TiposLineaProduccion
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Tipos de Línea de Producción · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Línea de Producción" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema PRODUCCION · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar tipo de línea de producción..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="tipos-linea-produccion" style="position:relative;">
+    <MudDataGrid T="TiposLineaProduccionModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="90">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_TIPO_LINEA_PRODUCCION" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TiposLineaProduccionModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_TIPO_LINEA_PRODUCCION)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_LINEA_PRODUCCION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_LINEA_PRODUCCION" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TiposLineaProduccionModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_TIPO_LINEA_PRODUCCION)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_LINEA_PRODUCCION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Producción" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;" Width="110">
+                <CellTemplate>
+                    <MudIcon Icon="@Icons.Material.Filled.PrecisionManufacturing" Color="@(context.Item.FLG_PRODUCCION == true ? Color.Success : Color.Error)"
+                             Style="@(context.Item.FLG_PRODUCCION == true ? "" : "opacity:.15;")" Size="Size.Small" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Planta Propia" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;" Width="120">
+                <CellTemplate>
+                    <MudIcon Icon="@Icons.Material.Filled.Factory" Color="@(context.Item.FLG_PLANTA_PROPIA == true ? Color.Success : Color.Error)"
+                             Style="@(context.Item.FLG_PLANTA_PROPIA == true ? "" : "opacity:.15;")" Size="Size.Small" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <div @onclick:stopPropagation="true">
+                        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TiposLineaProduccionModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<TiposLineaProduccionModel> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<TiposLineaProduccionModel> Ordenar(List<TiposLineaProduccionModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_LINEA_PRODUCCION).ToList() : items.OrderByDescending(x => x.COD_TIPO_LINEA_PRODUCCION).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_LINEA_PRODUCCION).ToList() : items.OrderByDescending(x => x.DES_TIPO_LINEA_PRODUCCION).ToList(),
+        _ => items
+    };
+    private List<TiposLineaProduccionModel> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<TiposLineaProduccionModel> Base(int col) => Aplicar(_items, col);
+
+    private List<TiposLineaProduccionModel> Aplicar(List<TiposLineaProduccionModel> src, int ex)
+    {
+        IEnumerable<TiposLineaProduccionModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_TIPO_LINEA_PRODUCCION)),
+                1 => q.Where(x => v.Contains(x.DES_TIPO_LINEA_PRODUCCION)),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private async Task Buscar() => _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("PRODUCCION", "TiposLineaProduccion");
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("PRODUCCION.TIPOS_LINEA_PRODUCCION", _onCambio);
+    }
+
+    private async Task Load() => _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+
+    private async Task<List<TiposLineaProduccionModel>> Fetch()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposLineaProduccionModel>>>(ApiRoutes.Produccion.TiposLineaProduccion);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(TiposLineaProduccion), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<TiposLineaProduccionModel>> FetchSearch(string s)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposLineaProduccionModel>>>(
+                $"{ApiRoutes.Produccion.TiposLineaProduccionSearch}?search={Uri.EscapeDataString(s)}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(TiposLineaProduccion), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(TiposLineaProduccionModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(TiposLineaProduccionModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de línea de producción",
+            CrudModo.Delete => $"Eliminar · {item?.DES_TIPO_LINEA_PRODUCCION}",
+            CrudModo.Read   => $"Consultar · {item?.DES_TIPO_LINEA_PRODUCCION}",
+            _               => $"Editar · {item?.DES_TIPO_LINEA_PRODUCCION}"
+        };
+        var dlg = await DialogService.ShowAsync<TiposLineaProduccionDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    public void Dispose() => Cambios.Desuscribir("PRODUCCION.TIPOS_LINEA_PRODUCCION", _onCambio ?? (() => Task.CompletedTask));
+}

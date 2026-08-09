@@ -1,0 +1,68 @@
+@using KONSolutions.Shared.Models.Administracion
+@using KONSolutions.Web.Services
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.PersonAdd" Color="Color.Success" />
+            <MudText Typo="Typo.h6">Asignar entidad</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">Cargo: @DesCargo</MudText>
+        @if (_cargando)
+        {
+            <MudProgressLinear Indeterminate="true" Class="mb-3" />
+        }
+        <AriaCombo TItem="EntidadDisponible" Items="_disponibles"
+                   TextFunc="@(e => $"{e.DES_NOMBRE_COMPLETO} — {e.DES_TIPO_DOCUMENTO_IDENTIDAD} {e.NUM_DOCUMENTO_IDENTIDAD}")"
+                   ValueFunc="@(e => e.COD_ENTIDAD.ToString())"
+                   @bind-Value="_codEntidadTexto"
+                   Label="Persona" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => MudDialog.Cancel())">Cancelar</MudButton>
+        <MudButton Color="Color.Success" Variant="Variant.Filled" Disabled="@(_saving || string.IsNullOrEmpty(_codEntidadTexto))" OnClick="Submit">
+            Asignar
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public int CodArea { get; set; }
+    [Parameter, EditorRequired] public int CodCargo { get; set; }
+    [Parameter] public string DesCargo { get; set; } = "";
+
+    private List<EntidadDisponible> _disponibles = new();
+    private string _codEntidadTexto = "";
+    private bool _cargando, _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _cargando = true;
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<EntidadDisponible>>>(ApiRoutes.Administracion.EntidadesDisponibles);
+            _disponibles = r?.Data ?? new();
+        }
+        catch (Exception ex) { await ErrorLog.LogAsync(ex, nameof(AsignarEntidadDialog), nameof(OnInitializedAsync)); }
+        finally { _cargando = false; }
+    }
+
+    private async Task Submit()
+    {
+        if (!decimal.TryParse(_codEntidadTexto, out var codEntidad)) return;
+        _saving = true;
+        var dto = new AreaCargoEntidadDto { COD_AREA = CodArea, COD_CARGO = CodCargo, COD_ENTIDAD = codEntidad };
+        var resp = await Http.PostAsJsonAsync(ApiRoutes.Administracion.AreasCargosEntidades, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add("Entidad asignada.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(AsignarEntidadDialog), nameof(Submit));
+    }
+}

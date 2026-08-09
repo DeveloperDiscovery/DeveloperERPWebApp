@@ -1,0 +1,273 @@
+@using RegimenModel = KONSolutions.Shared.Models.Sunat.RegimenesTributarios
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(900px,95vw);" Class="dialog-alto-ampliado">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@_model.DES_REGIMEN_TRIBUTARIO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm EditContext="_editContext" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            <CampoTexto Tabla="SUNAT.REGIMENES_TRIBUTARIOS" Columna="DES_REGIMEN_TRIBUTARIO"
+                        @bind-Value="_model.DES_REGIMEN_TRIBUTARIO"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposComprobantePago"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_COMPROBANTE_PAGO"
+                               Label="Tipo de comprobante de pago" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_monedas"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_MONEDA"
+                               Label="Moneda" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_clasesOperacion"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id.Trim())"
+                               Value="@(_model.COD_CLASE_OPERACION?.Trim())"
+                               ValueChanged="OnClaseOperacionChanged"
+                               Label="Clase de operación" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposOperacion"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_OPERACION"
+                               Label="Tipo de operación"
+                               Disabled="@(_readonly || string.IsNullOrEmpty(_model.COD_CLASE_OPERACION))" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposImpuesto"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_IMPUESTO"
+                               Label="Tipo de impuesto" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposValorCalculo"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_VALOR_CALCULO"
+                               Label="Tipo de valor de cálculo" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField @bind-Value="_model.NUM_PRIORIDAD" Label="Prioridad"
+                                      Variant="Variant.Outlined" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField @bind-Value="_model.NUM_DECIMALES_REDONDEO" Label="Decimales de redondeo"
+                                      Variant="Variant.Outlined" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField @bind-Value="_model.NUM_DIAS" Label="Días"
+                                      Variant="Variant.Outlined" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudNumericField @bind-Value="_model.VAL_MINIMO" Label="Valor mínimo" Min="0"
+                                      Format="N2" Variant="Variant.Outlined" Disabled="_readonly" Class="mb-3"
+                                      Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </MudItem>
+            </MudGrid>
+
+            <MudText Typo="Typo.caption" Class="mono mb-2" Style="opacity:.55;display:block;">CARACTERÍSTICAS</MudText>
+            <MudGrid Class="mb-3">
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.RequestQuote" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_RETENCION_TRIBUTO" Color="Color.Primary" Disabled="_readonly" Label="Retención de tributo" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.AccountBalance" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_DEPOSITO_CUENTA" Color="Color.Primary" Disabled="_readonly" Label="Depósito en cuenta" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.CalendarMonth" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_PERIODO" Color="Color.Primary" Disabled="_readonly" Label="Período" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.TrendingUp" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_INCREMENTA" Color="Color.Primary" Disabled="_readonly" Label="Incrementa" /></div></MudItem>
+                <MudItem xs="6" sm="3">
+                    <div class="d-flex align-center gap-1">
+                        <MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="Color.Primary" Size="Size.Small" />
+                        <MudSwitch T="bool?" Value="_model.FLG_DEPENDE_PRODUCTO" ValueChanged="OnDependeProductoChanged"
+                                   Color="Color.Primary" Disabled="_readonly" Label="Depende de producto" />
+                    </div>
+                </MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Block" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_RESTRICCION" Color="Color.Primary" Disabled="_readonly" Label="Restricción" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Schedule" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_PROVISION" Color="Color.Primary" Disabled="_readonly" Label="Provisión" /></div></MudItem>
+            </MudGrid>
+
+            @* La tasa no aplica cuando el régimen depende del producto (el valor viene de otro
+               lado, no de una tasa fija) — por eso el switch FLG_DEPENDE_PRODUCTO va ANTES y,
+               al activarse, deshabilita y limpia este campo. *@
+            <MudNumericField @bind-Value="_model.TAS_REGIMEN_TRIBUTARIO" Label="Tasa (%)" Min="0" Max="100"
+                              Format="N3" Variant="Variant.Outlined" Class="mb-3"
+                              Disabled="@(_readonly || _model.FLG_DEPENDE_PRODUCTO == true)"
+                              Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+
+            <EstadoCombo DesTabla="SUNAT.REGIMENES_TRIBUTARIOS"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+        </EditForm>
+    </DialogContent>
+    <DialogActions>
+        <CrudDialogActions Modo="Modo" Saving="_saving" SubmitButton="false"
+                           OnConfirm="ConfirmarDesdeFooter" OnCancel="@(() => MudDialog.Cancel())">
+            <LeftContent>
+                <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                FecRegistro="@Item?.FEC_REGISTRO"
+                                CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+            </LeftContent>
+        </CrudDialogActions>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public RegimenModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private RegimenModel _model = new();
+    // El botón Crear/Modificar vive en DialogActions (footer fijo), fuera del <EditForm> —
+    // por eso el EditContext se maneja a mano en vez de depender de un botón submit interno.
+    private EditContext _editContext = default!;
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _tiposComprobantePago = new();
+    private List<ComboboxItem> _monedas              = new();
+    private List<ComboboxItem> _clasesOperacion      = new();
+    private List<ComboboxItem> _tiposOperacion       = new();
+    private List<ComboboxItem> _tiposImpuesto        = new();
+    private List<ComboboxItem> _tiposValorCalculo    = new();
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        _editContext = new EditContext(_model);
+    }
+
+    private void MapearDesdeModelo(RegimenModel m)
+    {
+        _model = new RegimenModel
+        {
+            COD_REGIMEN_TRIBUTARIO   = m.COD_REGIMEN_TRIBUTARIO,
+            DES_REGIMEN_TRIBUTARIO   = m.DES_REGIMEN_TRIBUTARIO,
+            COD_TIPO_COMPROBANTE_PAGO = m.COD_TIPO_COMPROBANTE_PAGO,
+            FLG_RETENCION_TRIBUTO    = m.FLG_RETENCION_TRIBUTO,
+            FLG_DEPOSITO_CUENTA      = m.FLG_DEPOSITO_CUENTA,
+            FLG_PERIODO              = m.FLG_PERIODO,
+            FLG_INCREMENTA           = m.FLG_INCREMENTA,
+            FLG_DEPENDE_PRODUCTO     = m.FLG_DEPENDE_PRODUCTO,
+            FLG_RESTRICCION          = m.FLG_RESTRICCION,
+            FLG_PROVISION            = m.FLG_PROVISION,
+            NUM_PRIORIDAD            = m.NUM_PRIORIDAD,
+            NUM_DECIMALES_REDONDEO   = m.NUM_DECIMALES_REDONDEO,
+            COD_CLASE_OPERACION      = m.COD_CLASE_OPERACION,
+            COD_TIPO_OPERACION       = m.COD_TIPO_OPERACION,
+            NUM_DIAS                 = m.NUM_DIAS,
+            VAL_MINIMO               = m.VAL_MINIMO,
+            TAS_REGIMEN_TRIBUTARIO   = m.TAS_REGIMEN_TRIBUTARIO,
+            COD_TIPO_IMPUESTO        = m.COD_TIPO_IMPUESTO,
+            COD_TIPO_VALOR_CALCULO   = m.COD_TIPO_VALOR_CALCULO,
+            COD_MONEDA               = m.COD_MONEDA,
+            COD_TIPO_ESTADO          = m.COD_TIPO_ESTADO,
+            COD_ESTADO               = m.COD_ESTADO,
+        };
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<RegimenModel>($"{ApiRoutes.Sunat.RegimenesTributarios}/{_model.COD_REGIMEN_TRIBUTARIO}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    // Invocado por el botón Crear/Modificar del footer (fuera del <EditForm>): dispara
+    // la validación manualmente antes de guardar.
+    private async Task ConfirmarDesdeFooter()
+    {
+        if (!_editContext.Validate())
+        {
+            await ErrorDialogHelper.MostrarValidacionAsync(_editContext, DialogService, nameof(RegimenesTributariosDialog));
+            return;
+        }
+        await Submit();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        var tComprobante = Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Estandar.TiposComprobantesPagoCombobox);
+        var tMoneda       = Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Estandar.MonedasCombobox);
+        // No se usa el endpoint /combobox de Clases de Operación: el SP SHOWCOMBOX devuelve
+        // las columnas completas (COD_CLASE_OPERACION/DES_CLASE_OPERACION), no Id/Texto, así
+        // que Dapper no las mapea — se arma el combo a mano desde el listado completo, igual
+        // que en TipoOperacionDialog.razor.
+        var tClases       = Http.SafeGetAsync<List<KONSolutions.Shared.Models.Estandar.ClaseOperacion>>(ApiRoutes.Estandar.ClasesOperacion);
+        var tImpuesto     = Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Comercial.TiposImpuestoCombobox);
+        var tValorCalculo = Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Comercial.TiposValorCalculoCombobox);
+        await Task.WhenAll(tComprobante, tMoneda, tClases, tImpuesto, tValorCalculo);
+        _tiposComprobantePago = (await tComprobante) ?? new();
+        _monedas              = (await tMoneda)      ?? new();
+        _tiposImpuesto        = (await tImpuesto)     ?? new();
+        _tiposValorCalculo    = (await tValorCalculo) ?? new();
+        _clasesOperacion = ((await tClases) ?? new())
+            .Select(c => new ComboboxItem { Id = c.COD_CLASE_OPERACION.Trim(), Texto = c.DES_CLASE_OPERACION })
+            .ToList();
+
+        if (!string.IsNullOrEmpty(_model.COD_CLASE_OPERACION))
+            await CargarTiposOperacion(_model.COD_CLASE_OPERACION);
+    }
+
+    private async Task OnClaseOperacionChanged(string? codClase)
+    {
+        _model.COD_CLASE_OPERACION = codClase ?? "";
+        _model.COD_TIPO_OPERACION = "";
+        await CargarTiposOperacion(codClase);
+    }
+
+    private async Task CargarTiposOperacion(string? codClase)
+    {
+        if (string.IsNullOrEmpty(codClase)) { _tiposOperacion = new(); return; }
+        var r = await Http.SafeGetAsync<List<KONSolutions.Shared.Models.Estandar.TipoOperacion>>(
+            $"{ApiRoutes.Estandar.TiposOperacion}?codClaseOperacion={Uri.EscapeDataString(codClase)}");
+        _tiposOperacion = (r ?? new())
+            .Select(t => new ComboboxItem { Id = t.COD_TIPO_OPERACION, Texto = t.DES_TIPO_OPERACION })
+            .ToList();
+    }
+
+    private void OnDependeProductoChanged(bool? v)
+    {
+        _model.FLG_DEPENDE_PRODUCTO = v;
+        if (v == true) _model.TAS_REGIMEN_TRIBUTARIO = null;
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Sunat.RegimenesTributarios;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_REGIMEN_TRIBUTARIO}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(RegimenesTributariosDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new
+        {
+            _model.COD_REGIMEN_TRIBUTARIO, _model.DES_REGIMEN_TRIBUTARIO, _model.COD_TIPO_COMPROBANTE_PAGO,
+            _model.FLG_RETENCION_TRIBUTO, _model.FLG_DEPOSITO_CUENTA, _model.FLG_PERIODO, _model.FLG_INCREMENTA,
+            _model.FLG_DEPENDE_PRODUCTO, _model.FLG_RESTRICCION, _model.FLG_PROVISION,
+            _model.NUM_PRIORIDAD, _model.NUM_DECIMALES_REDONDEO,
+            _model.COD_CLASE_OPERACION, _model.COD_TIPO_OPERACION,
+            _model.NUM_DIAS, _model.VAL_MINIMO, _model.TAS_REGIMEN_TRIBUTARIO,
+            _model.COD_TIPO_IMPUESTO, _model.COD_TIPO_VALOR_CALCULO, _model.COD_MONEDA,
+            _model.COD_TIPO_ESTADO, _model.COD_ESTADO
+        };
+        var resp = await Http.GuardarAsync(ruta, dto, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(RegimenesTributariosDialog), nameof(Submit));
+    }
+}

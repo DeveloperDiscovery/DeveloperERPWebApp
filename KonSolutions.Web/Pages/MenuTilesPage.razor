@@ -1,0 +1,388 @@
+@implements IDisposable
+@inject MenuService MenuService
+@inject WorkspaceTabService TabService
+@inject ISnackbar Snackbar
+@inject FavoritoService FavoritoService
+@inject FavoritosCacheService FavoritosCache
+@inject IAuthService AuthService
+@inject IJSRuntime JS
+@inject IDialogService DialogService
+
+<div class="d-flex align-center justify-space-between mb-4 gap-3">
+    <MudText Typo="Typo.h4">Menú de Tiles</MudText>
+    <MudTextField T="string" Value="_busqueda" ValueChanged="@((string v) => _busqueda = v)"
+                  Placeholder="Buscar opción de menú..." Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Immediate="true" Clearable="true" ClearIcon="@Icons.Material.Filled.DeleteOutline" OnClearButtonClick="@(() => _busqueda = "")"
+                  Class="campo-texto-mt" Style="max-width:360px;flex:1;" />
+    <div class="d-flex align-center gap-2">
+        <span class="mono" style="opacity:.5;font-size:.8rem;">@_total opciones</span>
+        <MudTooltip Text="@(_apilado ? "Cambiar a lado a lado" : "Cambiar a apilado")">
+            <MudIconButton Icon="@(_apilado ? Icons.Material.Filled.ViewModule : Icons.Material.Filled.ViewStream)"
+                           Size="Size.Small" OnClick="@(() => _apilado = !_apilado)" />
+        </MudTooltip>
+    </div>
+</div>
+
+@if (!_cargado)
+{
+    <div class="d-flex flex-column align-center justify-center" style="height:60vh;gap:12px;opacity:.5;">
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Medium" />
+    </div>
+}
+else if (_grupos.Count == 0)
+{
+    <div class="d-flex flex-column align-center justify-center" style="height:60vh;gap:12px;opacity:.5;">
+        <MudIcon Icon="@Icons.Material.Outlined.GridView" Style="font-size:3rem;" />
+        <MudText>No hay opciones de menú disponibles.</MudText>
+    </div>
+}
+else if (!_gruposFiltrados.Any())
+{
+    <div class="d-flex flex-column align-center justify-center" style="height:40vh;gap:12px;opacity:.5;">
+        <MudIcon Icon="@Icons.Material.Outlined.SearchOff" Style="font-size:3rem;" />
+        <MudText>Sin resultados para "@_busqueda".</MudText>
+    </div>
+}
+else
+{
+    <div class="ws-menutiles @(_apilado ? "ws-grupos" : "ws-grupos ws-grupos--h")">
+        @foreach (var grupo in _gruposFiltrados)
+        {
+            <div class="ws-app-card">
+                <div class="ws-app-header" style="@EstiloGrupo(grupo.BackColor, grupo.ForeColor)">
+                    @if (grupo.IconoApp is not null)
+                    {
+                        <img src="data:image/png;base64,@grupo.IconoApp" class="ws-app-ico" alt="@grupo.NombreApp" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Apps" Class="ws-app-ico-mud" />
+                    }
+                    <span class="ws-app-nombre">@grupo.NombreApp</span>
+                </div>
+                @foreach (var seccion in grupo.Secciones)
+                {
+                    @if (!string.IsNullOrWhiteSpace(seccion.Nombre))
+                    {
+                        <div class="ws-seccion-header">
+                            <MudIcon Icon="@Icons.Material.Filled.Folder" Style="font-size:.85rem;opacity:.55;flex-shrink:0;" />
+                            <span>@seccion.Nombre</span>
+                        </div>
+                    }
+                    <div class="ws-tiles">
+                        @foreach (var tile in seccion.Tiles)
+                        {
+                            <div class="ws-tile @(_spinning == tile ? "ws-tile-spin" : "")"
+                                 @onclick="@(() => AbrirOpcion(tile))"
+                                 @oncontextmenu="@(e => MostrarMenu(e, tile))"
+                                 @oncontextmenu:preventDefault="true"
+                                 style="@EstiloTile(tile.BackColor, tile.ForeColor)">
+                                @if (tile.IconoOpcion is not null)
+                                {
+                                    <img src="data:image/png;base64,@tile.IconoOpcion" class="ws-tile-ico" alt="@tile.Nombre" />
+                                }
+                                else
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.Dashboard" Class="ws-tile-ico-mud" />
+                                }
+                                <div class="ws-tile-lbl">@tile.Nombre</div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@* Menú contextual *@
+@if (_ctxVisible)
+{
+    <div style="position:fixed;inset:0;z-index:2999;" @onclick="CerrarMenu"
+         @oncontextmenu="CerrarMenu" @oncontextmenu:preventDefault="true"></div>
+    <div class="ctx-menu" style="@($"top:{_ctxY}px;left:{_ctxX}px;")">
+        @if (_ctxEsFavorito)
+        {
+            <div class="ctx-item" @onclick="QuitarFavorito">
+                <MudIcon Icon="@Icons.Material.Filled.StarBorder" Size="Size.Small" /> Quitar de favoritos
+            </div>
+        }
+        else
+        {
+            <div class="ctx-item" @onclick="AgregarFavorito">
+                <MudIcon Icon="@Icons.Material.Filled.Star" Size="Size.Small" /> Agregar a favoritos
+            </div>
+        }
+        <div class="ctx-item" @onclick="@(async () => { CerrarMenu(); await AbrirOpcion(_ctxTile!); })">
+            <MudIcon Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" /> Abrir
+        </div>
+    </div>
+}
+
+@code {
+    private class SeccionVm
+    {
+        public string Nombre { get; set; } = "";
+        public List<WorkspaceMenuCircular.TileVm> Tiles { get; set; } = new();
+    }
+
+    private class AppGrupoVm
+    {
+        public string CodApp    { get; set; } = "";
+        public string NombreApp { get; set; } = "";
+        public string? IconoApp { get; set; }
+        public string BackColor { get; set; } = "";
+        public string ForeColor { get; set; } = "";
+        public List<SeccionVm> Secciones { get; set; } = new();
+    }
+
+    private List<AppGrupoVm> _grupos = new();
+    private int  _total => _grupos.SelectMany(g => g.Secciones).Sum(s => s.Tiles.Count);
+    // Por defecto (false), layout "lado a lado" (columnas que se ajustan al contenido, ver ws-grupos--h en app.css).
+    // true = apilado, una sección por fila completa.
+    private bool _apilado = false;
+    private string _busqueda = "";
+
+    /// <summary>Filtra tiles por nombre; oculta secciones y apps que se quedan sin coincidencias.</summary>
+    private List<AppGrupoVm> _gruposFiltrados
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_busqueda)) return _grupos;
+            var resultado = new List<AppGrupoVm>();
+            foreach (var g in _grupos)
+            {
+                var secciones = g.Secciones
+                    .Select(s => new SeccionVm
+                    {
+                        Nombre = s.Nombre,
+                        Tiles = s.Tiles.Where(t => t.Nombre.Contains(_busqueda, StringComparison.OrdinalIgnoreCase)).ToList()
+                    })
+                    .Where(s => s.Tiles.Count > 0)
+                    .ToList();
+                if (secciones.Count > 0)
+                    resultado.Add(new AppGrupoVm
+                    {
+                        CodApp = g.CodApp, NombreApp = g.NombreApp, IconoApp = g.IconoApp,
+                        BackColor = g.BackColor, ForeColor = g.ForeColor, Secciones = secciones
+                    });
+            }
+            return resultado;
+        }
+    }
+
+    private bool   _ctxVisible;
+    private double _ctxX, _ctxY;
+    private WorkspaceMenuCircular.TileVm? _ctxTile;
+    private bool   _ctxEsFavorito;
+    private string _codUsuario = "";
+    private bool   _cargado;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var sesion = await AuthService.GetSesionAsync();
+        _codUsuario = sesion?.COD_USUARIO ?? "";
+
+        ConstruirGrupos();
+
+        // Los favoritos ya los cargó MainLayout una vez al login (en paralelo, una sola
+        // ronda) — se leen aquí en memoria, sin otra vuelta a la API por cada app.
+        _cargado = true;
+
+        // Los íconos del árbol se cargan aparte, en segundo plano (ver MenuService) — cuando
+        // lleguen, reconstruir los grupos para que los tiles pasen de ícono genérico al real.
+        MenuService.IconosActualizados += AlLlegarIconos;
+    }
+
+    private void AlLlegarIconos()
+    {
+        ConstruirGrupos();
+        InvokeAsync(StateHasChanged);
+    }
+
+    void IDisposable.Dispose() => MenuService.IconosActualizados -= AlLlegarIconos;
+
+    private void ConstruirGrupos()
+    {
+        var arbol = MenuService.GetArbolMenu();
+        _grupos = arbol
+            .GroupBy(n => n.COD_APLICACION)
+            .Select(g =>
+            {
+                var (hojas, secciones) = Procesar(g.ToList());
+                var todas = new List<SeccionVm>();
+                if (hojas.Count > 0)
+                    todas.Add(new SeccionVm { Nombre = "", Tiles = ATile(hojas) });
+                todas.AddRange(secciones);
+
+                return new AppGrupoVm
+                {
+                    CodApp    = g.Key,
+                    NombreApp = g.First().DES_APLICACION ?? g.Key,
+                    IconoApp  = g.First().IMG_ICONO_APLICACION,
+                    BackColor = g.First().DES_BACKCOLOR_APLICACION,
+                    ForeColor = g.First().DES_FORECOLOR_APLICACION,
+                    Secciones = todas
+                };
+            })
+            .Where(g => g.Secciones.Sum(s => s.Tiles.Count) > 0)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Recorre el árbol de un grupo (aplicación) y separa sus nodos en:
+    /// - "hojas": opciones clicables que quedan sueltas (sin carpeta propia, o dentro de un Sub Módulo que se "sube" un nivel).
+    /// - "secciones": una por cada carpeta (CRP) encontrada, con sus propias hojas ya aplanadas.
+    /// </summary>
+    private static (List<NodoMenu> hojas, List<SeccionVm> secciones) Procesar(List<NodoMenu> nodos)
+    {
+        var hojas = new List<NodoMenu>();
+        var secciones = new List<SeccionVm>();
+        foreach (var n in nodos)
+        {
+            if (n.EsSeparador) continue;
+
+            if (n.EsCarpeta)
+            {
+                var (hijasHojas, hijasSecciones) = Procesar(n.Hijos);
+                if (hijasHojas.Count > 0)
+                    secciones.Add(new SeccionVm { Nombre = n.DES_OPCION_APLICACION ?? n.COD_OPCION_APLICACION, Tiles = ATile(hijasHojas) });
+                secciones.AddRange(hijasSecciones);
+                continue;
+            }
+
+            if (!n.EsSubModulo && !string.IsNullOrWhiteSpace(n.DES_FORMULARIO))
+                hojas.Add(n);
+
+            if (n.Hijos.Count > 0)
+            {
+                var (hijasHojas, hijasSecciones) = Procesar(n.Hijos);
+                hojas.AddRange(hijasHojas);
+                secciones.AddRange(hijasSecciones);
+            }
+        }
+        return (hojas, secciones);
+    }
+
+    private static List<WorkspaceMenuCircular.TileVm> ATile(List<NodoMenu> nodos) =>
+        nodos.Select((n, i) => new WorkspaceMenuCircular.TileVm
+        {
+            CodApp      = n.COD_APLICACION,
+            CodOpcion   = n.COD_OPCION_APLICACION,
+            Nombre      = n.DES_OPCION_APLICACION ?? n.COD_OPCION_APLICACION,
+            Ruta        = n.DES_FORMULARIO,
+            IconoOpcion = n.IMG_ICONO_OPCION,
+            BackColor   = n.DES_BACKCOLOR_OPCION,
+            ForeColor   = n.DES_FORECOLOR_OPCION,
+            Orden       = i
+        }).ToList();
+
+    // Gira el hexágono clicado 5 vueltas mientras "carga" la opción (efecto visual, la
+    // pestaña ya se abre resuelta al terminar) — mismo tipo de feedback que usa el anillo
+    // del Menú Circular (WorkspaceMenuCircular.Clic), pero con una rotación CSS simple.
+    private WorkspaceMenuCircular.TileVm? _spinning;
+
+    private async Task AbrirOpcion(WorkspaceMenuCircular.TileVm t)
+    {
+        if (_spinning is not null) return;
+        _spinning = t;
+        StateHasChanged();
+        await Task.Delay(1000); // 1 vuelta x .5s cada medio giro (ver @keyframes ws-tile-spin en app.css)
+        _spinning = null;
+        AbrirOpcionInterna(t);
+    }
+
+    private void AbrirOpcionInterna(WorkspaceMenuCircular.TileVm t)
+    {
+        var info = WorkspaceRegistry.PorRuta(t.Ruta ?? "");
+        if (info is not null)
+        {
+            TabService.Abrir(info.Titulo, info.Icono, info.ComponentType, info.Ruta,
+                new Dictionary<string, object>
+                {
+                    ["CodAplicacion"]       = (object)t.CodApp,
+                    ["CodOpcionAplicacion"] = (object)t.CodOpcion
+                }, iconoImagenBase64: t.IconoOpcion);
+        }
+        else if (string.IsNullOrWhiteSpace(t.Ruta))
+            TabService.Abrir(t.Nombre, Icons.Material.Filled.Construction,
+                typeof(KONSolutions.Web.Pages.Shared.PaginaEnConstruccion), $"/en-construccion/{t.CodApp}/{t.CodOpcion}",
+                new Dictionary<string, object>
+                {
+                    ["Titulo"] = t.Nombre,
+                    ["CodAplicacion"] = t.CodApp,
+                    ["CodOpcionAplicacion"] = t.CodOpcion
+                });
+        else
+            TabService.Abrir(t.Nombre, Icons.Material.Filled.ErrorOutline,
+                typeof(KONSolutions.Web.Pages.Shared.PaginaError), $"/error-pantalla/{t.CodApp}/{t.CodOpcion}",
+                new Dictionary<string, object>
+                {
+                    ["Titulo"] = t.Nombre,
+                    ["Ruta"] = t.Ruta,
+                    ["CodAplicacion"] = t.CodApp,
+                    ["CodOpcionAplicacion"] = t.CodOpcion
+                });
+    }
+
+    private async Task MostrarMenu(MouseEventArgs e, WorkspaceMenuCircular.TileVm t)
+    {
+        // El menú usa position:fixed dentro de #app, que tiene transform:scale() por el
+        // zoom propio de la app — hay que dividir las coordenadas reales entre el factor
+        // de zoom para que el menú quede alineado bajo el cursor (ver appZoom.js).
+        double scale = 1;
+        try { scale = await JS.InvokeAsync<double>("appZoom.getScale"); } catch { }
+        if (scale <= 0) scale = 1;
+        _ctxX = e.ClientX / scale; _ctxY = e.ClientY / scale;
+        _ctxTile = t;
+        _ctxEsFavorito = FavoritosCache.EsFavorito(t.CodApp, t.CodOpcion);
+        _ctxVisible = true;
+    }
+
+    private void CerrarMenu() => _ctxVisible = false;
+
+    private async Task AgregarFavorito()
+    {
+        _ctxVisible = false;
+        if (_ctxTile is null) return;
+        var ok = await FavoritoService.AgregarAsync(_codUsuario, _ctxTile.CodApp, _ctxTile.CodOpcion);
+        if (ok)
+        {
+            FavoritosCache.Agregar(_ctxTile.CodApp, _ctxTile.CodOpcion);
+            Snackbar.Add($"'{_ctxTile.Nombre}' agregado a favoritos.", Severity.Success);
+        }
+        else
+            await ErrorDialogHelper.MostrarMensajeAsync("Error al agregar favorito.", DialogService, nameof(MenuTilesPage));
+    }
+
+    private async Task QuitarFavorito()
+    {
+        _ctxVisible = false;
+        if (_ctxTile is null) return;
+        var ok = await FavoritoService.QuitarAsync(_codUsuario, _ctxTile.CodApp, _ctxTile.CodOpcion);
+        if (ok)
+        {
+            FavoritosCache.Quitar(_ctxTile.CodApp, _ctxTile.CodOpcion);
+            Snackbar.Add($"'{_ctxTile.Nombre}' quitado de favoritos.", Severity.Info);
+        }
+        else
+            await ErrorDialogHelper.MostrarMensajeAsync("Error al quitar favorito.", DialogService, nameof(MenuTilesPage));
+    }
+
+    private static string EstiloGrupo(string back, string fore)
+    {
+        var s = "";
+        if (!string.IsNullOrWhiteSpace(back)) s += $"background:{back};";
+        if (!string.IsNullOrWhiteSpace(fore)) s += $"color:{fore};";
+        return s;
+    }
+
+    private static string EstiloTile(string back, string fore)
+    {
+        var s = "";
+        if (!string.IsNullOrWhiteSpace(back)) s += $"background:{back};border-color:{back};";
+        if (!string.IsNullOrWhiteSpace(fore)) s += $"color:{fore};";
+        return s;
+    }
+}

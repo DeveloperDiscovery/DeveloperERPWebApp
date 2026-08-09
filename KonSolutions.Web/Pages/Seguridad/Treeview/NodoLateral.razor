@@ -1,0 +1,94 @@
+@using KONSolutions.Shared.Models.Seguridad
+
+@* Nodo del panel lateral contráctil por niveles. *@
+
+<div>
+    @* Fila del nodo *@
+    <div class="d-flex align-center gap-1"
+         style="@EstiloFila padding:4px 8px 4px @(Nivel * 14 + 8)px;cursor:pointer;border-radius:4px;margin:1px 4px;"
+         @onclick="Toggle">
+
+        @* Flecha *@
+        @if (Nodo.Hijos.Any())
+        {
+            <MudIcon Icon="@(_expandido ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                     Style="font-size:.8rem;opacity:.5;flex-shrink:0;" />
+        }
+        else
+        {
+            <span style="width:14px;flex-shrink:0;"></span>
+        }
+
+        @* Icono tipo *@
+        <MudIcon Icon="@IconoPorTipo(Nodo.COD_TIPO)"
+                 Style="@($"font-size:.85rem;color:{ColorPorTipo(Nodo.COD_TIPO)};flex-shrink:0;")" />
+
+        @* Texto *@
+        <span style="font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;">
+            @(string.IsNullOrWhiteSpace(Nodo.DES_OPCION) ? Nodo.COD_CHILDREN : Nodo.DES_OPCION)
+        </span>
+
+        @* Badge hijos *@
+        @if (Nodo.Hijos.Any() && !_expandido)
+        {
+            <span style="font-size:.65rem;background:var(--line);border-radius:8px;padding:1px 5px;flex-shrink:0;">
+                @Nodo.Hijos.Count
+            </span>
+        }
+    </div>
+
+    @* Hijos (recursivo, solo si expandido) *@
+    @if (_expandido)
+    {
+        @foreach (var hijo in Nodo.Hijos)
+        {
+            <NodoLateral Nodo="hijo"
+                         Nivel="@(Nivel + 1)"
+                         NivelActual="NivelActual"
+                         OnSeleccionar="OnSeleccionar" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public NodoOpcion  Nodo          { get; set; } = null!;
+    [Parameter] public int         Nivel         { get; set; } = 0;
+    [Parameter] public NodoOpcion? NivelActual   { get; set; }
+    [Parameter] public EventCallback<NodoOpcion> OnSeleccionar { get; set; }
+
+    private bool _expandido;
+
+    private bool EsActual => NivelActual?.COD_CHILDREN == Nodo.COD_CHILDREN;
+
+    private string EstiloFila => EsActual
+        ? "background:var(--foco-fondo,#b8472d);color:var(--foco-texto,#fff);"
+        : "background:transparent;";
+
+    private void Toggle()
+    {
+        if (Nodo.Hijos.Any()) _expandido = !_expandido;
+        OnSeleccionar.InvokeAsync(Nodo);
+    }
+
+    private static string IconoPorTipo(string tipo) => tipo switch
+    {
+        "ROT" => Icons.Material.Filled.AccountTree,
+        "APP" => Icons.Material.Filled.AppsOutage,
+        "CRP" => Icons.Material.Filled.Folder,
+        "MDL" => Icons.Material.Filled.ViewModule,
+        "SMD" => Icons.Material.Filled.ViewQuilt,
+        "BTN" => Icons.Material.Filled.SmartButton,
+        _     => Icons.Material.Filled.Circle
+    };
+
+    private static string ColorPorTipo(string tipo) => tipo switch
+    {
+        "ROT" => "#16130f",
+        "APP" => "#b8472d",
+        "CRP" => "#e6921a",
+        "MDL" => "#2b6cb0",
+        "SMD" => "#6b46c1",
+        "BTN" => "#2f855a",
+        _     => "#888"
+    };
+}

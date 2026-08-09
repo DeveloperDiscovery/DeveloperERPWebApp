@@ -1,0 +1,36 @@
+<MudDialog Style="width:min(480px,95vw);">
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">
+            Atajos disponibles en cualquier pantalla de la aplicación.
+        </MudText>
+        <MudSimpleTable Dense="true" Hover="true">
+            <tbody>
+                @foreach (var (tecla, desc) in _atajos)
+                {
+                    <tr>
+                        <td style="width:140px;"><MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@tecla</MudChip></td>
+                        <td>@desc</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => MudDialog.Close())">Regresar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+
+    private readonly (string tecla, string desc)[] _atajos = new[]
+    {
+        ("Ctrl + K", "Enfocar el buscador del menú lateral"),
+        ("Ctrl + W", "Cerrar la pestaña activa del Workspace"),
+        ("Esc", "Cerrar el menú de usuario o el menú contextual abierto"),
+        ("Ctrl + N", "Nuevo registro (en pantallas compatibles)"),
+        ("Ctrl + S", "Guardar (en pantallas compatibles)"),
+        ("Delete", "Eliminar el registro seleccionado (en pantallas compatibles)"),
+        ("F2", "Consultar el registro seleccionado (en pantallas compatibles)"),
+    };
+}

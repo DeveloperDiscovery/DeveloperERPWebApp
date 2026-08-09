@@ -1,0 +1,128 @@
+@using GenerarModel = KONSolutions.Shared.Models.Logistica.ContenedoresAlmacenajeCasillerosGenerar
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+@* Generador de la matriz de casilleros (_CREATETALL). Es un diálogo aparte y no un botón
+   directo a propósito: la operación BORRA los casilleros que ya existan y las ubicaciones
+   que el propio generador había creado antes. *@
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.GridOn" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">Generar casilleros</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            Contenedor <b>@CodContenedor</b> · @DesContenedor
+        </MudText>
+
+        @if (string.IsNullOrWhiteSpace(CodAlmacen))
+        {
+            @* Sin almacén no hay dónde crear las ubicaciones: el generador no puede correr. *@
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                El contenedor no tiene almacén asignado. Asígnelo antes de generar los casilleros:
+                cada casillero necesita una ubicación dentro de un almacén.
+            </MudAlert>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                Se eliminarán los casilleros actuales de este contenedor y las ubicaciones que
+                se hayan creado automáticamente para ellos. Las ubicaciones cargadas a mano no
+                se tocan.
+            </MudAlert>
+
+            <MudGrid Spacing="2">
+                <MudItem xs="6">
+                    <MudNumericField T="int" @bind-Value="_filas" Label="Filas (niveles)"
+                                     Min="1" Max="200" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Disabled="_generando" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudNumericField T="int" @bind-Value="_columnas" Label="Columnas"
+                                     Min="1" Max="200" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                     Disabled="_generando" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12">
+                    <div class="d-flex align-center gap-2 mb-3" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="Color.Primary" />
+                        <MudText Typo="Typo.body2">
+                            <span>Se crearán <b>@(_filas * _columnas)</b> casilleros y otras tantas ubicaciones</span>
+                        </MudText>
+                    </div>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField T="string" Value="@_desAlmacen" Label="Almacén de las ubicaciones"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  ReadOnly="true" Disabled="true" Class="mb-3" />
+                </MudItem>
+            </MudGrid>
+        }
+
+        @if (_generando)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+            <MudText Typo="Typo.caption" Style="opacity:.6;">
+                Creando las ubicaciones una por una. Puede tardar en matrices grandes.
+            </MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => MudDialog.Cancel())" Disabled="_generando">Cancelar</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.GridOn"
+                   OnClick="Generar"
+                   Disabled="@(_generando || string.IsNullOrWhiteSpace(CodAlmacen) || _filas < 1 || _columnas < 1)">
+            Generar
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string CodContenedor { get; set; } = "";
+    [Parameter] public string DesContenedor { get; set; } = "";
+    [Parameter] public string CodAlmacen { get; set; } = "";
+    [Parameter] public string DesAlmacen { get; set; } = "";
+    /// <summary>Grilla registrada en el contenedor: se propone como valor por defecto.</summary>
+    [Parameter] public int? Filas { get; set; }
+    [Parameter] public int? Columnas { get; set; }
+
+    private int _filas = 1, _columnas = 1;
+    private bool _generando;
+
+    private string _desAlmacen => string.IsNullOrWhiteSpace(DesAlmacen) ? CodAlmacen : $"{CodAlmacen} · {DesAlmacen}";
+
+    protected override void OnInitialized()
+    {
+        _filas    = Filas    is > 0 ? Filas.Value    : 1;
+        _columnas = Columnas is > 0 ? Columnas.Value : 1;
+    }
+
+    private async Task Generar()
+    {
+        _generando = true;
+        var dto = new GenerarModel
+        {
+            COD_CONTENEDOR = CodContenedor,
+            COD_ALMACEN    = CodAlmacen,
+            NUM_FILAS      = _filas,
+            NUM_COLUMNAS   = _columnas
+        };
+        var resp = await Http.PostAsJsonAsync(ApiRoutes.Logistica.ContenedoresCasillerosGenerar, dto);
+        _generando = false;
+        if (resp.IsSuccessStatusCode)
+        {
+            Snackbar.Add($"Se generaron {_filas * _columnas} casilleros.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+        {
+            await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService,
+                nameof(ContenedorGenerarCasillerosDialog), nameof(Generar), "No se pudieron generar los casilleros");
+        }
+    }
+}

@@ -1,0 +1,131 @@
+@using TiposSucursalesModel = KONSolutions.Shared.Models.Estandar.TiposSucursales
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_SUCURSAL" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="ESTANDAR.TIPOS_SUCURSALES" Columna="COD_TIPO_SUCURSAL"
+                        @bind-Value="_model.COD_TIPO_SUCURSAL"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="ESTANDAR.TIPOS_SUCURSALES" Columna="DES_TIPO_SUCURSAL"
+                        @bind-Value="_model.DES_TIPO_SUCURSAL"
+                        Disabled="_readonly" Obligatorio="true" />
+            <MudText Typo="Typo.caption" Class="mono mt-2 mb-1" Style="opacity:.6;">Tipo de uso</MudText>
+            <MudGrid Spacing="1">
+                @foreach (var f in _flags)
+                {
+                    <MudItem xs="6" sm="4">
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@f.Icon" Size="Size.Small" Style="opacity:.6;" />
+                            <MudSwitch T="bool?" Value="@f.Get()" ValueChanged="@f.Set" Color="Color.Primary" Label="@f.Label" Disabled="_readonly" Dense="true" />
+                        </div>
+                    </MudItem>
+                }
+            </MudGrid>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposSucursalesModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposSucursalesModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private (string Icon, string Label, Func<bool?> Get, Action<bool?> Set)[] _flags => new (string, string, Func<bool?>, Action<bool?>)[]
+    {
+        (Icons.Material.Filled.Handyman,       "Servicio",             () => _model.FLG_SERVICIO,           v => _model.FLG_SERVICIO = v),
+        (Icons.Material.Filled.Factory,        "Planta",               () => _model.FLG_PLANTA,             v => _model.FLG_PLANTA = v),
+        (Icons.Material.Filled.Warehouse,      "Almacén",              () => _model.FLG_ALMACEN,            v => _model.FLG_ALMACEN = v),
+        (Icons.Material.Filled.Business,       "Administración",       () => _model.FLG_ADMINISTRACION,     v => _model.FLG_ADMINISTRACION = v),
+        (Icons.Material.Filled.Storefront,     "Tienda",               () => _model.FLG_TIENDA,             v => _model.FLG_TIENDA = v),
+        (Icons.Material.Filled.SupportAgent,   "Call center",          () => _model.FLG_CALLCENTER,         v => _model.FLG_CALLCENTER = v),
+        (Icons.Material.Filled.Code,           "Desarrollo",           () => _model.FLG_DESARROLLO,         v => _model.FLG_DESARROLLO = v),
+        (Icons.Material.Filled.Construction,   "Explotación",          () => _model.FLG_EXPLOTACION,        v => _model.FLG_EXPLOTACION = v),
+        (Icons.Material.Filled.DirectionsBoat, "Puerto",               () => _model.FLG_PUERTO,             v => _model.FLG_PUERTO = v),
+        (Icons.Material.Filled.Flight,         "Aeropuerto",           () => _model.FLG_AEROPUERTO,         v => _model.FLG_AEROPUERTO = v),
+        (Icons.Material.Filled.DirectionsBus,  "Terminal terrestre",   () => _model.FLG_TERMINAL_TERRESTRE, v => _model.FLG_TERMINAL_TERRESTRE = v),
+        (Icons.Material.Filled.LocalShipping,  "Patio de maniobras",   () => _model.FLG_PATIO_MANIOBRAS,    v => _model.FLG_PATIO_MANIOBRAS = v),
+        (Icons.Material.Filled.LocalHospital,  "Centro médico",        () => _model.FLG_CENTRO_MEDICO,      v => _model.FLG_CENTRO_MEDICO = v),
+        (Icons.Material.Filled.Hotel,          "Hotel",                () => _model.FLG_HOTEL,              v => _model.FLG_HOTEL = v),
+        (Icons.Material.Filled.Dns,            "Centro de datos",      () => _model.FLG_CENTRO_DATOS,       v => _model.FLG_CENTRO_DATOS = v),
+        (Icons.Material.Filled.Inventory,      "Centro de distribución", () => _model.FLG_CENTRO_DISTRIBUCION, v => _model.FLG_CENTRO_DISTRIBUCION = v),
+        (Icons.Material.Filled.Visibility,     "Monitoreo",            () => _model.FLG_MONITOREO,          v => _model.FLG_MONITOREO = v),
+        (Icons.Material.Filled.Agriculture,    "Fundo",                () => _model.FLG_FUNDO,              v => _model.FLG_FUNDO = v),
+        (Icons.Material.Filled.Cabin,          "Campamento",           () => _model.FLG_CAMPAMENTO,         v => _model.FLG_CAMPAMENTO = v),
+        (Icons.Material.Filled.Gavel,          "Aduana",               () => _model.FLG_ADUANA,             v => _model.FLG_ADUANA = v),
+    };
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(TiposSucursalesModel m) =>
+        _model = new TiposSucursalesModel
+        {
+            COD_TIPO_SUCURSAL      = m.COD_TIPO_SUCURSAL,
+            DES_TIPO_SUCURSAL      = m.DES_TIPO_SUCURSAL,
+            FLG_SERVICIO           = m.FLG_SERVICIO,
+            FLG_PLANTA             = m.FLG_PLANTA,
+            FLG_ALMACEN            = m.FLG_ALMACEN,
+            FLG_ADMINISTRACION     = m.FLG_ADMINISTRACION,
+            FLG_TIENDA             = m.FLG_TIENDA,
+            FLG_CALLCENTER         = m.FLG_CALLCENTER,
+            FLG_DESARROLLO         = m.FLG_DESARROLLO,
+            FLG_EXPLOTACION        = m.FLG_EXPLOTACION,
+            FLG_PUERTO             = m.FLG_PUERTO,
+            FLG_AEROPUERTO         = m.FLG_AEROPUERTO,
+            FLG_TERMINAL_TERRESTRE = m.FLG_TERMINAL_TERRESTRE,
+            FLG_PATIO_MANIOBRAS    = m.FLG_PATIO_MANIOBRAS,
+            FLG_CENTRO_MEDICO      = m.FLG_CENTRO_MEDICO,
+            FLG_HOTEL              = m.FLG_HOTEL,
+            FLG_CENTRO_DATOS       = m.FLG_CENTRO_DATOS,
+            FLG_CENTRO_DISTRIBUCION= m.FLG_CENTRO_DISTRIBUCION,
+            FLG_MONITOREO          = m.FLG_MONITOREO,
+            FLG_FUNDO              = m.FLG_FUNDO,
+            FLG_CAMPAMENTO         = m.FLG_CAMPAMENTO,
+            FLG_ADUANA             = m.FLG_ADUANA
+        };
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposSucursalesModel>($"{ApiRoutes.Estandar.TiposSucursales}/{Uri.EscapeDataString(_model.COD_TIPO_SUCURSAL)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Estandar.TiposSucursales;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_TIPO_SUCURSAL)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposSucursalesDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposSucursalesDialog), nameof(Submit));
+    }
+}

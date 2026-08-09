@@ -1,0 +1,404 @@
+@page "/produccion/procesos"
+@attribute [Authorize]
+@using ProcesosModel = KONSolutions.Shared.Models.Produccion.Procesos
+@using SubProcesosModel = KONSolutions.Shared.Models.Produccion.SubProcesos
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject ShortcutService ShortcutSvc
+@inject MenuService MenuSvc
+@implements IDisposable
+
+<PageTitle>Procesos · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Procesos" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema PRODUCCION · @_procesos.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchProceso" OnSearch="BuscarProcesos" Placeholder="Buscar proceso..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="LoadProcesos" />
+        <AccionesBotones CodAplicacion="@_codApProceso" CodOpcionAplicacion="@_codOpProceso"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderProceso" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);margin-bottom:16px;">
+    <div data-resizable-grid="procesos" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="ProcesosModel" Items="_procesosVisibles" Dense="true" Hover="true" Striped="true"
+                 RowClick="OnProcesoRowClick"
+                 RowClassFunc="@((p, i) => p.COD_PROCESO == _procesoSel?.COD_PROCESO ? "fila-seleccionada" : "")"
+                 RowStyleFunc="@((p, i) => "cursor:pointer;")"
+                 FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="90">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_PROCESO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="ProcesosModel" ItemsBase="@BaseProceso(0)" ValorDe="@(x=>x.COD_PROCESO)"
+                                            ValoresActivos="_filtrosProceso.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroProceso(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_PROCESO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_PROCESO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="ProcesosModel" ItemsBase="@BaseProceso(1)" ValorDe="@(x=>x.DES_PROCESO)"
+                                            ValoresActivos="_filtrosProceso.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroProceso(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_PROCESO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Clase de Proceso" Width="180">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Clase" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="ProcesosModel" ItemsBase="@BaseProceso(2)" ValorDe="@(x=>x.DES_CLASE_PROCESO ?? "")"
+                                            ValoresActivos="_filtrosProceso.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>FiltroProceso(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_CLASE_PROCESO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Estado" Sortable="false" Width="120">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Estado" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="ProcesosModel" ItemsBase="@BaseProceso(3)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtrosProceso.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>FiltroProceso(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrEmpty(context.Item.DES_ESTADO))
+                    {
+                        <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <div @onclick:stopPropagation="true">
+                        <AccionesBotones CodAplicacion="@_codApProceso" CodOpcionAplicacion="@_codOpProceso"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaProceso(item,b))" />
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="ProcesosModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div class="d-flex align-center gap-3 pa-3 grid-header-compacto">
+        <div class="grid-header-titulo">
+            <MudText Typo="Typo.h6">Sub-Procesos</MudText>
+            <MudText Class="mono" Style="opacity:.6;font-size:.78rem;">
+                @(_procesoSel is null ? "Ningún proceso seleccionado" : $"Proceso: {_procesoSel.COD_PROCESO} – {_procesoSel.DES_PROCESO}")
+            </MudText>
+        </div>
+        <BarraBusqueda @bind-Value="_searchSubProceso" OnSearch="@(() => Task.CompletedTask)" Placeholder="Buscar sub-proceso..." DebounceInterval="300" MaxWidth="719px" Class="grid-header-search" />
+        @if (_procesoSel is not null)
+        {
+            <div class="grid-header-divider"></div>
+            <AccionesBotones CodAplicacion="@_codApSubProceso" CodOpcionAplicacion="@_codOpSubProceso"
+                             Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderSubProceso" />
+        }
+    </div>
+    <div data-resizable-grid="sub-procesos" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="SubProcesosModel" Items="_subProcesosVisibles" Dense="true" Hover="true" Striped="true"
+                 FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="90">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_SUB_PROCESO" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="SubProcesosModel" ItemsBase="@BaseSubProceso(0)" ValorDe="@(x=>x.COD_SUB_PROCESO)"
+                                            ValoresActivos="_filtrosSubProceso.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroSubProceso(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_SUB_PROCESO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_SUB_PROCESO" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="SubProcesosModel" ItemsBase="@BaseSubProceso(1)" ValorDe="@(x=>x.DES_SUB_PROCESO)"
+                                            ValoresActivos="_filtrosSubProceso.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroSubProceso(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_SUB_PROCESO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Estado" Sortable="false" Width="120">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Estado" Activo="@(_ordenColumna == 6)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(6))" />
+                        <FiltroExcelColumna T="SubProcesosModel" ItemsBase="@BaseSubProceso(2)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtrosSubProceso.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>FiltroSubProceso(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrEmpty(context.Item.DES_ESTADO))
+                    {
+                        <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <div @onclick:stopPropagation="true">
+                        <AccionesBotones CodAplicacion="@_codApSubProceso" CodOpcionAplicacion="@_codOpSubProceso"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaSubProceso(item,b))" />
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-6 mono" Style="opacity:.5;">
+                @(_procesoSel is null ? "Seleccione un proceso arriba." : "Sin sub-procesos para este proceso.")
+            </MudText>
+        </NoRecordsContent>
+        <PagerContent><MudDataGridPager T="SubProcesosModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio0;
+    private Func<Task>? _onCambio1;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private string _codApProceso = "", _codOpProceso = "";
+    private string _codApSubProceso = "", _codOpSubProceso = "";
+
+    private void ResolverCodigosPorSeccion()
+    {
+        (_codApProceso, _codOpProceso)       = ResolverCod("Produccion/Procesos.razor");
+        (_codApSubProceso, _codOpSubProceso) = ResolverCod("Produccion/SubProcesos.razor");
+    }
+
+    private (string App, string Opcion) ResolverCod(string formulario)
+    {
+        var r = MenuSvc.BuscarCodigosPorFormulario(formulario);
+        return r is null ? (CodAplicacion, CodOpcionAplicacion) : (r.Value.CodAplicacion, r.Value.CodOpcionAplicacion);
+    }
+
+    private List<ProcesosModel> _procesos = new();
+    private List<SubProcesosModel> _subProcesos = new();
+    private ProcesosModel? _procesoSel;
+    private string _searchProceso = "";
+    private string _searchSubProceso = "";
+
+    private List<SubProcesosModel> _subProcesosBuscados =>
+        string.IsNullOrWhiteSpace(_searchSubProceso) ? _subProcesos
+        : _subProcesos.Where(t => t.COD_SUB_PROCESO.Contains(_searchSubProceso, StringComparison.OrdinalIgnoreCase)
+                               || t.DES_SUB_PROCESO.Contains(_searchSubProceso, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosProceso = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<ProcesosModel> Ordenar_g0(List<ProcesosModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_PROCESO).ToList() : items.OrderByDescending(x => x.COD_PROCESO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_PROCESO).ToList() : items.OrderByDescending(x => x.DES_PROCESO).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_CLASE_PROCESO).ToList() : items.OrderByDescending(x => x.DES_CLASE_PROCESO).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+    private List<SubProcesosModel> Ordenar_g1(List<SubProcesosModel> items) => _ordenColumna switch
+    {
+        3 => _ordenAscendente ? items.OrderBy(x => x.COD_SUB_PROCESO).ToList() : items.OrderByDescending(x => x.COD_SUB_PROCESO).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_SUB_PROCESO).ToList() : items.OrderByDescending(x => x.DES_SUB_PROCESO).ToList(),
+        6 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+    private List<ProcesosModel> _procesosVisibles => Ordenar_g0(AplicarProceso(_procesos, -1));
+    private List<ProcesosModel> BaseProceso(int col) => AplicarProceso(_procesos, col);
+    private List<ProcesosModel> AplicarProceso(List<ProcesosModel> src, int ex)
+    {
+        IEnumerable<ProcesosModel> q = src;
+        foreach (var (c, v) in _filtrosProceso)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_PROCESO)),
+                1 => q.Where(x => v.Contains(x.DES_PROCESO)),
+                2 => q.Where(x => v.Contains(x.DES_CLASE_PROCESO ?? "")),
+                3 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroProceso(int c, HashSet<string>? v) { _filtrosProceso[c] = v; StateHasChanged(); }
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosSubProceso = new();
+    private List<SubProcesosModel> _subProcesosVisibles => Ordenar_g1(AplicarSubProceso(_subProcesosBuscados, -1));
+    private List<SubProcesosModel> BaseSubProceso(int col) => AplicarSubProceso(_subProcesosBuscados, col);
+    private List<SubProcesosModel> AplicarSubProceso(List<SubProcesosModel> src, int ex)
+    {
+        IEnumerable<SubProcesosModel> q = src;
+        foreach (var (c, v) in _filtrosSubProceso)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_SUB_PROCESO)),
+                1 => q.Where(x => v.Contains(x.DES_SUB_PROCESO)),
+                2 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroSubProceso(int c, HashSet<string>? v) { _filtrosSubProceso[c] = v; StateHasChanged(); }
+
+    protected override async Task OnInitializedAsync()
+    {
+        ResolverCodigosPorSeccion();
+        await AccessLog.LogNavegacionAsync("PRODUCCION", "Procesos");
+        await LoadProcesos();
+
+        _procesoSel = _procesos.FirstOrDefault();
+        if (_procesoSel is not null) await LoadSubProcesos();
+
+        _onCambio0 = async () => await InvokeAsync(async () => { await LoadProcesos();    StateHasChanged(); });
+        Cambios.Suscribir("PRODUCCION.PROCESOS", _onCambio0);
+        _onCambio1 = async () => await InvokeAsync(async () => { await LoadSubProcesos(); StateHasChanged(); });
+        Cambios.Suscribir("PRODUCCION.SUB_PROCESOS", _onCambio1);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => AbrirProceso(null, CrudModo.Create));
+
+    private async Task LoadProcesos()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ProcesosModel>>>(ApiRoutes.Produccion.Procesos);
+            _procesos = r?.Data ?? new();
+        }
+        catch { _procesos = new(); }
+    }
+
+    private async Task LoadSubProcesos()
+    {
+        if (_procesoSel is null) { _subProcesos = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<SubProcesosModel>>>(
+                $"{ApiRoutes.Produccion.SubProcesos}?COD_PROCESO={Uri.EscapeDataString(_procesoSel.COD_PROCESO)}");
+            _subProcesos = r?.Data ?? new();
+        }
+        catch { _subProcesos = new(); }
+    }
+
+    private async Task BuscarProcesos()
+    {
+        if (string.IsNullOrWhiteSpace(_searchProceso)) { await LoadProcesos(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ProcesosModel>>>(
+                $"{ApiRoutes.Produccion.ProcesosSearch}?search={Uri.EscapeDataString(_searchProceso)}");
+            _procesos = r?.Data ?? new();
+        }
+        catch { _procesos = new(); }
+    }
+
+    private async Task OnProcesoRowClick(DataGridRowClickEventArgs<ProcesosModel> args)
+    {
+        _procesoSel = args.Item;
+        await LoadSubProcesos();
+    }
+
+    // ── Procesos ──
+    private Task OnAccionHeaderProceso(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirProceso(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaProceso(ProcesosModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirProceso(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirProceso(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirProceso(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirProceso(ProcesosModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo proceso",
+            CrudModo.Delete => $"Eliminar · {item?.DES_PROCESO}",
+            CrudModo.Read   => $"Consultar · {item?.DES_PROCESO}",
+            _               => $"Editar · {item?.DES_PROCESO}"
+        };
+        var dlg = await DialogService.ShowAsync<ProcesosDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadProcesos();
+    }
+
+    // ── Sub-Procesos ──
+    private Task OnAccionHeaderSubProceso(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirSubProceso(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaSubProceso(SubProcesosModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirSubProceso(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirSubProceso(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirSubProceso(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirSubProceso(SubProcesosModel? item, CrudModo modo)
+    {
+        if (modo == CrudModo.Create && _procesoSel is not null)
+            item = new SubProcesosModel
+            {
+                COD_PROCESO = _procesoSel.COD_PROCESO,
+                DES_PROCESO = _procesoSel.DES_PROCESO,
+                // Heredados del proceso padre — el usuario puede cambiarlos igual en el diálogo.
+                FLG_ORDEN_FABRICACION = _procesoSel.FLG_ORDEN_FABRICACION,
+                FLG_EMBALAJE_FINAL = _procesoSel.FLG_EMBALAJE_FINAL,
+                FLG_CONTROL_CALIDAD = _procesoSel.FLG_CONTROL_CALIDAD,
+            };
+
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo sub-proceso",
+            CrudModo.Delete => $"Eliminar · {item?.DES_SUB_PROCESO}",
+            CrudModo.Read   => $"Consultar · {item?.DES_SUB_PROCESO}",
+            _               => $"Editar · {item?.DES_SUB_PROCESO}"
+        };
+        var dlg = await DialogService.ShowAsync<SubProcesosDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadSubProcesos();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("PRODUCCION.PROCESOS", _onCambio0 ?? (() => Task.CompletedTask));
+        Cambios.Desuscribir("PRODUCCION.SUB_PROCESOS", _onCambio1 ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

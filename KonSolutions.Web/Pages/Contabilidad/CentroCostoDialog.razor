@@ -1,0 +1,150 @@
+@using KONSolutions.Shared.Models.Contabilidad
+@using KONSolutions.Web.Services
+@inject CatalogoService<CentroCosto, CentroCostoDto> Service
+@inject CatalogoService<TipoCentroCosto, TipoCentroCostoDto> TiposCentroCostoSvc
+@inject ISnackbar Snackbar
+
+<MudDialog Style="width:min(680px,95vw);">
+    <DialogContent>
+        @if (_error is not null)
+        {
+            <ErrorSqlBox Titulo="@_error.Titulo" Mensaje="@_error.Mensaje" Origen="@_error.Origen"
+                         ErrorNumber="@_error.ErrorNumber" ErrorProcedure="@_error.ErrorProcedure"
+                         ErrorLine="@_error.ErrorLine" SqlSentence="@_error.SqlSentence" Pagina="@_error.Pagina"
+                         OnClose="@(() => _error = null)" />
+        }
+
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="SubmitInvalido">
+            <DataAnnotationsValidator />
+            <AriaCombo TItem="CentroCosto"
+                       Items="_padres"
+                       TextFunc="@(c => $"{c.COD_CENTRO_COSTO} – {c.DES_CENTRO_COSTO}")"
+                       ValueFunc="@(c => c.COD_CENTRO_COSTO)"
+                       @bind-Value="_model.COD_CENTRO_COSTO_PADRE"
+                       Label="Centro de costo padre (vacío = raíz)" Disabled="true" />
+
+            <CampoTexto Tabla="CONTABILIDAD.CENTROS_COSTO" Columna="COD_CENTRO_COSTO"
+                        @bind-Value="_model.COD_CENTRO_COSTO" Disabled="true" />
+            <CampoTexto Tabla="CONTABILIDAD.CENTROS_COSTO" Columna="DES_CENTRO_COSTO"
+                        @bind-Value="_model.DES_CENTRO_COSTO" Disabled="_readonly" />
+
+            <AriaCombo TItem="TipoCentroCosto"
+                       Items="_tipos"
+                       TextFunc="@(t => t.DES_TIPO_CENTRO_COSTO)"
+                       ValueFunc="@(t => t.COD_TIPO_CENTRO_COSTO)"
+                       @bind-Value="_model.COD_TIPO_CENTRO_COSTO"
+                       Label="Tipo de centro de costo" Disabled="_readonly" />
+
+            <div class="d-flex align-center gap-1 mb-3">
+                <MudIcon Icon="@Icons.Material.Filled.RequestQuote" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch T="bool" Value="@(_model.FLG_GENERA_ASIENTO ?? false)" ValueChanged="@(v => _model.FLG_GENERA_ASIENTO = v)"
+                             Disabled="_readonly" Label="Genera asiento contable" Color="Color.Primary" />
+            </div>
+
+            <EstadoCombo DesTabla="CONTABILIDAD.CENTROS_COSTO"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public CentroCosto? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public List<CentroCosto> Universo { get; set; } = new();
+
+    private CentroCostoDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+    private List<TipoCentroCosto> _tipos = new();
+
+    private record ErrorMostrado(string Titulo, string Mensaje, OrigenError Origen, string Pagina,
+        int? ErrorNumber = null, string? ErrorProcedure = null, int? ErrorLine = null, string? SqlSentence = null);
+    private ErrorMostrado? _error;
+
+    /// <summary>Centros de costo elegibles como padre: todo el universo salvo el propio registro (evita auto-referencia).</summary>
+    private List<CentroCosto> _padres => Universo.Where(c => c.COD_CENTRO_COSTO != _model.COD_CENTRO_COSTO).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (Modo != CrudModo.Create && Item is not null) await RecargarDesdeShowbyidAsync();
+        _tipos = await TiposCentroCostoSvc.GetAllAsync();
+        CalcularNivel();
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de GetByIdAsync) hacia _model.</summary>
+    private void MapearDesdeModelo(CentroCosto m)
+    {
+        _model = new CentroCostoDto
+        {
+            COD_CENTRO_COSTO       = m.COD_CENTRO_COSTO,
+            DES_CENTRO_COSTO       = m.DES_CENTRO_COSTO,
+            COD_TIPO_CENTRO_COSTO  = m.COD_TIPO_CENTRO_COSTO,
+            NUM_NIVEL              = m.NUM_NIVEL,
+            COD_CENTRO_COSTO_PADRE = m.COD_CENTRO_COSTO_PADRE,
+            FLG_GENERA_ASIENTO     = m.FLG_GENERA_ASIENTO,
+            COD_TIPO_ESTADO        = m.COD_TIPO_ESTADO,
+            COD_ESTADO             = m.COD_ESTADO
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde GetByIdAsync — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_CENTRO_COSTO);
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    /// <summary>Nivel no se edita en pantalla: se deriva del padre (raíz = 0, hijo = nivel del padre + 1).</summary>
+    private void CalcularNivel()
+    {
+        var padre = Universo.FirstOrDefault(c => c.COD_CENTRO_COSTO == _model.COD_CENTRO_COSTO_PADRE);
+        _model.NUM_NIVEL = padre is null ? 0 : (padre.NUM_NIVEL ?? 0) + 1;
+    }
+
+    private Task SubmitInvalido()
+    {
+        _error = new("No se pudo completar la acción", "Revisa los campos marcados: hay datos obligatorios sin completar.",
+            OrigenError.WEB, nameof(CentroCostoDialog));
+        return Task.CompletedTask;
+    }
+
+    private async Task Submit()
+    {
+        _error = null;
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Service.EliminarDetalladoAsync(_model.COD_CENTRO_COSTO);
+            _saving = false;
+            if (rd.Ok) { Snackbar.Add("Centro de costo eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else _error = new("No se pudo eliminar el registro", rd.Msg,
+                rd.ErrorNumber.HasValue ? OrigenError.SQL : OrigenError.API, nameof(CentroCostoDialog),
+                rd.ErrorNumber, rd.ErrorProcedure, rd.ErrorLine, rd.SqlSentence);
+            return;
+        }
+        var r = await Service.GuardarDetalladoAsync(_model);
+        _saving = false;
+        if (r.Ok) { Snackbar.Add(_isEdit ? "Centro de costo actualizado." : "Centro de costo creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else _error = new("No se pudo guardar el registro", r.Msg,
+            r.ErrorNumber.HasValue ? OrigenError.SQL : OrigenError.API, nameof(CentroCostoDialog),
+            r.ErrorNumber, r.ErrorProcedure, r.ErrorLine, r.SqlSentence);
+    }
+}

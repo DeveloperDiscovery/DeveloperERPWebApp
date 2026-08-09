@@ -1,0 +1,88 @@
+@using IncotermsFasesModel = KONSolutions.Shared.Models.Comercial.IncotermsFases
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_FASE_INCOTERM" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <AriaCombo Items="_fases" TextFunc="@(t => $"{t.Texto} ({t.Id})")" ValueFunc="@(t => t.Id)"
+                         @bind-Value="_model.COD_FASE_INCOTERM" Label="Fase de incoterm"
+                         Disabled="@(!_esNuevo || _readonly)" Class="mb-3" />
+            <MudNumericField @bind-Value="_model.NUM_ORDEN_PRESENTACION" Label="Orden de presentación" Min="0"
+                              Variant="Variant.Outlined" Disabled="_readonly" Class="mb-3"
+                              Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.Person" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_VENDEDOR" Color="Color.Primary" Label="A cargo del vendedor" Disabled="_readonly" /></div>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public IncotermsFasesModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public string? CodIncotermFijo { get; set; }
+
+    private IncotermsFasesModel _model = new();
+    private List<KONSolutions.Shared.Common.ComboboxItem> _fases = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private void MapearDesdeModelo(IncotermsFasesModel m)
+    {
+        _model.COD_INCOTERM           = m.COD_INCOTERM;
+        _model.COD_FASE_INCOTERM      = m.COD_FASE_INCOTERM;
+        _model.FLG_VENDEDOR           = m.FLG_VENDEDOR;
+        _model.NUM_ORDEN_PRESENTACION = m.NUM_ORDEN_PRESENTACION;
+    }
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<IncotermsFasesModel>(
+            $"{ApiRoutes.Comercial.IncotermsFases}/{Uri.EscapeDataString(_model.COD_INCOTERM)}/{Uri.EscapeDataString(_model.COD_FASE_INCOTERM)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        else if (!string.IsNullOrEmpty(CodIncotermFijo))
+            _model.COD_INCOTERM = CodIncotermFijo;
+
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<KONSolutions.Shared.Common.ComboboxItem>>>(
+                ApiRoutes.Comercial.FasesIncotermCombobox);
+            _fases = r?.Data ?? new();
+        }
+        catch { }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Comercial.IncotermsFases;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_INCOTERM)}/{Uri.EscapeDataString(_model.COD_FASE_INCOTERM)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(IncotermsFasesDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(IncotermsFasesDialog), nameof(Submit));
+    }
+}

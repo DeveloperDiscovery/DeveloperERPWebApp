@@ -1,0 +1,91 @@
+@inject CatalogoService<TipoEstado, TipoEstadoDto> Service
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(820px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo"
+                         Descripcion="@Item?.DES_TIPO_ESTADO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <div style="display:flex;gap:16px;align-items:flex-start;">
+                <div style="flex:1;min-width:0;">
+                    <CampoTexto Tabla="ESTANDAR.TIPOS_ESTADOS" Columna="DES_TIPO_ESTADO"
+                                @bind-Value="_model.DES_TIPO_ESTADO" Disabled="_readonly" />
+                </div>
+                <div style="flex-shrink:0;padding-left:8px;border-left:1px solid rgba(0,0,0,.1);">
+                    <ImagePicker Image="_model.IMG_PICTURE" ImageChanged="@(v => _model.IMG_PICTURE = v)" Label="Imagen del tipo" />
+                </div>
+            </div>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TipoEstado? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TipoEstadoDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private bool _esNuevo;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(TipoEstado m) =>
+        _model = new TipoEstadoDto
+        {
+            COD_TIPO_ESTADO = m.COD_TIPO_ESTADO,
+            DES_TIPO_ESTADO = m.DES_TIPO_ESTADO ?? "",
+            IMG_PICTURE = m.IMG_PICTURE
+        };
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_TIPO_ESTADO?.ToString() ?? "");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.COD_TIPO_ESTADO?.ToString() ?? "");
+            _saving = false;
+            if (okd) { Snackbar.Add("Tipo de estado eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(TipoEstadoDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model, _esNuevo);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Tipo actualizado." : "Tipo creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(TipoEstadoDialog));
+    }
+}

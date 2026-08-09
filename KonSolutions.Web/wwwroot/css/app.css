@@ -1,0 +1,2443 @@
+/* Columna de expandir (HierarchyColumn) de "Tipos de Operación" en Clases de
+   Operación: se aplica sticky por CSS externo, apuntando a la primera celda de
+   cada fila, en vez de pasarle HeaderStyle/CellStyle al componente — hacerlo vía
+   parámetros del propio HierarchyColumn rompía el botón de expandir (dejaba de
+   pintarse). Así el componente se renderiza sin tocar, y el sticky se aplica
+   por fuera. */
+.grid-hierarchy-sticky .mud-table-head tr th:first-child,
+.grid-hierarchy-sticky .mud-table-body tr td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--paper, #efe9df);
+}
+
+:root {
+    --ink: #16130f;
+    --paper: #efe9df;
+    --rust: #b8472d;
+    --rust-deep: #8a3320;
+    --olive: #4a4a32;
+    --line: rgba(22,19,15,.14);
+    --tile: #ffffff;
+}
+
+html, body {
+    margin: 0;
+    font-family: 'Archivo', sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    height: 100%;
+    overflow: hidden; /* con appZoom (transform:scale), #app siempre encaja exacto en la
+                         ventana real — no debe haber scroll de página completa */
+}
+/* #app es el elemento que appZoom.js escala; toda la cadena de alturas de abajo debe
+   ser 100% (no vh), para que dependa de este contenedor y no de la ventana real. */
+#app, #app > .mud-layout {
+    height: 100%;
+}
+
+.mono { font-family: 'Spline Sans Mono', monospace; }
+
+/* Causa real del "espacio en blanco" bajo pocas filas: con FixedHeader, MudBlazor
+   fuerza la <table class="mud-table-root"> a height:100% dentro de un contenedor
+   con scroll. Cuando hay menos filas de las que caben, el navegador reparte ese
+   espacio sobrante metiéndolo dentro de UNA fila cualquiera (estirando su <td> —
+   confirmado con DevTools: una celda de 202px de alto en vez de los ~36px
+   normales), en vez de dejarlo como espacio vacío del contenedor. Forzando la
+   tabla a su alto natural, el sobrante queda en .mud-table-container (que ya
+   tiene el color de fila configurado de fondo), no estirando ninguna fila. */
+.mud-table-root {
+    height: auto !important;
+}
+
+/* Cabecera compacta de grilla: título + buscador + limpiar filtros + botones de
+   cabecera, todo en una sola fila (antes el buscador vivía en un MudToolBar aparte
+   debajo del título, ocupando una fila completa adicional). */
+.grid-header-compacto {
+    flex-wrap: wrap;
+}
+.grid-header-titulo {
+    margin-right: auto;
+    min-width: 0;
+}
+.grid-header-search {
+    flex-shrink: 0;
+    /* .aria-combo trae margin-top:16px (reserva espacio para su label flotante
+       estilo Material) — en la cabecera de grilla eso desalinea su borde superior
+       con los botones de al lado (Refrescar, etc.), que no tienen ese margen. */
+    margin-top: 0 !important;
+}
+.grid-header-divider {
+    width: 1px;
+    height: 28px;
+    background: var(--grilla-lineas, rgba(255,255,255,.15));
+    flex-shrink: 0;
+}
+
+/* Vista de fichas de Usuarios (experimento) — mismos colores de grilla configurados. */
+.usuarios-fichas {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(391px, 1fr));
+    gap: 12px;
+    padding: 12px;
+    background: var(--grilla-fila-impar, #201b17);
+}
+.usuario-ficha {
+    background: var(--grilla-fila-par, #1a1714);
+    border: 1px solid var(--grilla-lineas, rgba(255,255,255,.15));
+    border-radius: 8px;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: start;
+    gap: 4px 12px;
+    color: var(--grilla-texto, #efe9df);
+    /* Sin overflow:hidden — recortaba el ícono "Editar" (el primero de la fila de
+       acciones), cuyo ripple de MudBlazor usa márgenes negativos que sobresalen
+       ligeramente del contenedor. El texto ya no se sale del ancho de la ficha
+       gracias a overflow-wrap en .usuario-ficha-nombre/-campo, así que no hace
+       falta recortar nada a nivel de tarjeta. */
+}
+/* Foto grande (6x el tamaño normal de grilla) pegada arriba a la derecha de la ficha,
+   con el estado justo debajo — segunda columna del grid, ancho fijo al del contenido. */
+.usuario-ficha-foto-col {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+.usuario-ficha-datos {
+    grid-column: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+.usuario-ficha-titulo {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.usuario-ficha-nombre {
+    font-weight: 700;
+    font-size: .88rem;
+    overflow-wrap: break-word;
+}
+.usuario-ficha-campo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: .8rem;
+    opacity: .85;
+    min-width: 0;
+}
+.usuario-ficha-campo span {
+    min-width: 0;
+    overflow-wrap: break-word;
+}
+/* El código de usuario reutiliza el estilo de -campo (ícono de persona con el mismo
+   color que Perfil/Correo) pero un poco más chico, en fuente monoespaciada. */
+.usuario-ficha-cod {
+    font-size: .72rem;
+}
+/* Flags activos (Directorio Activo/Credenciales/Login facial/Huella): solo se
+   renderizan si están activos — sin ícono gris para los inactivos. */
+.usuario-ficha-flags {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #5c8a3c;
+}
+.usuario-ficha-acciones {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--grilla-lineas, rgba(255,255,255,.15));
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 0;
+    justify-content: flex-end;
+}
+.usuario-ficha-acciones .mud-icon-button {
+    flex-shrink: 0;
+}
+
+/* Todos los botones de cabecera de grillas (Refrescar, Limpiar filtros, Imprimir)
+   comparten la misma altura, sin importar si son MudIconButton o MudButton. */
+.grid-header-btn {
+    height: 40px !important;
+    min-height: 40px !important;
+}
+
+/* Configuración General y Configuración de Usuario: el recorte blanco detrás de
+   las etiquetas outlined (fijo en --mud-palette-surface del tema) toma el color
+   de fondo configurado (--paper) en vez del blanco por defecto. Acotado a estas
+   2 pantallas — el resto de la app sigue con el blanco fijo del tema. */
+.cfg-page-labels-paper .mud-input-label-outlined,
+.cfg-page-labels-paper .mud-input-label-outlined.mud-shrink {
+    background: var(--paper, #efe9df) !important;
+}
+
+/* Configuración General / Configuración de Usuario: todo el texto descriptivo (captions,
+   body2/body1 — no los títulos h4/h6/subtitle2) debe usar el color de texto configurado
+   (--ink / DES_FORECOLOR) en vez del gris fijo por defecto de MudBlazor. Los títulos se
+   dejan afuera a propósito porque tienen su propio color (--paper/--titulo-color). */
+.cfg-page-labels-paper .mud-typography-caption,
+.cfg-page-labels-paper .mud-typography-body1,
+.cfg-page-labels-paper .mud-typography-body2 {
+    color: var(--ink, #16130f) !important;
+}
+/* Texto ESCRITO dentro de los inputs (no solo los labels/captions de arriba) — sin esto
+   MudBlazor usa su color de texto por defecto (blanco), invisible sobre el fondo claro
+   de estas dos pantallas. */
+.cfg-page-labels-paper .mud-input input,
+.cfg-page-labels-paper .mud-input textarea,
+.cfg-page-labels-paper .mud-input-slot input,
+.cfg-page-labels-paper .mud-input-slot textarea,
+.cfg-page-labels-paper .aria-combo-box input {
+    color: var(--ink, #16130f) !important;
+}
+
+/* Botón de confirmación configurable (Configuración General → Botones de Diálogo y
+   Acciones de Cabecera): aplica a TODOS los botones de cabecera de la app —
+   filled (fondo+texto), outlined y text (solo color, sin fondo propio) — sin
+   importar qué Color de MudBlazor traigan (Primary/Secondary/Tertiary/Success/
+   Info/Warning), no solo a los que ya se tocaron uno por uno. Eliminar/peligro
+   (Error) NUNCA toma este color — se mantiene siempre rojo. Se excluyen los
+   botones que están dentro de una grilla, que siguen con el color por defecto de
+   MudBlazor. */
+.mud-button-filled.mud-button-filled-primary,
+.mud-button-filled.mud-button-filled-secondary,
+.mud-button-filled.mud-button-filled-tertiary,
+.mud-button-filled.mud-button-filled-success,
+.mud-button-filled.mud-button-filled-info,
+.mud-button-filled.mud-button-filled-warning {
+    background-color: var(--boton-backcolor, unset) !important;
+    color: var(--boton-forecolor, unset) !important;
+}
+.mud-button-outlined.mud-button-outlined-primary,
+.mud-button-outlined.mud-button-outlined-secondary,
+.mud-button-outlined.mud-button-outlined-tertiary,
+.mud-button-outlined.mud-button-outlined-success,
+.mud-button-outlined.mud-button-outlined-info,
+.mud-button-outlined.mud-button-outlined-warning,
+.mud-button-outlined.mud-button-outlined-default {
+    color: var(--boton-backcolor, unset) !important;
+    border-color: var(--boton-backcolor, unset) !important;
+}
+.mud-button-text.mud-button-text-primary,
+.mud-button-text.mud-button-text-secondary,
+.mud-button-text.mud-button-text-tertiary,
+.mud-button-text.mud-button-text-success,
+.mud-button-text.mud-button-text-info,
+.mud-button-text.mud-button-text-warning {
+    color: var(--boton-backcolor, unset) !important;
+}
+.mud-table .mud-button-filled.mud-button-filled-primary,
+.mud-table .mud-button-filled.mud-button-filled-secondary,
+.mud-table .mud-button-filled.mud-button-filled-tertiary,
+.mud-table .mud-button-filled.mud-button-filled-success,
+.mud-table .mud-button-filled.mud-button-filled-info,
+.mud-table .mud-button-filled.mud-button-filled-warning,
+.mud-table .mud-button-outlined,
+.mud-table .mud-button-text {
+    background-color: unset !important;
+    color: unset !important;
+    border-color: unset !important;
+}
+
+/* Excepción: botones de cabecera ("Nuevo") de sub-grillas anidadas dentro de un
+   ChildRowContent (ej. Comprobantes de pago / Valores afectados en Clases de
+   Operación) sí deben tomar el color estándar configurado, igual que cualquier
+   otro botón de cabecera fuera de una grilla — no son botones "de fila". */
+.mud-table .boton-header-anidado .mud-button-filled.mud-button-filled-primary,
+.mud-table .boton-header-anidado .mud-button-filled.mud-button-filled-secondary,
+.mud-table .boton-header-anidado .mud-button-filled.mud-button-filled-tertiary,
+.mud-table .boton-header-anidado .mud-button-filled.mud-button-filled-success,
+.mud-table .boton-header-anidado .mud-button-filled.mud-button-filled-info,
+.mud-table .boton-header-anidado .mud-button-filled.mud-button-filled-warning {
+    background-color: var(--boton-backcolor, unset) !important;
+    color: var(--boton-forecolor, unset) !important;
+}
+
+/* Pestañas (MudTabs) en TODA la app: barra sin fondo propio, fija (sticky) para
+   que no se vayan con el scroll del contenido de la pestaña. Inactiva y activa
+   comparten el mismo fondo/texto configurados (--paper/--ink) y negrita — la
+   única diferencia entre ambas es la cursiva de la activa. */
+.mud-tabs,
+.mud-tabs-panels {
+    background: transparent !important;
+}
+/* Cubre ambos esquemas de nombres de clase que usan las distintas versiones de
+   MudBlazor para la barra de pestañas ("toolbar" y "tabbar"), incluyendo TODOS
+   sus contenedores internos (inner/content/scroll-button) — el "relleno" en
+   blanco a la derecha de las pestañas es uno de estos contenedores sin fondo
+   propio configurado, no las pestañas mismas. */
+.mud-tabs-toolbar,
+.mud-tabs-toolbar-inner,
+.mud-tabs-toolbar-content,
+.mud-tabs-tabbar,
+.mud-tabs-tabbar-inner,
+.mud-tabs-tabbar-content,
+.mud-tabs-scroll-button {
+    background: var(--paper, #efe9df) !important;
+}
+.mud-tabs-toolbar,
+.mud-tabs-tabbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+.mud-tab {
+    background: var(--paper, #efe9df) !important;
+    color: var(--menu-back, var(--ink, #16130f)) !important;
+    font-weight: 700;
+    opacity: 1;
+    border-radius: 8px 8px 0 0 !important;
+    padding: 6px 12px !important;
+    font-size: .85rem !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 2px;
+}
+.mud-tab.mud-tab-active {
+    background: var(--menu-back, var(--ink, #16130f)) !important;
+    color: var(--menu-fore, var(--paper, #efe9df)) !important;
+    font-style: italic;
+}
+
+/* Configuración General: título fijo apilado justo encima de las pestañas fijas,
+   para que ninguno de los dos se vaya con el scroll. Altura fija (en vez de
+   depender del contenido) para que el "top" de las pestañas, más abajo, calce
+   exactamente sin superponerse. */
+.cfg-titulo-fijo {
+    position: sticky;
+    top: 0;
+    z-index: 11;
+    background: var(--paper, #efe9df) !important;
+    min-height: 84px;
+    box-sizing: border-box;
+    padding: 14px 0;
+    margin-bottom: 0 !important;
+}
+.cfg-tabs .mud-tabs-toolbar,
+.cfg-tabs .mud-tabs-tabbar {
+    top: 84px;
+}
+
+/* Iconos de los selectores de color (paleta de ConfiguracionGeneral): deben verse
+   del color del texto (--ink), no el gris apagado default de MudBlazor. */
+.color-con-swatch .mud-input-adornment-icon,
+.color-con-swatch .mud-icon-root {
+    color: var(--ink) !important;
+}
+/* Dentro de un diálogo (ej. BancoColorDialog), esos mismos íconos (paleta, copiar,
+   pegar) deben seguir el color de texto configurado para diálogos, no --ink. */
+.mud-dialog .color-con-swatch .mud-input-adornment-icon,
+.mud-dialog .color-con-swatch .mud-icon-root {
+    color: var(--dialog-fore, #16130f) !important;
+}
+
+/* Banco de Colores dentro de ColorConSwatch: aparece SOLO al hacer clic para
+   elegir un color, pegado justo debajo del picker nativo de MudBlazor (mismo
+   ancho aproximado), y se cierra junto con un clic afuera. Fondo/texto FIJOS
+   (blanco/negro), no las variables --paper/--ink del tema, para que combine
+   visualmente con la superficie blanca propia del picker nativo. */
+.cs-picker-wrap {
+    position: relative; display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+}
+.cs-banco-overlay {
+    position: fixed; inset: 0; z-index: 1250;
+}
+.cs-banco-attached {
+    position: absolute; top: calc(100% + 4px); left: 44px; right: 0; z-index: 1300;
+    max-width: 320px;
+    background: #ffffff; color: #16130f;
+    border: 1px solid rgba(0,0,0,.12); border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.3);
+    padding: .6rem .7rem;
+}
+.cs-banco-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: .7rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    opacity: .7; margin-bottom: .5rem;
+}
+.cs-banco-agregar {
+    display: flex; align-items: center; gap: .4rem; margin-bottom: .6rem;
+}
+.cs-banco-preview {
+    width: 28px; height: 28px; border-radius: 4px; border: 1px solid rgba(0,0,0,.15); flex-shrink: 0;
+}
+.cs-banco-vacio {
+    font-size: .75rem; opacity: .5; padding: .5rem 0; text-align: center;
+}
+.cs-banco-swatches {
+    display: flex; flex-wrap: wrap; gap: .4rem;
+}
+.cs-banco-sw {
+    width: 28px; height: 28px; flex: 0 0 auto; border-radius: 4px; border: 1px solid rgba(0,0,0,.15); cursor: pointer;
+}
+.cs-banco-sw.selected {
+    outline: 2px solid #1682d8; outline-offset: 1px;
+}
+/* Dentro de un diálogo (ej. BancoColorDialog), el panel del Banco de Colores
+   hereda el fondo/texto configurados para diálogos en vez del blanco/negro fijo. */
+.mud-dialog .cs-banco-attached {
+    background: var(--dialog-back, #efe9df) !important;
+    color: var(--dialog-fore, #16130f) !important;
+}
+.mud-dialog .cs-banco-preview {
+    border-color: rgba(0,0,0,.25);
+}
+
+/* Icono de lupa/limpiar de BarraBusqueda (buscador de todas las grillas): mismo
+   color que el texto que se escribe, no el gris apagado default de MudBlazor. */
+.barra-busqueda .mud-input-adornment-icon,
+.barra-busqueda .mud-icon-root {
+    color: var(--ink) !important;
+}
+/* Texto ESCRITO dentro del buscador (no solo el ícono de lupa) — MudBlazor lo deja con su
+   color de texto por defecto si no se fuerza, quedando ilegible sobre el fondo configurado. */
+.barra-busqueda input,
+.barra-busqueda .mud-input-slot,
+.barra-busqueda .mud-input-label,
+.grid-header-search input,
+.grid-header-search .mud-input-slot {
+    color: var(--ink, #16130f) !important;
+}
+/* MAYÚSCULAS/minúsculas del buscador en vivo: text-transform NO lo heredan los <input>
+   desde un ancestro (son "replaced elements"), así que BarraBusqueda.razor no puede
+   aplicarlo directo al wrapper — en cambio fija esta variable CSS ahí (las custom
+   properties sí atraviesan esa barrera) y acá se consume apuntando al <input> real. */
+.barra-busqueda input {
+    text-transform: var(--busqueda-text-transform, none);
+}
+/* Mismo criterio que arriba, para CampoTexto.razor (todos los campos de texto de formulario
+   ligados a una columna real de la BD) — evita reescribir el .value del <input>/<textarea>
+   por un cambio de MAYÚSCULAS/minúsculas mientras el usuario edita a mitad de la cadena
+   (eso era lo que le hacía perder el cursor y saltar al final). */
+.campo-texto-mt input, .campo-texto-mt textarea {
+    text-transform: var(--campo-texto-transform, none);
+}
+/* Ícono de borrar (papelera) de CampoTexto.razor/CampoTextoEstable.razor — en rojo, para
+   diferenciarlo de un botón de acción normal (MudBlazor lo deja con el color de texto
+   default por defecto). Cubre los nombres de clase que usa MudBlazor para el botón nativo
+   "Clearable" según la versión instalada. */
+.campo-texto-mt .mud-input-clear-button,
+.campo-texto-mt .mud-input-clear-button .mud-icon-root,
+.campo-texto-mt .mud-icon-button-clear-button .mud-icon-root {
+    color: #d32f2f !important;
+}
+
+/* ── Filtro estándar de columna (FiltroExcelColumna): buscador y lista de valores con
+   el color de la grilla. La fuente/tamaño NO se fuerza acá — FiltroExcelColumna.razor
+   la lee en tiempo real de la primera celda de la grilla (JS) y la aplica inline con
+   !important, para que quede visualmente idéntica a la grilla sin importar la config. ── */
+.filtro-excel-col .filtro-excel-buscar input,
+.filtro-excel-col .filtro-excel-buscar .mud-input-label {
+    color: var(--grilla-texto, #efe9df) !important;
+}
+.filtro-excel-col span,
+.filtro-excel-col .mud-checkbox svg.mud-icon-root {
+    color: var(--grilla-texto, #efe9df) !important;
+}
+
+/* Cabecera del Workspace ("N favoritos" + iconos de vista/zoom): mismo color
+   que los subtítulos (--subtitulo-color), no el gris apagado default de MudBlazor. */
+.ws-header-actions .mud-icon-root {
+    color: var(--subtitulo-color, #6b6358) !important;
+}
+
+h1,h2,h3,h4,h5,h6,
+.mud-typography-h4,.mud-typography-h5,.mud-typography-h6 {
+    font-family: 'Archivo', sans-serif;
+    font-weight: 800;
+    letter-spacing: -.02em;
+}
+
+/* Pantalla de arranque */
+.boot {
+    position: fixed; inset: 0;
+    background: var(--ink);
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+}
+.boot-grid {
+    position: absolute; inset: 0;
+    background-image:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 32px 32px;
+    opacity: .15;
+    animation: drift 8s linear infinite;
+}
+@keyframes drift { to { background-position: 32px 32px; } }
+.boot-text {
+    position: relative;
+    font-weight: 800; font-size: 2.4rem; letter-spacing: .35em;
+    color: var(--paper);
+}
+.boot-text span { color: var(--rust); }
+
+/* Tiles de favoritos */
+.fav-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 1rem;
+}
+.fav-tile {
+    position: relative;
+    aspect-ratio: 1;
+    background: var(--tile);
+    border: none;
+    border-radius: 2px;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: .8rem;
+    cursor: pointer;
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s;
+    user-select: none;
+}
+.fav-tile:hover {
+    transform: translateY(-3px);
+    box-shadow: 6px 6px 0 var(--env-back, var(--ink));
+    border-color: var(--env-back, var(--ink));
+}
+.fav-tile::before {
+    content: ""; position: absolute; top: 8px; left: 8px;
+    width: 6px; height: 6px; background: var(--rust); border-radius: 50%;
+}
+.fav-tile .ico { font-size: 2.4rem; color: var(--olive); }
+.fav-tile .lbl {
+    font-size: .82rem; font-weight: 600; text-align: center;
+    padding: 0 .6rem; line-height: 1.2;
+    color: var(--env-back, var(--ink));
+}
+
+/* Tile vacío (placeholder) */
+.fav-empty {
+    border: 1px dashed var(--line);
+    border-radius: 2px;
+    aspect-ratio: 1;
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(22,19,15,.35); font-size: .8rem; text-align: center;
+    padding: 1rem;
+}
+
+/* ── Workspace: grupos de aplicación ── */
+.ws-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 200px; border: 1px dashed var(--line); border-radius: 4px;
+    color: rgba(22,19,15,.4); gap: .5rem;
+}
+.ws-grupos {
+    display: flex; flex-direction: column; gap: 1.5rem;
+}
+.ws-grupos--h {
+    flex-direction: row; flex-wrap: wrap; align-items: flex-start;
+}
+.ws-grupos--h .ws-app-card {
+    flex: 1 1 320px; max-width: 480px;
+}
+.ws-app-card {
+    border: 1px solid var(--line); border-radius: 4px;
+    /* Sin overflow:hidden: con el zoom propio de la app (CSS zoom) el alto real
+       de .ws-tiles varía por redondeo de píxeles según el nivel de zoom, y recortar
+       aquí cortaba la última fila de tiles. El radio de esquina se logra solo en el
+       header (ver .ws-app-header), que es el único elemento que necesita esquinas. */
+}
+.ws-app-header {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .6rem 1rem;
+    background: var(--ink); color: var(--paper);
+    font-weight: 700; font-size: .9rem;
+    border-top-left-radius: 4px; border-top-right-radius: 4px;
+}
+.ws-app-ico { width: 28px; height: 28px; object-fit: contain; border-radius: 3px; }
+.ws-app-ico-mud { font-size: 1.6rem !important; color: var(--paper) !important; }
+.ws-app-nombre { letter-spacing: .04em; }
+.ws-seccion-header {
+    display: flex; align-items: center; gap: .4rem;
+    padding: .5rem 1rem 0; margin-top: .25rem;
+    font-size: .72rem; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; opacity: .55;
+}
+.ws-tiles {
+    /* Grid en vez de flex-wrap: con flex-wrap el ancho variable de cada fila hacía
+       que las columnas no quedaran alineadas y, con la forma hexagonal (punta
+       arriba/abajo), las filas se pisaban entre sí. Con grid cada tile ocupa una
+       celda de ancho fijo, en columnas prolijas, con más separación vertical para
+       que las puntas de una fila no toquen las de la fila siguiente. */
+    display: grid;
+    /* minmax(100px,140px): cada columna mide como mucho 140px, así el tile nunca
+       crece más que eso — sin este tope, en un contenedor ancho sin límite (ej. el
+       Workspace en su layout vertical, sin el modificador --h que sí acota el
+       ancho de .ws-app-card) con pocos tiles por grupo, "1fr" repartía TODO el
+       ancho disponible entre 2-3 columnas y el hexágono salía gigante. Con el tope
+       fijo, en vez de agrandar el tile lo que crece es la CANTIDAD de columnas. */
+    grid-template-columns: repeat(auto-fill, minmax(100px, 140px));
+    justify-items: center;
+    gap: 1.6rem 1rem;
+    padding: 1rem; min-height: 110px;
+}
+.ws-tile {
+    width: 100%; max-width: 140px; aspect-ratio: 116 / 128;
+    background: var(--tile); border: none;
+    /* Hexágono (punta arriba/abajo) en vez de tarjeta rectangular — mismo estilo
+       que las burbujas del Menú Circular. Alto/ancho y padding-top/bottom se
+       agrandaron un poco respecto al rectángulo original para que el ícono y la
+       etiqueta no queden pegados a las puntas recortadas. */
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    padding: 1.1rem .5rem;
+    box-sizing: border-box;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: .5rem; cursor: pointer;
+    transition: transform .12s ease, filter .12s ease;
+    user-select: none;
+}
+.ws-tile:hover {
+    transform: translateY(-3px) scale(1.03);
+    filter: brightness(1.08);
+}
+.ws-tile--dragging { opacity: .4; }
+/* Al hacer clic en un tile (Menú de Tiles y Workspace), gira 1 vuelta completa
+   mientras "carga" la opción — .5s por cada medio giro (1s total), igual al
+   Task.Delay que espera antes de abrir la pestaña (ver MenuTilesPage.AbrirOpcion /
+   Workspace.AbrirTile). */
+@keyframes ws-tile-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.ws-tile-spin { animation: ws-tile-spin 1s linear; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .ws-tile-spin { animation: none; } }
+.ws-tile-ico { width: 36px; height: 36px; object-fit: contain; }
+.ws-tile-ico-mud { font-size: 2.2rem !important; color: inherit !important; }
+.ws-tile-lbl {
+    font-size: .75rem; font-weight: 600; text-align: center;
+    padding: 0 .4rem; line-height: 1.2;
+    /* Hereda el color configurado en tile.ForeColor (inline style en .ws-tile) —
+       antes lo pisaba con var(--env-back, var(--ink)), por eso el texto salía
+       azul/oscuro en vez del blanco configurado. */
+    color: inherit;
+}
+
+/* Menú de Tiles (MenuTilesPage): tarjetas más angostas (320-480px) que el Workspace
+   sin restricción de ancho — ahí SÍ queremos 3 columnas fijas siempre, aunque el
+   tile deba encogerse un poco, en vez del tope de tamaño de .ws-tile (pensado para
+   que el Workspace, sin límite de ancho, no infle el hexágono quitándole columnas). */
+.ws-menutiles .ws-tiles { grid-template-columns: repeat(3, 1fr); }
+.ws-menutiles .ws-tile  { max-width: none; }
+
+/* Menú contextual propio — colores configurables (Configuración General →
+   Entorno y navegación → Menú contextual), en vez de fijos. */
+.ctx-menu {
+    position: fixed; z-index: 3000;
+    background: var(--menu-back, var(--ink)); color: var(--menu-fore, var(--paper));
+    border-radius: 2px; padding: .3rem;
+    box-shadow: 4px 4px 0 rgba(0,0,0,.3);
+    min-width: 190px;
+}
+.ctx-item {
+    padding: .55rem .8rem; font-size: .85rem; cursor: pointer;
+    display: flex; align-items: center; gap: .6rem;
+    border-radius: 2px;
+    color: var(--menu-fore, var(--paper));
+}
+.ctx-item:hover { background: var(--rust); }
+
+/* Menú contextual de favoritos del sidebar (MudListItem): fuerza que el ícono
+   tome el mismo color que el texto, sin importar el color por defecto que
+   MudBlazor aplique internamente al ícono del MudListItem. */
+.ctx-fav-item, .ctx-fav-item .mud-icon-root {
+    color: var(--env-fore, #fff) !important;
+}
+
+#blazor-error-ui {
+    display: none; position: fixed; bottom: 0; left: 0; right: 0;
+    padding: .8rem 1.2rem; background: var(--rust-deep); color: #fff; z-index: 4000;
+}
+#blazor-error-ui .reload, #blazor-error-ui .dismiss { color: #fff; margin-left: 1rem; cursor: pointer; }
+
+/* ───────────── Pestañas internas del workspace (estilo ERP) ───────────── */
+.ws-tabs-host {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;      /* crítico en flex: permite que el hijo con scroll no se desborde */
+    overflow: hidden;   /* el scroll lo maneja .ws-tab-content, no la página */
+    background-image: var(--workspace-bg-image, none);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+/* Fila contenedora: la barra de pestañas (con scroll horizontal propio) + el botón
+   selector "▼" siempre visible, fuera del área que hace scroll — igual idea que el
+   desplegable de queries abiertos en SQL Server Management Studio. */
+.ws-tabbar-row {
+    display: flex;
+    align-items: stretch;
+    margin-bottom: 1rem;
+    border-bottom: 2px solid var(--line, #e0e0e0);
+    /* Los diálogos ahora se ocultan/muestran por pestaña vía workspaceDialogScope.js
+       (display:none en el contenedor cuando no pertenecen a la pestaña activa), así
+       que ya no hace falta pelear por z-index contra el diálogo de OTRA pestaña — solo
+       queda por debajo del diálogo de su PROPIA pestaña, que es el z-index por defecto
+       de MudBlazor (mayor que cualquier contenido normal de la página). */
+    position: relative;
+}
+.ws-tabbar-row .ws-tabbar { margin-bottom: 0; border-bottom: none; flex: 1; min-width: 0; }
+.ws-tabbar-overflow-btn {
+    flex-shrink: 0; align-self: center; opacity: .85; margin-left: 4px;
+    padding-left: 6px; border-left: 1px solid var(--line, rgba(255,255,255,.2));
+}
+.ws-tabbar-overflow-btn .mud-button-root {
+    width: 32px; height: 32px; border-radius: 6px;
+    background: rgba(255,255,255,.06);
+}
+.ws-tabbar-overflow-btn .mud-icon-root {
+    color: var(--env-fore, var(--ink, #16130f)) !important;
+    fill: var(--env-fore, var(--ink, #16130f)) !important;
+    width: 22px !important; height: 22px !important;
+}
+.ws-tabbar-overflow-btn:hover { opacity: 1; }
+.ws-tabbar-overflow-btn .mud-button-root:hover { background: rgba(255,255,255,.14); }
+
+/* Menú de pestañas ocultas: mismos colores que el menú contextual (--menu-back/--menu-fore),
+   en vez del blanco/negro por defecto de MudBlazor. */
+.ws-tabbar-overflow-popover,
+.ws-tabbar-overflow-popover .mud-list {
+    background: var(--menu-back, var(--ink, #16130f)) !important;
+    color: var(--menu-fore, var(--paper, #efe9df)) !important;
+    border-radius: 2px !important;
+    box-shadow: 4px 4px 0 rgba(0,0,0,.3) !important;
+}
+.ws-tabbar-overflow-popover .mud-list-item,
+.ws-tabbar-overflow-popover .mud-list-item * {
+    color: var(--menu-fore, var(--paper, #efe9df)) !important;
+}
+.ws-tabbar-overflow-popover .mud-list-item:hover {
+    background: var(--rust, #b8472d) !important;
+}
+
+/* Menú contextual (clic derecho) del TreeList de Especificaciones/Ítems Técnicos:
+   mismos colores configurados en "Menú Contextual" (--menu-back/--menu-fore). */
+.tl-context-menu,
+.tl-context-menu .mud-list {
+    background: var(--menu-back, var(--ink, #16130f)) !important;
+    color: var(--menu-fore, var(--paper, #efe9df)) !important;
+    border-radius: 2px !important;
+    box-shadow: 4px 4px 0 rgba(0,0,0,.3) !important;
+}
+.tl-context-menu .mud-list-item,
+.tl-context-menu .mud-list-item * {
+    color: var(--menu-fore, var(--paper, #efe9df)) !important;
+}
+.tl-context-menu .mud-list-item:hover {
+    background: var(--rust, #b8472d) !important;
+}
+/* MudMenu no reutiliza las clases que ya cubre la regla global de --control-size (usa su
+   propio wrapper de ítem), así que se fija acá directo. */
+.ws-tabbar-overflow-popover,
+.ws-tabbar-overflow-popover * {
+    font-size: var(--control-size, 14px) !important;
+}
+.ws-tabbar-overflow-item { display: block; white-space: nowrap; }
+.ws-tabbar-overflow-item-active { font-weight: 700; }
+
+.ws-tabbar {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    border-bottom: 2px solid var(--line, #e0e0e0);
+    margin-bottom: 1rem;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    min-height: 40px;
+    height: 48px;
+    flex-shrink: 0;         /* nunca se comprime ni se desplaza */
+    z-index: 20;
+    background: transparent;
+    padding: 4px 0;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0,0,0,.18) transparent;
+}
+.ws-tabbar::-webkit-scrollbar { height: 4px; }
+.ws-tabbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); border-radius: 2px; }
+
+.ws-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    border: 1px solid var(--line, rgba(0,0,0,.12));
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    background: var(--paper, #efe9df);
+    white-space: nowrap;
+    font-size: .85rem;
+    color: var(--menu-back, var(--ink, #16130f));
+    font-weight: 700;
+    transition: background .15s, color .15s;
+    position: relative;
+    top: 2px;
+    user-select: none;
+}
+
+.ws-tab:hover { background: rgba(0,0,0,.04); }
+
+.ws-tab-active:hover {
+    background: var(--menu-back, var(--ink, #16130f));
+    color: var(--menu-fore, var(--paper, #efe9df));
+    font-style: normal;
+}
+.ws-tab-active {
+    background: var(--menu-back, var(--ink, #16130f));
+    border-bottom: 2px solid var(--menu-fore, var(--paper, #efe9df));
+    font-weight: 600;
+    font-style: italic;
+    color: var(--menu-fore, var(--paper, #efe9df));
+}
+
+.ws-tab-icon { opacity: .8; color: inherit; }
+.ws-tab-icon svg { color: inherit; fill: currentColor; }
+.ws-tab-icon-img { width: 18px; height: 18px; object-fit: contain; flex-shrink: 0; border-radius: 3px; }
+.ws-tab-title { line-height: 1; }
+
+.ws-tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    width: 18px; height: 18px;
+    opacity: .5;
+    transition: opacity .15s, background .15s;
+}
+.ws-tab-close:hover { opacity: 1; background: rgba(0,0,0,.12); }
+
+/* El contenido de la pestaña activa se ajusta a su alto real (no fuerza llenar todo
+   el espacio disponible); solo aparece scroll cuando el contenido excede ese espacio. */
+.ws-tab-content {
+    width: 100%;
+    /* flex:1 (no 0 1 auto): el contenedor SIEMPRE llena el alto disponible de
+       .ws-tabs-host, en vez de ajustarse solo a su contenido. Antes, páginas que
+       necesitaban ocupar toda la altura (grillas, treeviews) tenían que adivinar
+       un calc(100vh - Npx) que nunca calzaba exactamente y dejaba un hueco al
+       final; ahora basta con height:100% en la raíz de la página. Para páginas
+       cortas (formularios simples) esto no cambia nada visible: si el contenido
+       no llena el alto, el espacio de sobra queda transparente debajo, igual que
+       antes con max-height.
+    */
+    flex: 1 1 auto;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;          /* crítico en flex para que el scroll interno funcione */
+}
+
+/* Efecto de aparición al activar una pestaña (cambiar de display:none a block
+   reinicia la animación cada vez, sin necesidad de JS) — crece desde su propio
+   centro, igual que los diálogos (ver .mud-dialog-open más abajo). */
+.ws-tab-pane {
+    transform-origin: center center;
+    animation: ws-tab-fade-in .3s cubic-bezier(.2,.7,.3,1);
+}
+@keyframes ws-tab-fade-in {
+    from { opacity: 0; transform: scale(.7); }
+    to   { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ws-tab-pane { animation: none; }
+}
+
+/* ── Split panel ─────────────────────────────────────────────────────────── */
+.ws-split-container {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+.ws-split-horizontal { flex-direction: column; }
+.ws-split-vertical   { flex-direction: row; }
+
+.ws-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1 1 0;
+    min-height: 0;
+    min-width: 0;
+}
+
+/* Divisor arrastrable */
+.ws-split-handle {
+    background: #3a3330;
+    flex: 0 0 5px;
+    cursor: row-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .15s;
+    user-select: none;
+    z-index: 10;
+}
+.ws-split-handle:hover, .ws-split-handle.ws-dragging { background: #c8a97e; }
+.ws-split-handle-v { cursor: col-resize; flex-direction: column; }
+.ws-split-handle-h { cursor: row-resize; }
+
+.ws-split-handle-grip {
+    background: rgba(255,255,255,.3);
+    border-radius: 2px;
+}
+.ws-split-handle-h .ws-split-handle-grip { width: 32px; height: 3px; }
+.ws-split-handle-v .ws-split-handle-grip { width: 3px; height: 32px; }
+
+/* Botón mover tab al otro panel */
+.ws-tab-split-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    width: 18px; height: 18px;
+    opacity: .4;
+    transition: opacity .15s, background .15s;
+    margin-left: 2px;
+}
+.ws-tab-split-btn:hover { opacity: 1; background: rgba(0,0,0,.12); }
+
+/* Botón cambiar dirección split (en la tabbar) */
+.ws-tab-split-dir-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    padding: 2px 4px;
+    margin-left: auto;
+    opacity: .5;
+    cursor: pointer;
+    transition: opacity .15s, background .15s;
+}
+.ws-tab-split-dir-btn:hover { opacity: 1; background: rgba(255,255,255,.08); }
+
+/* ── Tamaño de iconos de acción en grillas (punto 4: TODAS las grillas) ── */
+.mud-table-cell .mud-icon-button .mud-icon-root,
+.mud-table-cell .mud-icon-root,
+.mud-table-cell button .mud-icon-root,
+td.mud-table-cell .mud-icon-root,
+.mud-table-container .mud-table-cell .mud-icon-root {
+    width: var(--icono-grilla-ancho, 20px) !important;
+    height: var(--icono-grilla-alto, 20px) !important;
+    font-size: var(--icono-grilla-ancho, 20px) !important;
+}
+
+/* ── Tamaño de fuente de la grilla: por defecto toma el de Controles (Configuración
+   General → Controles → Tamaño (px)), pero si se configuran --grilla-cab-fontsize /
+   --grilla-fila-fontsize (Configuración General → Colores de la grilla → Alto y
+   tamaño de fuente), esos valores mandan por separado para cabecera y filas. ── */
+.mud-table-root .mud-table-head th,
+.mud-table-root .mud-table-head .mud-table-cell {
+    font-size: var(--grilla-cab-fontsize, var(--control-size, 14px)) !important;
+}
+.mud-table-root .mud-table-body .mud-table-cell {
+    font-size: var(--grilla-fila-fontsize, var(--control-size, 14px)) !important;
+}
+
+/* ── Alto de fila/cabecera: independiente del tamaño de fuente.
+   Se fuerza con height + min-height a la vez porque MudBlazor trae su propio alto
+   fijo para el modo Dense con especificidad/orden que le ganaba a un solo "height".
+   Especificidad reforzada repitiendo la clase de fila/celda (cada repetición cuenta
+   para el cálculo de especificidad CSS) y anteponiendo "html body". ── */
+html body .mud-table-root .mud-table-head th,
+html body .mud-table-root .mud-table-head .mud-table-cell.mud-table-cell,
+html body .mud-table-root .mud-table-head tr.mud-table-row.mud-table-row {
+    height: var(--grilla-cab-alto, auto) !important;
+    min-height: var(--grilla-cab-alto, auto) !important;
+}
+html body .mud-table-root .mud-table-body .mud-table-row.mud-table-row.mud-table-row,
+html body .mud-table-root .mud-table-body .mud-table-row td.mud-table-cell.mud-table-cell {
+    height: var(--grilla-fila-alto, auto) !important;
+    min-height: var(--grilla-fila-alto, auto) !important;
+}
+
+/* ── Colores de la grilla (punto 8) ── */
+.mud-table-root .mud-table-head th,
+.mud-table-root .mud-table-head .mud-table-cell {
+    background-color: var(--grilla-cab-fondo, #2b2622) !important;
+    color: var(--grilla-cab-texto, #fff) !important;
+    border-color: var(--grilla-lineas, rgba(255,255,255,.15)) !important;
+}
+
+/* Tablas simples (MudSimpleTable, ej. "Documentos vinculados"): mismo esquema de
+   colores que las grillas normales, ya que MudSimpleTable no emite las clases
+   .mud-table-root/.mud-table-head/.mud-table-body que cubren las reglas de arriba. */
+.grilla-simple {
+    background: var(--grilla-fila-par, #1a1714) !important;
+}
+.grilla-simple th {
+    background-color: var(--grilla-cab-fondo, #2b2622) !important;
+    color: var(--grilla-cab-texto, #fff) !important;
+    border-color: var(--grilla-lineas, rgba(255,255,255,.15)) !important;
+}
+.grilla-simple tbody tr:nth-of-type(even) td {
+    background-color: var(--grilla-fila-par, #1a1714) !important;
+}
+.grilla-simple tbody tr:nth-of-type(odd) td {
+    background-color: var(--grilla-fila-impar, #201b17) !important;
+}
+.grilla-simple td {
+    color: var(--grilla-texto, #efe9df) !important;
+    border-color: var(--grilla-lineas, rgba(255,255,255,.15)) !important;
+}
+.grilla-simple tr.fila-foco td {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+}
+.mud-table-root .mud-table-body .mud-table-row:nth-of-type(even),
+.mud-table-root .mud-table-body .mud-table-row.mud-table-row-hover:nth-of-type(even) {
+    background-color: var(--grilla-fila-par, #1a1714) !important;
+}
+.mud-table-root .mud-table-body .mud-table-row:nth-of-type(odd),
+.mud-table-root .mud-table-body .mud-table-row.mud-table-row-hover:nth-of-type(odd) {
+    background-color: var(--grilla-fila-impar, #201b17) !important;
+}
+.mud-table-root .mud-table-body .mud-table-cell {
+    color: var(--grilla-texto, #efe9df) !important;
+    border-color: var(--grilla-lineas, rgba(255,255,255,.15)) !important;
+}
+/* Fondo del contenedor de la fila "Sin registros." (NoRecordsContent) y del
+   .mud-table-body en general — SOLO el contenedor mismo, sin comodines "*" hacia
+   sus hijos (esos comodines terminaron pisando el estado hover/selección de las
+   filas reales, poniéndolas todas en el color de foco a la vez). */
+.mud-table-root .mud-table-body {
+    background-color: var(--grilla-fila-par, #1a1714) !important;
+}
+/* OJO: .mud-table-container es PADRE de <table class="mud-table-root">, no su
+   descendiente — confirmado con DevTools. ".mud-table-root .mud-table-container"
+   nunca podía coincidir con nada. El ancestro real es ".mud-table" (la clase del
+   div más exterior que envuelve container + table + pagination). */
+.mud-table .mud-table-container {
+    background-color: var(--grilla-fila-par, #1a1714) !important;
+}
+/* Texto de "Sin registros."/"Sin usuarios para mostrar." (NoRecordsContent):
+   siempre se escribe en el código como MudText Style="opacity:.5" (o similar),
+   sin color propio — ahora toma el color de texto configurado en vez del gris
+   por defecto de MudBlazor. */
+.mud-table-root .mud-table-body [style*="opacity"] {
+    color: var(--grilla-texto, #efe9df) !important;
+}
+/* Fila de "Sin registros." real: confirmado en el código fuente de MudBlazor
+   (MudDataGrid.razor) que se renderiza como <tr><th colspan="1000"
+   class="mud-table-empty-row"> — un <th> (celda de ENCABEZADO), no un <td>. Por
+   eso ninguna regla de .mud-table-body/-container la alcanzaba: no es una celda
+   de cuerpo. Con esto sí toma el color de fila configurado. */
+.mud-table-root .mud-table-empty-row {
+    background-color: var(--grilla-fila-par, #1a1714) !important;
+    color: var(--grilla-texto, #efe9df) !important;
+}
+
+/* ── Separación vertical entre columnas (estándar en todas las grillas) ──
+   Borde derecho en cada celda, tanto de cabecera como de cuerpo;
+   se quita en la última columna de cada fila para no duplicar el borde externo. */
+.mud-table-root .mud-table-head th,
+.mud-table-root .mud-table-head .mud-table-cell {
+    border-right: 1px solid var(--grilla-lineas, rgba(255,255,255,.15));
+}
+.mud-table-root .mud-table-body .mud-table-cell {
+    border-right: 1px solid var(--grilla-lineas, rgba(255,255,255,.15));
+}
+/* Íconos de acciones (columna "Acciones") sin color semántico propio (ej. "Ver"):
+   heredan el color de texto de su propia fila/estado (normal, foco o seleccionada)
+   en vez del gris/negro por defecto de MudBlazor, así siempre contrastan contra el
+   fondo de esa fila. Especificidad baja a propósito: los íconos con color semántico
+   (Warning/Error/etc., con su propia clase) siguen ganando por especificidad. */
+.mud-table-root .mud-table-body .mud-table-cell .mud-icon-root {
+    color: inherit;
+}
+
+.mud-table-root .mud-table-head th:last-child,
+.mud-table-root .mud-table-head .mud-table-cell:last-child,
+.mud-table-root .mud-table-body .mud-table-cell:last-child {
+    border-right: none;
+}
+
+/* ── Fila seleccionada en grillas maestro-detalle (punto 6) ──
+   El selector de la celda usa la misma especificidad que la regla base de
+   color de celda (.mud-table-root .mud-table-body .mud-table-cell) — con "td"
+   suelto perdía el empate de especificidad aunque ambas reglas tengan
+   !important, y el texto se quedaba con el color normal de la grilla en vez
+   del color de foco configurado. */
+.mud-table-row.fila-seleccionada,
+.mud-table-root .mud-table-body .mud-table-row.fila-seleccionada .mud-table-cell {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+    font-family: var(--foco-fuente, inherit) !important;
+    font-weight: 600;
+}
+
+/* ── Colores de tipografía (punto 14) ── */
+h1, h2, h3, .mud-typography-h4, .mud-typography-h5, .mud-typography-h6 {
+    color: var(--titulo-color, #16130f);
+}
+.mud-typography-subtitle1, .mud-typography-subtitle2 {
+    color: var(--subtitulo-color, #6b6358);
+}
+
+/* ── Hover de fila con el color de foco configurado (sin necesidad de clic/teclado) ──
+   Se apaga mientras se navega con el teclado (body.nav-teclado, ver index.html).
+   El motivo: el navegador mantiene :hover en la fila donde quedó el puntero hasta que el
+   mouse se mueva de nuevo. Sin esto, al pasar el mouse por una fila y seguir con las flechas
+   quedaban DOS filas resaltadas —la del puntero y la del teclado— y no se distinguía cuál
+   estaba realmente seleccionada. La clase se saca sola al primer movimiento del mouse. */
+body:not(.nav-teclado) .mud-table-row:hover,
+body:not(.nav-teclado) .mud-table-root .mud-table-body .mud-table-row:hover .mud-table-cell {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+}
+/* Evitar que el hover se aplique a la fila/celdas de cabecera. Especificidad alta
+   a propósito: MudBlazor aplica su propio color de hover al th/celda de cabecera
+   (sortable-column-header) con una regla que empataba con la anterior. */
+.mud-table-container .mud-table-head .mud-table-row:hover,
+.mud-table-container .mud-table-head .mud-table-row:hover .mud-table-cell,
+.mud-table-container .mud-table-head th:hover,
+.mud-table-container .mud-table-head .mud-table-cell:hover,
+.mud-table-container .mud-table-head .sortable-column-header:hover,
+.mud-table-container .mud-table-head tr:hover th,
+.mud-table-container .mud-table-head tr:hover .mud-table-cell {
+    background-color: var(--grilla-cab-fondo, #2b2622) !important;
+    color: var(--grilla-cab-texto, #fff) !important;
+}
+
+/* ── Fila con foco / seleccionada (puntos 17 y 19) ── */
+.mud-table-row.fila-foco,
+.mud-table-root .mud-table-body .mud-table-row.fila-foco .mud-table-cell,
+/* Foco real del DOM (navegación con flechas por index.html) en páginas que no marcan
+   "fila-foco" por su cuenta — mismo look, sin depender de que la página lo implemente. */
+.mud-table-row:focus,
+.mud-table-root .mud-table-body .mud-table-row:focus .mud-table-cell {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+    font-family: var(--foco-fuente, inherit) !important;
+    outline: none;
+}
+
+/* ── Navegación de grilla con teclado (flechas + Enter) ──
+   Misma apariencia que .fila-foco — aplica a filas de MudDataGrid marcadas
+   dinámicamente vía JS (gridKeyNav) según RowStyleFunc en cada página. */
+.gridkeynav-row.gridkeynav-focused,
+.mud-table-root .mud-table-body .gridkeynav-row.gridkeynav-focused .mud-table-cell {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+    font-family: var(--foco-fuente, inherit) !important;
+}
+
+/* ── Color configurable de íconos de acción (Configuración General → DES_ICONCOLOR_ACTIONS).
+   Especificidad alta a propósito ("html body" + repetición) para ganarle al hover/foco de
+   fila de arriba, que fuerza "color" con !important sobre la celda (ancestro del ícono). ── */
+html body .icono-accion-color.mud-icon-root,
+html body .mud-table-row:hover .icono-accion-color.mud-icon-root,
+html body .mud-table-row.fila-foco .icono-accion-color.mud-icon-root,
+html body .gridkeynav-row.gridkeynav-focused .icono-accion-color.mud-icon-root {
+    color: var(--icono-acciones-color) !important;
+}
+
+/* ── Oculta el ícono de expandir sub-tabla (HierarchyColumn) en filas donde no aplica ── */
+.mud-table-row.sin-subtabla .mud-table-cell:first-child button {
+    visibility: hidden;
+}
+/* Contenedor de grilla enfocable — quita el outline azul nativo del navegador */
+.gridkeynav-container { outline: none; }
+.gridkeynav-container:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--foco-fondo, #b8472d);
+}
+
+/* ── Pantalla de bloqueo por inactividad (punto 15) ── */
+.pantalla-bloqueo {
+    position: fixed;
+    inset: 0;
+    /* Por encima de TODO, incluyendo la barra de pestañas del Workspace (que se subió a
+       z-index:20000 para que reciba clicks por encima del fondo de los diálogos) — sin
+       esto, la pantalla de bloqueo quedaba tapada por esa barra. */
+    z-index: 30000;
+    background: linear-gradient(135deg, #1c1917 0%, #2b2622 100%);
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    gap: 2rem;
+}
+.pantalla-bloqueo-reloj {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    opacity: .9;
+}
+.pantalla-bloqueo-hora {
+    font-size: 4.5rem;
+    font-weight: 700;
+    letter-spacing: .05em;
+    font-family: 'Spline Sans Mono', monospace;
+}
+.pantalla-bloqueo-fecha {
+    font-size: 1.1rem;
+    opacity: .6;
+    text-transform: capitalize;
+}
+.pantalla-bloqueo-form {
+    background: #fff;
+    color: #16130f;
+    padding: 2rem;
+    border-radius: 12px;
+    width: 340px;
+    max-width: 90vw;
+    cursor: default;
+    box-shadow: 0 12px 48px rgba(0,0,0,.4);
+}
+
+/* ── Punto 16: logo rebotando estilo DVD ── */
+.logo-dvd {
+    position: absolute;
+    width: 90px;
+    height: auto;
+    z-index: 1;
+    opacity: .85;
+    filter: drop-shadow(0 4px 12px rgba(0,0,0,.4));
+    animation: dvd-x 7s linear infinite alternate,
+               dvd-y 5.3s linear infinite alternate;
+}
+@keyframes dvd-x {
+    from { left: 2%; }
+    to   { left: calc(100% - 90px - 2%); }
+}
+@keyframes dvd-y {
+    from { top: 3%; }
+    to   { top: calc(100% - 90px - 3%); }
+}
+
+/* ── Foco/selección por defecto de MudBlazor en TODAS las grillas (puntos 4/9) ── */
+/* Sobrescribe el azul por defecto con el color de foco configurado, sin tocar cada grilla.
+   Igual que las reglas de arriba, la celda necesita la misma especificidad que
+   .mud-table-root .mud-table-body .mud-table-cell (el "td" suelto perdía el empate). */
+.mud-table-row.mud-selected-row,
+.mud-table-root .mud-table-body .mud-table-row.mud-selected-row .mud-table-cell,
+.mud-table-hover tbody tr.mud-selected-row,
+.mud-table-root .mud-table-body .mud-table-hover tbody tr.mud-selected-row .mud-table-cell,
+tr.mud-table-row.mud-selected-item,
+.mud-table-root .mud-table-body tr.mud-table-row.mud-selected-item .mud-table-cell {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+    font-family: var(--foco-fuente, inherit) !important;
+}
+
+/* ── v3: Fuente de las filas de grilla (todas, par, impar) ── */
+.mud-table-root .mud-table-body .mud-table-row td.mud-table-cell {
+    font-family: var(--grilla-fila-fuente, 'Archivo'), sans-serif;
+}
+
+/* ── v3: Color de filas SIN foco (solo si se configura un valor) ── */
+/* Se aplica vía variables que solo existen si el usuario las configuró;
+   si no, no se tocan los colores por defecto de la grilla. */
+
+/* ── v3: Campos obligatorios con backcolor configurable ── */
+.campo-obligatorio .mud-input-slot,
+.campo-obligatorio input,
+.campo-obligatorio .mud-input-control input,
+.campo-obligatorio textarea {
+    background-color: var(--obligatorio-backcolor, #fff3e0) !important;
+}
+
+/* ── Ícono de ordenamiento en cabeceras de grilla, estilo sutil "↕" ──
+   MudBlazor por defecto muestra una flecha grande y solo visible al hover/orden activo.
+   Aquí se reduce el tamaño, se atenúa, y se muestra siempre (no solo al ordenar). */
+.mud-table-root .mud-table-head .sortable-column-header,
+.mud-table-root .mud-table-head .mud-table-sort-label {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 4px;
+}
+.mud-table-root .mud-table-head .mud-table-sort-label-icon {
+    opacity: .55;
+    font-size: .85rem !important;
+    width: .85rem !important;
+    height: .85rem !important;
+    transition: opacity .15s;
+}
+.mud-table-root .mud-table-head .mud-table-sort-label:hover .mud-table-sort-label-icon {
+    opacity: 1;
+}
+/* Cuando la columna está activamente ordenada, el ícono queda completamente visible */
+.mud-table-root .mud-table-head .mud-table-sort-label.mud-direction-ltr .mud-table-sort-label-icon,
+.mud-table-root .mud-table-head .mud-table-sort-label .mud-table-sort-label-icon.mud-table-sort-label-icon-active,
+.mud-table-root .mud-table-head .mud-icon-root.mud-table-sort-label-icon[style*="opacity: 1"] {
+    opacity: 1;
+}
+
+/* ── Íconos de cabecera (orden, filtro, menú "⋮") siempre en blanco ── */
+.mud-table-root .mud-table-head .mud-icon-root,
+.mud-table-root .mud-table-head .mud-icon-button,
+.mud-table-root .mud-table-head .mud-button-root,
+.mud-table-root .mud-table-head svg {
+    color: #fff !important;
+    fill: #fff !important;
+}
+.mud-table-root .mud-table-head .mud-icon-button:hover {
+    background-color: rgba(255,255,255,.12) !important;
+}
+
+/* El marco exterior (MudPaper) que envuelve cada grilla usaba el borde genérico
+   de la app (--line) en vez del color de línea configurado para grillas
+   (--grilla-lineas) — quedaba de un tono distinto al de las líneas internas. */
+.mud-paper:has([data-resizable-grid]) {
+    border-color: var(--grilla-lineas, rgba(255,255,255,.15)) !important;
+}
+/* Marco propio alrededor de toda la grilla (buscador + cabecera + filas + pie),
+   con el mismo color de línea configurado — bosquejo aprobado por el usuario. */
+[data-resizable-grid] {
+    border: 2px solid var(--grilla-lineas, rgba(255,255,255,.15));
+    border-radius: 6px;
+}
+
+/* Checkbox de selección de fila (MultiSelection) en las grillas: en vez del azul "primary"
+   default de MudBlazor, tanto el cuadro sin marcar como el tilde usan el color de TEXTO
+   configurado para la grilla (--grilla-texto) — se probó con --grilla-lineas primero, pero
+   ese color es intencionalmente tenue (pensado para las líneas divisorias) y el checkbox
+   quedaba casi invisible salvo en la fila con foco (fondo celeste, más contraste). */
+/* La clase de estado (mud-checkbox-true/false) va en el <span> exterior (mud-checkbox),
+   NO en el <input class="mud-checkbox-input"> — el input y el <svg> son HERMANOS, no
+   ancestro/descendiente, así que ".mud-checkbox-input .mud-icon-root" (el selector usado
+   antes) no coincidía con nada; por eso el color nunca se aplicaba de verdad, con o sin
+   foco. Además se repite el selector con la misma cantidad de clases que ".fila-seleccionada"
+   (la regla que fuerza --foco-texto en la fila con foco) para empatarle la especificidad. */
+.mud-table-root .mud-checkbox svg.mud-icon-root,
+.mud-table-root .mud-table-body .mud-table-row.fila-seleccionada .mud-table-cell .mud-checkbox svg.mud-icon-root {
+    color: var(--grilla-texto, #efe9df) !important;
+    fill: var(--grilla-texto, #efe9df) !important;
+}
+
+/* Títulos de cabecera de columna centrados en todas las grillas. */
+.mud-table-root .mud-table-head .mud-table-cell,
+.mud-table-root .mud-table-head th {
+    text-align: center !important;
+}
+.mud-table-root .mud-table-head .mud-table-cell .d-flex,
+.mud-table-root .mud-table-head th .d-flex {
+    justify-content: center;
+}
+
+/* ── Handle de redimensionado de grillas ── */
+.grid-resize-handle {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 6px;
+    cursor: s-resize;
+    background: transparent;
+    z-index: 10;
+    transition: background .15s;
+    border-radius: 0 0 4px 4px;
+}
+.grid-resize-handle:hover,
+.grid-resize-handle.arrastrando {
+    background: rgba(184,71,45,.35);
+}
+
+/* ── Propagación de altura en grillas redimensionables ──
+   El div[data-resizable-grid] recibe la altura por JS.
+   Flexbox propaga esa altura al MudDataGrid interno. */
+[data-resizable-grid] {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    /* Cuando la grilla queda vacía (NoRecordsContent) o con pocas filas, el
+       contenedor interno no llega a llenar toda la altura reservada (data-default-height)
+       y se veía el fondo oscuro de la página por detrás — ahora toma el mismo color
+       que la primera fila de la grilla. */
+    background: var(--grilla-fila-par, #1a1714);
+}
+[data-resizable-grid] > .mud-table {
+    flex: 1;
+    min-height: 0;
+    display: flex !important;
+    flex-direction: column !important;
+}
+[data-resizable-grid] .mud-table-container {
+    flex: 1 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    overflow: auto !important;
+}
+/* Fondo/texto/bordes del contenedor, pie y paginación de CUALQUIER grilla de la
+   app, esté o no dentro de un [data-resizable-grid]. Ancestro correcto: ".mud-table"
+   (el div más exterior), NO ".mud-table-root" (la <table> interna) — .mud-table-container/
+   -footer/-pagination son HERMANOS de la tabla, no descendientes suyos; confirmado
+   con DevTools que ".mud-table-root .mud-table-container" nunca coincidía con nada. */
+.mud-table .mud-table-container,
+.mud-table .mud-table-footer,
+.mud-table .mud-table-pagination,
+.mud-table .mud-tfoot {
+    background: var(--grilla-fila-par, #1a1714) !important;
+    border-color: var(--grilla-lineas, rgba(255,255,255,.15)) !important;
+}
+/* Letras y símbolos (flechas de página) del pie de grilla: el pie usa el mismo fondo que
+   las filas (--grilla-fila-par, ver regla de arriba), así que el texto debe ser el color
+   de texto configurado para las filas (--grilla-texto) — antes usaba el color de texto de
+   la CABECERA (pensado para el fondo oscuro del header), que sobre el fondo del pie quedaba
+   casi invisible. */
+.mud-table .mud-table-pagination,
+.mud-table .mud-table-pagination .mud-table-pagination-caption,
+.mud-table .mud-table-pagination .mud-icon-root,
+.mud-table .mud-table-pagination .mud-select-input,
+.mud-table .mud-table-pagination .mud-input-input {
+    color: var(--grilla-texto, #efe9df) !important;
+}
+/* TODOS los bordes dentro de una grilla (contenedor, botones/select del pie de
+   página, subrayado del combo "Rows per page", separadores entre flechas, etc.)
+   toman el mismo color de línea configurado, en vez de mezclar el default de
+   MudBlazor con el ya corregido en cabecera/filas/columnas. */
+.mud-table-root,
+.mud-table-root * {
+    border-color: var(--grilla-lineas, rgba(255,255,255,.15)) !important;
+}
+[data-resizable-grid],
+[data-resizable-grid] .mud-table-container,
+[data-resizable-grid] * {
+    border-color: var(--grilla-lineas, rgba(255,255,255,.15)) !important;
+}
+
+/* ── Paneles contenedores transparentes (elevation-0) ──
+   Los MudPaper con Elevation="0" actúan como secciones de página.
+   Se hacen transparentes para que el fondo de la app se vea a través.
+   Los controles (inputs, selects) conservan su propio background.
+   Dialogs, dropdowns y cards con elevation > 0 no se ven afectados. */
+.mud-paper.mud-elevation-0 {
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+/* ── Etiquetas flotantes de MudBlazor: fondo igual al de la página ──
+   Con Variant.Outlined la etiqueta flota sobre el borde del input.
+   Usando el color de fondo de la paleta MudBlazor la etiqueta "corta"
+   visualmente la línea del borde sin mostrar un fondo blanco opaco. */
+/* Placeholder y texto de búsqueda — color del font del entorno en todas las páginas */
+::placeholder,
+input::placeholder,
+textarea::placeholder {
+    color: var(--env-fore, var(--ink, #16130f)) !important;
+    opacity: .55 !important;
+}
+.mud-input input,
+.mud-input textarea,
+.mud-input-slot input,
+.mud-input-slot textarea {
+    color: var(--env-fore, var(--ink, #16130f)) !important;
+}
+
+/* "Generar TXT de SPs" (Sistema): página independiente, no diálogo, así que no
+   hereda el reset a --dialog-fore de arriba — usa el color de texto normal
+   (--ink) en vez de --env-fore (pensado para el banner de entorno), igual
+   criterio que .mud-dialog. */
+.sps-form-paper .mud-input input,
+.sps-form-paper .mud-input textarea,
+.sps-form-paper .mud-input-slot input,
+.sps-form-paper .mud-input-slot textarea {
+    color: var(--ink, #16130f) !important;
+}
+
+/* Visor de Logs (Desarrollador): mismo problema que .sps-form-paper — el
+   buscador no es un diálogo, así que hereda --env-fore (blanco) y el texto
+   quedaba invisible sobre el fondo claro de la página. */
+.log-viewer-search .mud-input input,
+.log-viewer-search .mud-input textarea,
+.log-viewer-search .mud-input-slot input,
+.log-viewer-search .mud-input-slot textarea {
+    color: var(--ink, #16130f) !important;
+}
+
+/* Etiquetas MudBlazor — color normal del texto (--ink). Antes usaba --env-fore
+   (pensado para el buscador del sidebar sobre fondo oscuro), pero esa regla se
+   aplicaba GLOBALMENTE a todos los formularios de la app — como --env-fore es
+   blanco por defecto, las etiquetas quedaban invisibles sobre fondos claros
+   (ej. Configuración General, diálogos de edición). */
+.mud-input-label,
+.mud-input-label-animated,
+.mud-input-label-outlined,
+.mud-input-label-inputcontrol,
+.mud-input-label.mud-shrink,
+.mud-input-label-animated.mud-shrink,
+.mud-input-label-outlined.mud-shrink,
+.mud-input-label-inputcontrol.mud-shrink {
+    color: var(--ink, #16130f) !important;
+}
+/* El label de Variant.Outlined queda recostado sobre el borde y MudBlazor le pinta un fondo
+   fijo para tapar la línea detrás — eso se notaba como un parche de otro tono sobre el fondo
+   oscuro del título. La regla anterior exigía también la clase ".mud-shrink", que esta versión
+   de MudBlazor no agrega (el DOM real es
+   "mud-input-label mud-input-label-animated mud-input-label-outlined mud-input-label-inputcontrol"
+   sin mud-shrink) — por eso nunca se aplicaba y quedaba el fondo blanco por defecto de MudBlazor.
+   Se homologa al fondo de la página (mismo fondo que el título). */
+.mud-input-label-outlined,
+.mud-input-label-inputcontrol {
+    background: var(--paper, #efe9df) !important;
+}
+/* Labels de inputs SIN datos más tenues que los que sí tienen valor — pedido
+   explícito para distinguir a simple vista campos vacíos vs. llenos.
+   CampoTexto.razor agrega la clase "campo-vacio" cuando _val está vacío
+   (mismo patrón que "campo-obligatorio"/"campo-invalido") — no se usa
+   :placeholder-shown porque MudBlazor Outlined no expone un placeholder
+   real en el <input>, así que ese selector nunca coincidía.
+   Ojo: "opacity" en el elemento entero también diluye el FONDO del label (el que tapa la
+   línea del borde detrás, ver ".campo-texto-mt .mud-input-label" más abajo) — dejaba
+   traslucir la línea del campo cuando estaba vacío. Se usa color-mix sobre el color de
+   texto en vez de opacity, así el fondo del label se queda 100% sólido siempre. */
+.campo-vacio .mud-input-label {
+    color: color-mix(in srgb, currentColor 50%, transparent) !important;
+}
+/* Labels de CampoTexto.razor/CampoTextoEstable.razor (clase "campo-texto-mt"): fondo del
+   label = fondo del diálogo configurado (--dialog-back), no el fondo genérico de la página
+   (--paper) — así tapa de verdad la línea del borde detrás en vez de dejarla transparentar.
+   Tamaño 1pt menos que la fuente estándar del diálogo (--control-size) y en negrita. Todo
+   con !important + opacity:1 explícito porque ".campo-vacio .mud-input-label{opacity:.5}"
+   (arriba) igual aplica sobre estas mismas clases y podía diluir el fondo semi-transparente. */
+.campo-texto-mt .mud-input-label,
+.campo-texto-mt .mud-input-label-animated,
+.campo-texto-mt .mud-input-label-outlined,
+.campo-texto-mt .mud-input-label-inputcontrol {
+    background-color: var(--dialog-back, var(--paper, #efe9df)) !important;
+    opacity: 1 !important;
+    color: var(--dialog-fore, var(--ink, #16130f)) !important;
+    font-size: calc(var(--control-size, 14px) - 1pt) !important;
+    font-weight: 700 !important;
+}
+
+/* ── Pie de página de la aplicación — fijo en el borde inferior ── */
+.app-footer {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 56px;
+    z-index: 900;
+    background: #1a1714;
+    border-top: 1px solid rgba(255,255,255,.08);
+    padding: 0 24px;
+    font-size: .75rem;
+    color: rgba(255,255,255,.5);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Spline Sans Mono', monospace;
+}
+
+/* ── Diálogos: efecto de apertura desde el punto central ──
+   Cada vez que se muestra un MudDialog, aparece creciendo desde su propio centro
+   (scale) en vez de aparecer de golpe. El fondo oscuro (overlay) hace un fundido
+   suave por separado. Como el diálogo se monta recién al abrirse, la animación
+   se dispara sola cada vez, sin necesidad de JS. */
+.mud-overlay {
+    animation: mud-overlay-fade .2s ease-out;
+}
+@keyframes mud-overlay-fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+.mud-dialog {
+    transform-origin: center center;
+    animation: mud-dialog-open .2s cubic-bezier(.2,.9,.3,1.1);
+}
+/* Colores propios de los diálogos (crear/editar/ver/eliminar), configurables en
+   Configuración General → Apariencia — independientes del resto de la pantalla. */
+.mud-dialog,
+.mud-dialog .mud-dialog-content,
+.mud-dialog .mud-dialog-actions {
+    background-color: var(--dialog-back, #efe9df) !important;
+    color: var(--dialog-fore, #16130f) !important;
+}
+/* Cabecera invertida: fondo = color de texto configurado, texto = color de fondo
+   configurado — para que la cabecera resalte del cuerpo del diálogo. */
+.mud-dialog .mud-dialog-title,
+.mud-dialog .mud-dialog-title .mud-typography {
+    background-color: var(--dialog-fore, #16130f) !important;
+    color: var(--dialog-back, #efe9df) !important;
+}
+.mud-dialog .mud-dialog-title .mud-icon-button .mud-icon-root {
+    color: var(--dialog-back, #efe9df) !important;
+}
+/* Los inputs/labels dentro de diálogos heredan --env-fore / --ink de las reglas
+   globales de grillas (más abajo en este archivo) por tener igual o mayor
+   especificidad — se sobreescriben aquí, con ámbito .mud-dialog, para que
+   usen el color de texto configurado para diálogos en vez del del entorno. */
+.mud-dialog .mud-input input,
+.mud-dialog .mud-input textarea,
+.mud-dialog .mud-input-slot input,
+.mud-dialog .mud-input-slot textarea {
+    color: var(--dialog-fore, #16130f) !important;
+}
+.mud-dialog .mud-input-label,
+.mud-dialog .mud-input-label-animated,
+.mud-dialog .mud-input-label-outlined,
+.mud-dialog .mud-input-label-inputcontrol,
+.mud-dialog .mud-input-label.mud-shrink,
+.mud-dialog .mud-input-label-animated.mud-shrink,
+.mud-dialog .mud-input-label-outlined.mud-shrink,
+.mud-dialog .mud-input-label-inputcontrol.mud-shrink {
+    color: var(--dialog-fore, #16130f) !important;
+    background: var(--dialog-back, #efe9df) !important;
+}
+/* AriaCombo (no es un MudTextField) nunca recibió el mismo ámbito .mud-dialog que los
+   campos de arriba — sus inputs seguían usando --control-color incluso dentro de un
+   diálogo, mientras los CampoTexto/MudTextField ya usaban --dialog-fore. Resultado:
+   dentro del mismo diálogo, unos inputs salían de un color y otros de otro. */
+.mud-dialog .aria-combo-box input,
+.mud-dialog .aria-combo-label,
+.mud-dialog .aria-combo-option {
+    color: var(--dialog-fore, #16130f) !important;
+}
+/* MudSwitch (ej. "Exige contraseña", "Habilitar teclado virtual"): por defecto usa el
+   gris/azul de MudBlazor sin relación con el tema — se homologa al color de texto
+   configurado (--dialog-fore dentro de diálogos, --ink en el resto), igual criterio que
+   el checkbox de las grillas: apagado = línea sutil, encendido = color de texto pleno. */
+.mud-switch-track {
+    background-color: var(--line, rgba(0,0,0,.35)) !important;
+    opacity: 1 !important;
+}
+.mud-switch-thumb {
+    color: var(--dialog-fore, var(--ink, #16130f)) !important;
+    fill: var(--dialog-fore, var(--ink, #16130f)) !important;
+}
+.mud-switch-base.mud-checked .mud-switch-track,
+.mud-switch-base.mud-checked ~ .mud-switch-track {
+    background-color: var(--dialog-fore, var(--ink, #16130f)) !important;
+    opacity: .45 !important;
+}
+.mud-switch-base.mud-checked .mud-switch-thumb,
+.mud-switch-base.mud-checked ~ * .mud-switch-thumb {
+    color: var(--dialog-fore, var(--ink, #16130f)) !important;
+    fill: var(--dialog-fore, var(--ink, #16130f)) !important;
+}
+.mud-switch-label { color: var(--dialog-fore, var(--ink, #16130f)) !important; }
+
+/* Diálogos arrastrables desde su cabecera (ver script de dialogDrag en index.html). */
+.mud-dialog-title {
+    cursor: move;
+    user-select: none;
+}
+.mud-dialog-dragging {
+    animation: none !important;
+    transition: none !important;
+}
+@keyframes mud-dialog-open {
+    from { opacity: 0; transform: scale(.55); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+/* Cierre: exactamente lo inverso de la apertura. Se agrega por JS (ver dialogAnim en
+   index.html) justo antes de invocar el cierre real, para que se vea la animación
+   antes de que Blazor quite el diálogo del DOM. */
+.mud-dialog.mud-dialog-closing {
+    animation: mud-dialog-close .2s cubic-bezier(.4,0,.7,.3) forwards;
+}
+@keyframes mud-dialog-close {
+    from { opacity: 1; transform: scale(1); }
+    to   { opacity: 0; transform: scale(.55); }
+}
+.mud-overlay.mud-overlay-closing {
+    animation: mud-overlay-fade-out .2s ease-in forwards;
+}
+@keyframes mud-overlay-fade-out {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mud-overlay, .mud-dialog { animation: none; }
+}
+
+/* Tamaño de fuente estándar de los inputs (Configuración General → --control-size)
+   aplicado también a los desplegables (ComboSelect/MudAutocomplete y MudSelect).
+   Los ítems de MudBlazor envuelven el texto en un <p class="mud-typography ..."> con su
+   propio font-size explícito, que gana por especificidad/orden a una regla genérica sobre
+   el contenedor — por eso se apunta también a *todo* lo que quede dentro del ítem con "*". */
+.mud-input-input, .mud-input-label, .mud-select-input,
+.mud-input-adornment-text, .mud-input-adornment-text *,
+.mud-checkbox-label, .mud-switch-label, .mud-radio-label,
+.mud-popover .mud-list-item,
+.mud-popover .mud-list-item *,
+.mud-popover .mud-list-item-text,
+.mud-popover .mud-list-item-text *,
+.mud-popover .mud-list-item-icon ~ div,
+.mud-popover-open .mud-typography,
+.mud-select-items .mud-typography,
+.mud-select-item,
+.mud-select-item *,
+.mud-popover p,
+.mud-popover span,
+.mud-popover div {
+    font-size: var(--control-size, 14px) !important;
+}
+.mud-input-input, .mud-input-label, .mud-select-input,
+.mud-input-adornment-text, .mud-input-adornment-text *,
+.mud-checkbox-label, .mud-switch-label, .mud-radio-label,
+.mud-popover .mud-list-item, .mud-popover .mud-list-item *,
+.mud-popover .mud-list-item-text, .mud-popover .mud-list-item-text * {
+    font-family: var(--control-font, inherit) !important;
+}
+/* Los elementos reales <input>/<textarea>/<select> NO heredan font-family del contenedor
+   por defecto (el navegador les aplica su propia fuente de sistema, ej. Calibri en Windows)
+   — la regla de arriba apunta a los DIV envolventes de MudBlazor (.mud-input-input, etc.),
+   que visualmente no son el <input> mismo. Se apunta acá directo al elemento real. */
+.mud-input input, .mud-input textarea, .mud-input-slot input, .mud-input-slot textarea,
+.mud-select input, .mud-autocomplete input {
+    font-family: var(--control-font, inherit) !important;
+    font-size: var(--control-size, 14px) !important;
+}
+/* Color de texto de TODOS los controles (Configuración General → Controles → Color de
+   texto), salvo títulos/subtítulos (--titulo-color/--subtitulo-color) y grillas
+   (--grilla-texto, con su propia config aparte). Mismos selectores que la fuente. */
+.mud-input-input, .mud-input-label, .mud-select-input,
+.mud-input-adornment-text, .mud-input-adornment-text *,
+.mud-checkbox-label, .mud-switch-label, .mud-radio-label,
+.mud-popover .mud-list-item, .mud-popover .mud-list-item *,
+.mud-popover .mud-list-item-text, .mud-popover .mud-list-item-text *,
+.mud-input input, .mud-input textarea, .mud-input-slot input, .mud-input-slot textarea,
+.mud-select input, .mud-autocomplete input,
+.aria-combo-box input, .aria-combo-label, .aria-combo-option {
+    color: var(--control-color, inherit) !important;
+}
+/* Botón "Aplicar" del filtro = color de botón configurado (Configuración General →
+   Botones de Diálogo y Acciones de Cabecera). "Limpiar" usa los mismos 2 colores
+   pero invertidos (fondo↔texto), para diferenciarse sin salirse de la paleta. */
+.mud-popover .filtro-excel-btn-aplicar {
+    background-color: var(--boton-backcolor, #3b82c4) !important;
+    color: var(--boton-forecolor, #fff) !important;
+}
+.mud-popover .filtro-excel-btn-limpiar {
+    background-color: var(--boton-forecolor, #fff) !important;
+    color: var(--boton-backcolor, #3b82c4) !important;
+    /* Borde con el color de fondo del botón configurado: si el color de texto elegido
+       queda muy claro/parecido al fondo de la página, el botón igual se distingue. */
+    border: 1.5px solid var(--boton-backcolor, #3b82c4) !important;
+}
+
+/* ── TreeList (árbol + columnas) — Opciones de Aplicaciones, Especificaciones Técnicas ──
+   Usa los MISMOS colores configurables que las grillas (MudDataGrid): cabecera, filas
+   pares/impares y foco/hover, para que un TreeList se sienta parte de la misma familia
+   visual que el resto de las pantallas en vez de un componente aparte. */
+/* Barra de título de los treeviews (ej. "Estructura", "Especificaciones Técnicas"):
+   mismo fondo/texto que la cabecera de columnas de abajo, en vez del blanco
+   default de MudPaper. */
+.tl-toolbar {
+    background-color: var(--grilla-cab-fondo, #2b2622) !important;
+    color: var(--grilla-cab-texto, #fff) !important;
+    border-bottom: 1px solid var(--grilla-lineas, rgba(255,255,255,.15));
+}
+/* Árbol de Opciones de Aplicaciones: el panel principal y sus dos columnas
+   (árbol scrolleable + panel de botones) no tenían fondo propio, heredando el
+   blanco default de MudPaper — ahora usan el fondo/texto general configurado. */
+.oa-main-panel,
+.oa-arbol-scroll,
+.oa-botones-panel {
+    background: var(--paper, #efe9df) !important;
+    color: var(--ink, #16130f) !important;
+}
+.tl-header, .tl-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 2.2fr) 130px 1.6fr 90px;
+    align-items: center;
+    column-gap: 4px;
+}
+.tl-header {
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    background-color: var(--grilla-cab-fondo, #2b2622);
+    color: var(--grilla-cab-texto, #fff);
+    padding: 6px 8px;
+}
+.tl-row {
+    padding: 3px 8px;
+    color: var(--grilla-texto, #efe9df);
+    border-bottom: 1px solid var(--grilla-lineas, rgba(255,255,255,.15));
+}
+.tl-row:nth-of-type(even) { background-color: var(--grilla-fila-par, #1a1714); }
+.tl-row:nth-of-type(odd)  { background-color: var(--grilla-fila-impar, #201b17); }
+.tl-row:hover {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+}
+.tl-row:hover .mono { color: inherit !important; opacity: .85; }
+.tl-row.tl-row-seleccionada {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+    font-weight: 600;
+}
+.tl-col-desc  { min-width: 0; }
+.tl-col-tipo, .tl-col-form, .tl-col-estado { min-width: 0; }
+.tl-badge {
+    display: inline-block;
+    font-size: .68rem;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 99px;
+}
+
+/* Árbol de Áreas Administrativas: el [data-resizable-grid] exterior tiene
+   overflow:hidden (pensado para que .mud-table-container haga el scroll en
+   grillas normales) — este contenedor propio con flex:1+overflow-y:auto es lo
+   que realmente permite bajar a ver el resto de los nodos del árbol. */
+.areas-arbol-scroll { flex: 1 1 auto; overflow-y: auto; overflow-x: auto; min-height: 0; }
+
+/* Variante para Especificaciones Técnicas: Descripción | Tipo | Características | Estado | Acciones */
+.tl-header-spec, .tl-row-spec {
+    display: grid;
+    grid-template-columns: minmax(260px, 2.4fr) 160px 190px 130px auto;
+    align-items: center;
+    column-gap: 4px;
+}
+.tl-header-spec {
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    background-color: var(--grilla-cab-fondo, #2b2622);
+    color: var(--grilla-cab-texto, #fff);
+    padding: 6px 8px;
+}
+.tl-row-spec {
+    padding: 3px 8px;
+    color: var(--grilla-texto, #efe9df);
+    border-bottom: 1px solid var(--grilla-lineas, rgba(255,255,255,.15));
+}
+.tl-row-spec:nth-of-type(even) { background-color: var(--grilla-fila-par, #1a1714); }
+.tl-row-spec:nth-of-type(odd)  { background-color: var(--grilla-fila-impar, #201b17); }
+.tl-row-spec:hover {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+}
+.tl-row-spec.tl-row-seleccionada {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+    font-weight: 600;
+}
+
+/* Variante para Especificaciones / Ítems Técnicos: Descripción | Color | Tipo | Valor | Unidad | Orden */
+.tl-header-items, .tl-row-items {
+    display: grid;
+    grid-template-columns: minmax(260px, 2.4fr) 200px 200px 120px 130px 150px 70px;
+    align-items: center;
+    column-gap: 4px;
+}
+.tl-header-items {
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    background-color: var(--grilla-cab-fondo, #2b2622);
+    color: var(--grilla-cab-texto, #fff);
+    padding: 6px 8px;
+}
+.tl-row-items {
+    min-height: 32px;
+    box-sizing: border-box;
+    padding: 3px 8px;
+    color: var(--grilla-texto, #efe9df);
+    border-bottom: 1px solid var(--grilla-lineas, rgba(255,255,255,.15));
+}
+.tl-row-items:nth-of-type(even) { background-color: var(--grilla-fila-par, #1a1714); }
+.tl-row-items:nth-of-type(odd)  { background-color: var(--grilla-fila-impar, #201b17); }
+.tl-row-items:hover {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+}
+.tl-row-items.tl-row-seleccionada {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+    font-weight: 600;
+}
+
+/* Formato estándar de grilla para listas simples de asignación (2 paneles
+   Asignadas/Por asignar, ej. GruposEspecificacionTecnica.razor): mismo look que
+   el resto de las grillas de la app — cabecera oscura, filas alternadas, hover. */
+.gea-header, .gea-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 2fr) 70px 90px 140px 80px 40px;
+    align-items: center; column-gap: 8px;
+    padding: 6px 10px;
+}
+/* Panel "Asignadas" tiene 5 columnas extra (Grupo, Incl. Desc., Reg. Comercial,
+   Ficha Técnica, Control de Calidad). */
+.gea-header-asignadas, .gea-row-asignadas {
+    grid-template-columns: minmax(180px, 2fr) 70px 90px 140px 120px 140px 110px 110px 110px 110px 40px;
+}
+.gea-header {
+    font-size: .7rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+    background-color: var(--grilla-cab-fondo, #2b2622);
+    color: var(--grilla-cab-texto, #fff);
+}
+.gea-row {
+    min-height: 36px;
+    box-sizing: border-box;
+    color: var(--grilla-texto, #efe9df);
+    border-bottom: 1px solid var(--grilla-lineas, rgba(255,255,255,.15));
+    cursor: pointer;
+}
+.gea-row:nth-of-type(even) { background-color: var(--grilla-fila-par, #1a1714); }
+.gea-row:nth-of-type(odd)  { background-color: var(--grilla-fila-impar, #201b17); }
+.gea-row:hover {
+    background-color: var(--foco-fondo, #b8472d) !important;
+    color: var(--foco-texto, #fff) !important;
+}
+
+/* Simulador de grilla dinámica (GruposEspecificacionTecnica.razor): vista previa de
+   cómo quedarían cruzadas las Especificaciones marcadas como Fila/Columna. */
+.sim-grid {
+    border-collapse: collapse;
+    min-width: 320px;
+    font-size: .82rem;
+}
+.sim-grid th, .sim-grid td {
+    border: 1px solid var(--grilla-lineas, rgba(255,255,255,.15));
+    padding: 6px 12px;
+    text-align: center;
+}
+.sim-grid thead th {
+    background-color: var(--grilla-cab-fondo, #2b2622);
+    color: var(--grilla-cab-texto, #fff);
+    font-size: .7rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+}
+.sim-grid tbody th {
+    text-align: left;
+    background-color: var(--grilla-fila-impar, #201b17);
+    color: var(--grilla-texto, #efe9df);
+    font-weight: 600;
+}
+.sim-grid tbody td { color: var(--grilla-texto, #efe9df); }
+.sim-combo {
+    width: 100%; min-width: 110px;
+    background: var(--paper, #fff); color: var(--ink, #16130f);
+    border: 1px solid var(--line, rgba(0,0,0,.2)); border-radius: 4px;
+    padding: 3px 6px; font-size: .8rem;
+}
+.sim-cantidad {
+    width: 100%; min-width: 70px;
+    background: var(--paper, #fff); color: var(--ink, #16130f);
+    border: 1px solid var(--line, rgba(0,0,0,.2)); border-radius: 4px;
+    padding: 3px 6px; font-size: .8rem; text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── 3 simuladores lado a lado (Registro Comercial / Ficha Técnica / Control de
+   Calidad) — cada uno agrupado por Grupo de Especificación Técnica. ── */
+.sim-paneles {
+    display: flex; gap: 16px; align-items: flex-start;
+    overflow-x: auto; padding-bottom: 8px;
+}
+.sim-panel {
+    flex: 1 1 0; min-width: 320px; max-width: 100%;
+    border: 1px solid var(--line); border-radius: 4px;
+    overflow-x: auto;
+}
+.sim-panel-cab {
+    padding: 10px 14px; border-bottom: 1px solid var(--line);
+}
+.sim-grupo-label {
+    font-size: .68rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--foco-fondo, #b8472d);
+    padding: 10px 14px 4px;
+}
+.sim-grupo-label .cnt {
+    color: var(--subtitulo-color, #6b6358); font-weight: 400; text-transform: none;
+    letter-spacing: 0; margin-left: 6px;
+}
+.sim-campo {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 7px 14px; border-bottom: 1px solid var(--grilla-lineas, rgba(255,255,255,.1));
+}
+.sim-campo:last-child { border-bottom: none; }
+.sim-campo .sim-campo-ctrl {
+    background: var(--fila-par, rgba(0,0,0,.04)); border: 1px solid var(--line);
+    border-radius: 3px; min-width: 120px; height: 26px; font-size: .74rem;
+    display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding: 0 8px; opacity: .6;
+}
+.sim-campo-ctrl.sim-swatch { min-width: 24px; height: 18px; border-radius: 3px; padding: 0; }
+.sim-panel-vacio { padding: 20px 14px; opacity: .5; font-size: .78rem; font-style: italic; }
+
+/* Contenedor por Grupo de Especificación Técnica en el tab "Especificaciones Técnicas" de
+   ProductosDialog — mismo criterio que .sim-grupo-box del simulador de Grupos de
+   Especificación, adaptado a un diálogo de edición normal (con padding interno). */
+.pet-grupo-box {
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; margin-bottom: 16px;
+}
+.pet-grupo-box:last-child { margin-bottom: 0; }
+.pet-grupo-titulo {
+    opacity: .8; padding-bottom: 8px; margin-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+    /* Título de grupo (MudText sin Style propio) seguía saliendo con --control-color
+       mientras los valores del grupo (inputs) ya usan --dialog-fore dentro de diálogos —
+       misma inconsistencia que EstiloControl, forzada aquí para que gane siempre. */
+    color: var(--dialog-fore, var(--control-color, inherit)) !important;
+}
+
+/* Contenedor propio por Grupo de Especificación Técnica dentro de cada panel del
+   simulador — separa visualmente un grupo de otro (antes solo el rótulo los distinguía). */
+.sim-grupo-box {
+    border: 1px solid var(--line); border-radius: 6px;
+    margin: 10px; overflow-x: auto; overflow-y: hidden;
+}
+.sim-grupo-box .sim-grupo-label { padding: 10px 14px 8px; }
+.sim-grupo-box .sim-campo:last-child { border-bottom: none; }
+
+/* ── CargaOverlay.razor — tapa el contenido hasta que carguen los datos, sin
+   ningún indicador visual (por pedido: sin spinners salvo el de arranque). ── */
+.carga-overlay {
+    position: absolute;
+    inset: 0;
+    background: var(--paper, #fff);
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+.carga-badge {
+    position: relative;
+    width: 64px; height: 64px;
+    display: flex; align-items: center; justify-content: center;
+}
+.carga-ring { position: absolute; inset: 0; }
+.carga-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.carga-ring circle { fill: none; stroke-width: 5; }
+.carga-bg { stroke: rgba(0,0,0,.12); }
+.carga-fg {
+    stroke: var(--gold-accent, #e2b93c);
+    stroke-linecap: round;
+    stroke-dasharray: 163;
+    stroke-dashoffset: 163;
+    animation: carga-ring-fill 1.4s cubic-bezier(.4,0,.2,1) infinite;
+}
+@keyframes carga-ring-fill {
+    0%   { stroke-dashoffset: 163; }
+    70%  { stroke-dashoffset: 0; }
+    100% { stroke-dashoffset: 0; opacity: 0; }
+}
+/* Logo REDONDO, revelado en abanico (máscara cónica) en la misma cadencia que el
+   anillo — @property permite animar el ángulo de la conic-gradient con suavidad. */
+@property --carga-reveal-angle {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+}
+.carga-logo-wrap {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: var(--navy-accent, #181233);
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    animation: carga-reveal 1.4s cubic-bezier(.4,0,.2,1) infinite;
+    -webkit-mask-image: conic-gradient(#000 var(--carga-reveal-angle, 0deg), transparent var(--carga-reveal-angle, 0deg));
+    mask-image: conic-gradient(#000 var(--carga-reveal-angle, 0deg), transparent var(--carga-reveal-angle, 0deg));
+}
+@keyframes carga-reveal {
+    0%   { --carga-reveal-angle: 0deg;   opacity: .85; }
+    70%  { --carga-reveal-angle: 360deg; opacity: 1; }
+    100% { --carga-reveal-angle: 360deg; opacity: 0; }
+}
+.carga-logo-img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+.carga-logo-fallback { color: var(--gold-accent, #e2b93c); font-size: 1.3rem; }
+.carga-texto { font-size: .72rem; opacity: .6; }
+@media (prefers-reduced-motion: reduce) {
+    .carga-fg, .carga-logo-wrap { animation: none; }
+}
+
+/* ── ErrorSqlBox.razor — bloque de error persistente en diálogos CRUD ── */
+.error-sql-box {
+    border: 1px solid #e0413a;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 16px;
+    background: #fff;
+}
+.error-sql-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12.5px 15px 12.5px 17.5px; /* cabecera 25% más alta que la versión original (8px→12.5px) */
+    color: #fff;
+}
+.error-sql-titulo { font-size: 1.03rem; font-weight: 700; flex: 1; min-width: 0; } /* .82rem * 1.25 */
+.error-sql-body { padding: 12px 14px; background: #fff; }
+.error-sql-mensaje { font-size: .82rem; color: #16130f; line-height: 1.5; margin-bottom: 8px; }
+.error-sql-detalle {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 3px 12px;
+    font-size: .72rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #6b6358;
+    background: rgba(0,0,0,.035);
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+}
+.error-sql-detalle dt { opacity: .7; white-space: nowrap; }
+.error-sql-detalle dd { margin: 0; color: #16130f; overflow-wrap: anywhere; }
+.error-sql-sentencia {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .72rem;
+    color: #6b6358;
+    background: rgba(0,0,0,.035);
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.error-sql-footer { display: flex; align-items: center; justify-content: space-between; }
+.error-sql-copiar {
+    font-size: .72rem; font-weight: 700;
+    text-decoration: underline; cursor: pointer; background: none; border: none; padding: 0;
+}
+.error-sql-cerrar {
+    width: 32px; height: 32px;
+    border: none; border-radius: 6px; color: #fff;
+    flex-shrink: 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+}
+
+/* Combo con fuente reducida un 25% (ej. Ubigeo en Sucursales). */
+.combo-fuente-chica, .combo-fuente-chica .mud-input { font-size: .75rem; }
+
+/* ── AriaCombo.razor — combobox con patrón W3C ARIA (piloto: TABLAS_TIPOS_ESTADO) ── */
+/* Margin-top igual al que aplica MudBlazor con Margin.Normal (el default de CampoTexto y
+   la mayoría de MudTextField/MudNumericField de la app) — sin esto, un AriaCombo puesto al
+   lado de un CampoTexto en una misma fila queda más arriba que su vecino, porque AriaCombo
+   no tenía ningún margen propio. */
+.aria-combo { position: relative; font-family: var(--control-font, inherit); margin-top: 16px; }
+.aria-combo-box {
+    position: relative;
+    display: flex; align-items: center; gap: 6px;
+    background: var(--dialog-back, var(--paper, #efe9df)); color: var(--dialog-fore, var(--ink, #16130f));
+    border: 1px solid var(--line, #3a342c); border-radius: 6px; padding: 0 12px;
+    /* Mismo alto real que .mud-input-control-input-container de un MudTextField
+       Variant.Outlined con Margin.Normal — medido en DevTools (51.25px), no el 56px
+       "teórico" de Material Design que MudBlazor no usa tal cual. */
+    height: 51.25px; box-sizing: border-box;
+    transition: border-color .15s ease;
+}
+.aria-combo-box:focus-within { border-color: var(--boton-backcolor, #3b82c4); border-width: 1.5px; }
+
+/* Validación "obligatorio" self-contained (CampoTexto/AriaCombo, ver comentarios en esos
+   componentes) — mismo color de error que usa MudBlazor por defecto, para que se vea
+   consistente con los CampoTexto (MudTextField Error/ErrorText) del mismo formulario. */
+.aria-combo-invalido .aria-combo-box { border-color: #d32f2f !important; }
+.campo-error-mensaje {
+    color: #d32f2f;
+    font-size: .75rem;
+    line-height: 1.2;
+    margin-top: 4px;
+    padding-left: 14px;
+}
+/* Etiqueta flotante estilo Material "outlined": reposa centrada dentro del control
+   (superpuesta al borde) y sube/encoge sobre el borde al enfocar o tener texto —
+   mismo estándar que los MudTextField Variant.Outlined del resto de la app. */
+.aria-combo-label {
+    position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    font-size: var(--control-size, 14px) !important; color: var(--dialog-fore, var(--ink, #16130f)); opacity: .65;
+    letter-spacing: .01em; font-family: var(--control-font, inherit) !important; pointer-events: none;
+    background: transparent; padding: 0 4px; margin: 0; white-space: nowrap;
+    max-width: calc(100% - 60px); overflow: hidden; text-overflow: ellipsis;
+    transition: all .15s ease;
+}
+.aria-combo-box input:focus ~ .aria-combo-label,
+.aria-combo-box input:not(:placeholder-shown) ~ .aria-combo-label {
+    top: 0; left: 8px; font-size: calc(var(--control-size, 14px) - 2pt); font-weight: 700; opacity: 1;
+    background: var(--dialog-back, var(--paper, #efe9df));
+    transform: translateY(-50%);
+}
+.aria-combo-disabled { opacity: .6; }
+.aria-combo-box input {
+    border: none; background: none; outline: none; flex: 1; min-width: 0;
+    font-size: var(--control-size, 14px) !important; color: var(--control-color, var(--ink)) !important;
+    font-family: var(--control-font, inherit) !important;
+    /* MAYÚSCULAS/minúsculas del Modo de Texto en vivo — mismo criterio que .barra-busqueda
+       input/.campo-texto-mt input: solo presentación visual, nunca se reescribe el .value
+       real del input durante el tipeo (ver AriaCombo.razor → EstiloTransformacion/OnInput). */
+    text-transform: var(--aria-combo-transform, none);
+}
+.aria-combo-box svg { width: 18px; height: 18px; opacity: .55; flex-shrink: 0; }
+.aria-combo-chevron { transition: transform .15s ease; }
+.aria-combo-limpiar {
+    background: none; border: none; padding: 2px; margin: 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; opacity: .7; color: #d32f2f;
+    border-radius: 4px; flex-shrink: 0;
+}
+/* El ícono (Icons.Material.Filled.DeleteOutline, un <path fill="currentColor">) hereda el
+   opacity:.55 de ".aria-combo-box svg" de arriba — se restaura a 1 acá porque el botón
+   mismo ya controla su propia translucidez (línea de arriba/:hover), si no quedaba
+   doblemente atenuado y muy tenue. */
+.aria-combo-limpiar svg { opacity: 1; fill: currentColor; }
+.aria-combo-limpiar:hover { opacity: 1; background: rgba(211,47,47,.12); }
+.aria-combo-listbox {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 1400;
+    /* min-width iguala el ancho del input, pero puede crecer más (hasta max-width) si las
+       opciones son más largas que el campo — así el diálogo/grid no necesita ensancharse. */
+    min-width: 100%; width: max-content; max-width: min(420px, 90vw);
+    background: var(--dialog-back, var(--paper, #efe9df)); color: var(--dialog-fore, var(--ink, #16130f));
+    border: 1px solid var(--line, #3a342c); border-radius: 6px; font-family: inherit;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35); max-height: 240px; overflow-y: auto;
+    padding: 4px; margin: 0; list-style: none;
+}
+.aria-combo-option {
+    padding: 8px 10px; border-radius: 4px; font-size: var(--control-size, 14px) !important;
+    font-family: var(--control-font, inherit) !important;
+    color: var(--dialog-fore, var(--ink, #16130f)); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.aria-combo-option mark { background: rgba(59,130,196,.28); color: inherit; border-radius: 2px; }
+/* Ítem con foco = colores del diálogo invertidos (si la lista es fondo blanco/letras
+   azules, el ítem con foco pasa a fondo azul/letras blancas) — no un color de acento
+   fijo, para que siempre combine con la paleta configurada en Configuración General. */
+/* !important porque otras reglas de más arriba (".aria-combo-option{color:...!important}",
+   ".mud-dialog .aria-combo-option{color:...!important}") también fijan el color con
+   !important — sin esto, el texto del ítem activo se quedaba con el mismo color que su
+   nuevo fondo (invisible) porque esas reglas le ganaban a esta por no tener !important. */
+.aria-combo-option.activo,
+.mud-dialog .aria-combo-option.activo {
+    background: var(--dialog-fore, var(--ink, #16130f)) !important;
+    color: var(--dialog-back, var(--paper, #efe9df)) !important;
+}
+.aria-combo-option.activo mark { background: color-mix(in srgb, var(--dialog-back, #efe9df) 35%, transparent); color: inherit; }
+.aria-combo-option.seleccionado { font-weight: 700; }
+.aria-combo-vacio { padding: 8px 10px; font-size: .8rem; opacity: .55; color: var(--dialog-fore, var(--ink, #16130f)); font-family: inherit; }
+
+.estado-combo-wrap { position: relative; }
+.estado-combo-dot {
+    position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    width: 10px; height: 10px; border-radius: 50%; pointer-events: none; z-index: 2;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.15);
+}
+.estado-combo-con-punto .aria-combo-box input { padding-left: 14px; }
+.estado-combo-con-punto .aria-combo-label { left: 26px; }
+.estado-combo-con-punto .aria-combo-box input:focus ~ .aria-combo-label,
+.estado-combo-con-punto .aria-combo-box input:not(:placeholder-shown) ~ .aria-combo-label { left: 8px; }
+
+/* Tabla HTML simple para grillas editables in-place (ej. pestañas Documentos de
+   Identidad / Medios de Contacto en EntidadesDialog) — deliberadamente SIN
+   overflow-x/y en ningún ancestro (a diferencia de MudSimpleTable, que envuelve
+   en un div overflow-x:auto — eso fuerza el eje Y también a auto/hidden por la
+   regla CSS de overflow combinado, recortando el desplegable position:absolute
+   de AriaCombo apenas se abre dentro de una fila). */
+.tabla-simple-editable { border-collapse: collapse; }
+.tabla-simple-editable th, .tabla-simple-editable td {
+    padding: 8px; text-align: left;
+    /* top, no middle: AriaCombo/CampoTexto/MudDatePicker no miden exactamente lo mismo
+       de alto — con "middle" cada control quedaba centrado en la fila a una altura
+       distinta, dando el efecto de "topes desalineados" entre columnas. Con "top" los
+       tres arrancan en el mismo borde superior sin importar la diferencia de alto. */
+    vertical-align: top;
+    font-family: var(--control-font, inherit); font-size: var(--control-size, 14px);
+    border: 1px solid var(--grilla-lineas, rgba(0,0,0,.12));
+}
+/* Medido en DevTools: con MostrarLabel="false" y Margin.None, el recuadro real de
+   MudTextField (.mud-input-control-input-container) queda ~1.5px más abajo que el de
+   AriaCombo/MudDatePicker en la misma fila — incluso con margin-top:0 en los tres —
+   porque MudBlazor sigue reservando un remanente del alto de línea del <label> aunque
+   esté vacío/oculto. (Un primer intento con -6px, medido ANTES de aplicar Margin.None,
+   quedó desactualizado y sobrecorrigió — el hueco real con Margin.None ya puesto es
+   mucho menor). MudDatePicker usa la MISMA clase ".mud-input-control-input-container"
+   por dentro, así que el ajuste no puede ir por esa clase sola (afectaba también a la
+   fecha, que no lo necesitaba) — se escopa al wrapper ".grilla-campo-texto" que envuelve
+   solo el CampoTexto/MudTextField, no la fecha. */
+.tabla-simple-editable .grilla-campo-texto .mud-input-control-input-container {
+    margin-top: -1.5px;
+}
+/* Mismo look que la cabecera de las grillas estándar (MudDataGrid/.sim-grid): fondo/texto
+   configurables en Configuración General, mayúsculas, negrita, tamaño reducido. */
+.tabla-simple-editable thead th {
+    background-color: var(--grilla-cab-fondo, #2b2622);
+    color: var(--grilla-cab-texto, #fff);
+    font-size: .75rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+    border-color: var(--grilla-lineas, rgba(255,255,255,.15));
+}
+.tabla-simple-editable tbody tr:nth-of-type(even) td { background: var(--grilla-fila-par, rgba(0,0,0,.02)); }
+.tabla-simple-editable tbody tr:hover td { background: var(--grilla-fila-hover, rgba(0,0,0,.05)); }
+
+/* Diálogo de Tipo de Operación: alto ampliado sobre el límite por defecto de
+   MudBlazor (que vive en .mud-dialog-content, no en el Paper exterior — por eso
+   agrandar solo el <MudDialog Style> no tenía ningún efecto visible).
+   75vh → +26% ≈ 94.5vh. */
+.mud-dialog.dialog-alto-ampliado {
+    max-height: 98vh !important;
+}
+/* Footer de acciones (Cancelar/Crear/Modificar/Eliminar) fijo al fondo del diálogo:
+   en diálogos largos el contenido scrollea dentro de .mud-dialog-content, pero los
+   botones deben quedar siempre visibles sin tener que bajar hasta el final. Se aplica
+   a CrudDialogActions.razor (todos los diálogos CRUD estándar) y a los diálogos con
+   footer propio que llevan esta misma clase agregada manualmente. */
+.mud-dialog-content { position: relative; }
+.dialog-acciones-fijas {
+    position: sticky;
+    bottom: -1px;
+    z-index: 3;
+    background-color: var(--dialog-back, #efe9df);
+    padding-top: 12px;
+    padding-bottom: 2px;
+    margin-bottom: -1px;
+    border-top: 1px solid rgba(0,0,0,.08);
+}
+.mud-dialog.dialog-alto-ampliado .mud-dialog-content {
+    max-height: 94.5vh !important;
+}
+
+/* ── Diálogos de documento de Logística (Requerimientos / Reservas) ──────────
+   MudGrid Spacing="2" deja 8px de padding por lado, o sea 16px de canal entre
+   columnas. Acá se reduce a un tercio menos (~10.67px) SOLO en horizontal: el
+   respiro vertical entre filas se conserva. El margen negativo y el width del
+   contenedor se recalculan en la misma proporción — si se toca el padding sin
+   tocarlos, la grilla desborda el ancho del diálogo. */
+.documento-logistica .mud-grid-spacing-xs-1,
+.documento-logistica .mud-grid-spacing-xs-2 {
+    margin-left: -0.9px;
+    margin-right: -0.9px;
+    width: calc(100% + 1.8px);
+}
+.documento-logistica .mud-grid-spacing-xs-1 > .mud-grid-item,
+.documento-logistica .mud-grid-spacing-xs-2 > .mud-grid-item {
+    padding-left: 0.9px;
+    padding-right: 0.9px;
+    /* Vertical a la mitad del spacing de MudBlazor: el canal de lado a lado ya está
+       apretado y no es lo que sobra — lo que sobra es el salto de una fila a la de
+       abajo, que es donde se pierde la pantalla. */
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+/* Los .mb-2/.mb-3 de cada control se suman al padding de la fila y duplican el salto
+   vertical. Se los lleva a la mitad dentro de estas pantallas. */
+.documento-logistica .mud-grid-item > .mb-2 { margin-bottom: 4px !important; }
+.documento-logistica .mud-grid-item > .mb-3 { margin-bottom: 8px !important; }
+
+/* Cada control trae su propio margen superior según el default de MudBlazor
+   (CampoTexto usa Margin.Normal, el date picker y AriaCombo no), y por eso los
+   campos de una misma fila no arrancaban a la misma altura. Se anula el
+   remanente en todos y se alinean los items al borde de arriba, en vez de ir
+   ajustando componente por componente. */
+/* El contenedor flex es la grilla, no el item: puesto sobre .mud-grid-item el
+   align-items no hacía nada, porque el item no es flex. Va sobre la fila. */
+.documento-logistica .mud-grid-spacing-xs-1,
+.documento-logistica .mud-grid-spacing-xs-2 { align-items: flex-start; }
+.documento-logistica .mud-input-control { margin-top: 0 !important; }
+/* AriaCombo no es MudBlazor: es un control propio, y lleva margin-top:16px justamente
+   para empatar con un MudTextField Margin.Normal. Al anular el margen de los Mud, ese
+   16px quedó sin contraparte y era todo el desalineo. */
+.documento-logistica .aria-combo { margin-top: 0 !important; }
+
+/* Las cantidades del detalle se teclean, no se recorren de a uno: las flechitas
+   del MudNumericField sólo comen ancho de celda. */
+.documento-logistica .mud-input-numeric-spin { display: none !important; }
+
+/* ── Panel de filtros: un solo alto de input ─────────────────────────────────
+   Conviven tres familias de control —AriaCombo (propio, 51.25px), MudTextField y
+   MudNumericField Dense (~40px)— y cada una traía su alto. Puestos lado a lado la
+   fila se veía escalonada. Se los fuerza a 40px acá y no en cada componente: el
+   alto es de ESTA pantalla, no del control. */
+.filtros-panel .aria-combo-box,
+.filtros-panel .mud-input.mud-input-outlined > .mud-input-slot,
+.filtros-panel .mud-input.mud-input-outlined {
+    height: 40px;
+    min-height: 40px;
+}
+.filtros-panel .aria-combo-box { padding: 0 8px; }
+.filtros-panel .aria-combo-box input,
+.filtros-panel .mud-input-outlined input { height: 100%; }
+
+/* Rangos de cantidad: números que se comparan entre sí, y para compararlos hay que
+   leerlos alineados por la unidad, no por la primera cifra. */
+.filtros-cantidades input { text-align: right; }
+
+/* El detalle sólo se habilita cuando la cabecera ya tiene número. Mientras
+   tanto se ve, pero apagado: se entiende que existe y por qué no se puede usar
+   todavía. */
+.documento-logistica .detalle-bloqueado {
+    opacity: .5;
+    pointer-events: none;
+    user-select: none;
+}
+
+/* ── Combos dentro de la grilla de detalle ───────────────────────────────────
+   AriaCombo está pensado para un formulario: 51.25px de alto y margen propio.
+   Metido en una celda de grilla densa, ese alto la desborda y el control queda
+   recortado o directamente invisible. Acá se lo achica al alto de la fila y se
+   le saca el margen, sin tocar el componente — que se sigue usando tal cual en
+   las cabeceras. */
+.documento-logistica .mud-table-cell .aria-combo { margin: 0 !important; width: 100%; }
+.documento-logistica .mud-table-cell .aria-combo-box {
+    height: 32px;
+    padding: 0 6px;
+    font-size: .82rem;
+}
+.documento-logistica .mud-table-cell .aria-combo-label { display: none; }
+.documento-logistica .mud-table-cell .aria-combo-box input { font-size: .82rem; }
+
+/* Acá hubo un table-layout:fixed y fue un error: MudDataGrid no escribe sus
+   anchos como estilo inline en el <th>, así que con layout fijo las columnas se
+   quedaban sin ancho de referencia y colapsaban. Se veía sólo en el detalle,
+   que es lo único dentro de .documento-logistica.
+
+   No hace falta: lo que estaba fallando de verdad era que los Width venían sin
+   unidad ("90" en vez de "90px") y el navegador los descartaba. Con la unidad
+   puesta, el reparto normal de la tabla ya los respeta, igual que en el resto
+   de las grillas de la app. */
+.documento-logistica .mud-table-container { overflow-x: auto; }
+
+/* El text-align de la celda alinea el valor mostrado, pero al entrar a editar la
+   celda pone un input que trae su propia alineación a la izquierda: el número
+   saltaba de lado al empezar a escribirlo. Se alinean también los inputs, y el
+   encabezado, para que la columna se lea derecha en los tres estados. */
+.documento-logistica .mud-table-cell[style*="text-align:right"] input,
+.documento-logistica .mud-table-cell[style*="text-align: right"] input {
+    text-align: right;
+}
+
+/* ── Ancho de columnas ajustable (ver wwwroot/js/gridColumnas.js) ────────────
+   La franja sensible va pegada al borde derecho de cada encabezado. Se ve sólo
+   al pasar por encima para no ensuciar la cabecera con líneas que compiten con
+   las separaciones reales de la grilla. */
+/* El encabezado de MudDataGrid trae adentro su propio contenedor —el del
+   ordenamiento y el filtro— que ocupa toda la celda. Sin un z-index alto la
+   franja queda debajo y el arrastre no llega nunca; sin overflow visible, la
+   celda la recorta. Los dos hicieron falta para que se pueda agarrar. */
+thead th:has(> .kon-col-resize) { overflow: visible !important; }
+.kon-col-resize {
+    position: absolute;
+    top: 0;
+    right: -3px;              /* montada sobre la línea divisoria, como se espera */
+    height: 100%;
+    width: 8px;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 20;
+    background: transparent;
+    transition: background .12s ease;
+}
+/* Una marca tenue permanente: si no se ve nada, nadie descubre que se puede
+   arrastrar. Se refuerza al pasar por encima. */
+.kon-col-resize::after {
+    content: "";
+    position: absolute;
+    top: 20%; bottom: 20%; left: 3px;
+    width: 2px;
+    background: currentColor;
+    opacity: .28;
+}
+.kon-col-resize:hover::after,
+.kon-col-resize.activo::after { opacity: 1; }
+.kon-col-resize:hover,
+.kon-col-resize.activo { background: rgba(255,255,255,.15); }
+/* Mientras se arrastra, el cursor no debe cambiar al pasar sobre el resto de
+   la página ni deben quedar textos seleccionados por el camino. */
+body.kon-redimensionando { cursor: col-resize !important; user-select: none !important; }
+body.kon-redimensionando * { cursor: col-resize !important; }

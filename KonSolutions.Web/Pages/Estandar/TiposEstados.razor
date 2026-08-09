@@ -1,0 +1,588 @@
+@page "/estandar/tipos-estados"
+@attribute [Authorize]
+@inject CatalogoService<TipoEstado, TipoEstadoDto> TipoService
+@inject ConfigService ConfigSvc
+@inject EstadoService EstadoService
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject MenuService MenuSvc
+@implements IDisposable
+
+<PageTitle>Tipos de Estados · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Estados" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_tiposVisibles.Count de @_tipos.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTipo" OnSearch="HandleSearchTipo" Placeholder="Buscar tipo de estado..."
+                   DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltrosTipo"
+                            HasFilters="@(_filtrosTipo.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="LoadTipos" />
+        <GridPrintButton Titulo="Tipos de Estados" Headers="@_printHeaders" Rows="@PrintRows()" />
+        <AccionesBotones CodAplicacion="@_codApTipo"
+                         CodOpcionAplicacion="@_codOpTipo"
+                         Zona="@AccionesBotones.ZonaBotones.Header"
+                         OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+@* ── MAESTRO: Tipos de Estados ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="mb-4">
+    <div data-resizable-grid="tipos-estados-maestro" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="TipoEstado" Items="_tiposVisibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true"
+                 RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre"
+                 RowClick="OnTipoRowClick" RowClassFunc="@FilaSeleccionada">
+        <Columns>
+            <TemplateColumn Title="Icono" Sortable="false">
+                <CellTemplate>
+                    <GridImage Image="context.Item.IMG_PICTURE" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Código" SortBy="x => x.COD_TIPO_ESTADO" Width="@Limites.ColWidth("ESTANDAR.TIPOS_ESTADO","COD_TIPO_ESTADO",60,120)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_TIPO_ESTADO" Activo="@(_ordenColumnaTipo == 0)" Ascendente="_ordenAscendenteTipo" OnClick="@(() => ToggleOrdenTipo(0))" />
+                        <FiltroExcelColumna T="TipoEstado" ItemsBase="@TiposBaseSinEstaColumna(0)"
+                                            ValorDe="@(t => t.COD_TIPO_ESTADO?.ToString())"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltroTipo(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_ESTADO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Descripción" SortBy="x => x.DES_TIPO_ESTADO" Width="@Limites.ColWidth("ESTANDAR.TIPOS_ESTADO","DES_TIPO_ESTADO",120,350)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TIPO_ESTADO" Activo="@(_ordenColumnaTipo == 1)" Ascendente="_ordenAscendenteTipo" OnClick="@(() => ToggleOrdenTipo(1))" />
+                        <FiltroExcelColumna T="TipoEstado" ItemsBase="@TiposBaseSinEstaColumna(1)"
+                                            ValorDe="@(t => t.DES_TIPO_ESTADO)"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltroTipo(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_ESTADO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var tipo = context.Item; }
+                    <AccionesBotones CodAplicacion="@_codApTipo"
+                                     CodOpcionAplicacion="@_codOpTipo"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                     OnAccion="@(b => OnAccionGrillaTipo(tipo, b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin tipos de estado.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TipoEstado" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@* ── DETALLE: Estados del tipo seleccionado ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div class="d-flex align-center justify-space-between pa-3" style="border-bottom:1px solid var(--line);">
+        <div class="d-flex align-center gap-3">
+            @* Punto 7: imagen del tipo seleccionado (padre) a la izquierda del subtítulo *@
+            @if (_tipoSel is not null && _tipoSel.IMG_PICTURE is { Length: > 0 })
+            {
+                <MudImage Src="@($"data:image/png;base64,{Convert.ToBase64String(_tipoSel.IMG_PICTURE)}")"
+                          Width="48" Height="48" Style="object-fit:contain;border-radius:6px;" />
+            }
+            <div>
+                <MudText Typo="Typo.h6">Estados</MudText>
+                <MudText Class="mono" Style="opacity:.5;font-size:.78rem;color:var(--subtitulo-color,#6b6358);">
+                    @if (_tipoSel is not null) { <text>Tipo: @_tipoSel.DES_TIPO_ESTADO · @_estados.Count estados</text> }
+                    else { <text>Seleccione un tipo de estado arriba</text> }
+                </MudText>
+            </div>
+        </div>
+        <div class="d-flex gap-2">
+            <GridRefreshButton OnRefresh="LoadEstados" />
+            <GridClearFiltersButton OnClear="LimpiarFiltrosEstado"
+                                    HasFilters="@(_filtrosEstado.Any(f => f.Value is not null))" />
+            <MudButton Variant="Variant.Text" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.LibraryAdd"
+                       Disabled="_tipoSel is null" OnClick="OpenImportar" Size="Size.Small">Importar de estándar</MudButton>
+            @* Punto 21: copiar los estados seleccionados a otro tipo de estado *@
+            <MudButton Variant="Variant.Text" Color="Color.Tertiary" StartIcon="@Icons.Material.Filled.ContentCopy"
+                       Disabled="@(_estadosSeleccionados is null || !_estadosSeleccionados.Any())"
+                       OnClick="OpenCopiarEstados" Size="Size.Small">Copiar a otro tipo (@(_estadosSeleccionados?.Count ?? 0))</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       Disabled="_tipoSel is null" OnClick="@(() => OpenEstado(null))" Size="Size.Small">Nuevo estado</MudButton>
+        </div>
+    </div>
+
+    @if (_tipoSel is null)
+    {
+        <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione un tipo de estado para ver sus estados.</MudText>
+    }
+    else if (_loadingEstados)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else
+    {
+        <div data-resizable-grid="tipos-estados-hija" style="position:relative;">
+        <MudDataGrid T="Estado" Items="_estadosVisibles" Dense="true" Hover="true" Striped="true"
+                     Height="100%" FixedHeader="true"
+                     MultiSelection="true" SelectedItems="_estadosSeleccionados"
+                     SelectedItemsChanged="OnEstadosSeleccionadosChanged"
+                     SelectOnRowClick="false"
+                     RowClick="@(args => _estadoSel = args.Item)"
+                     RowClassFunc="@FilaFocoEstado"
+                     RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+            <Columns>
+                <SelectColumn T="Estado" />
+                <TemplateColumn Title="Icono" Sortable="false">
+                    <CellTemplate>
+                        <GridImage Image="context.Item.IMG_PICTURE" />
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Cód" SortBy="x => x.COD_ESTADO" Width="@Limites.ColWidth("ESTANDAR.ESTADOS","COD_ESTADO",60,120)">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="COD_ESTADO" Activo="@(_ordenColumnaEstado == 0)" Ascendente="_ordenAscendenteEstado" OnClick="@(() => ToggleOrdenEstado(0))" />
+                            <FiltroExcelColumna T="Estado" ItemsBase="@EstadosBaseSinEstaColumna(0)"
+                                                ValorDe="@(e => e.COD_ESTADO?.ToString())"
+                                                ValoresActivos="_filtrosEstado.GetValueOrDefault(0)"
+                                                ValoresActivosChanged="@(v => AplicarFiltroEstado(0, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.COD_ESTADO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Alias" SortBy="x => x.COD_ESTADO_ALIAS" Width="@Limites.ColWidth("ESTANDAR.ESTADOS","COD_ESTADO_ALIAS",70,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="COD_ESTADO_ALIAS" Activo="@(_ordenColumnaEstado == 3)" Ascendente="_ordenAscendenteEstado" OnClick="@(() => ToggleOrdenEstado(3))" />
+                            <FiltroExcelColumna T="Estado" ItemsBase="@EstadosBaseSinEstaColumna(3)"
+                                                ValorDe="@(e => e.COD_ESTADO_ALIAS?.ToString() ?? "")"
+                                                ValoresActivos="_filtrosEstado.GetValueOrDefault(3)"
+                                                ValoresActivosChanged="@(v => AplicarFiltroEstado(3, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.COD_ESTADO_ALIAS</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Estado" SortBy="x => x.DES_ESTADO" Width="@Limites.ColWidth("ESTANDAR.ESTADOS","DES_ESTADO",120,300)">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumnaEstado == 1)" Ascendente="_ordenAscendenteEstado" OnClick="@(() => ToggleOrdenEstado(1))" />
+                            <FiltroExcelColumna T="Estado" ItemsBase="@EstadosBaseSinEstaColumna(1)"
+                                                ValorDe="@(e => e.DES_ESTADO)"
+                                                ValoresActivos="_filtrosEstado.GetValueOrDefault(1)"
+                                                ValoresActivosChanged="@(v => AplicarFiltroEstado(1, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        <EstadoChip Estado="@context.Item.DES_ESTADO"
+                                    BackColor="@context.Item.DES_BACKCOLOR"
+                                    ForeColor="@context.Item.DES_FORECOLOR" />
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Dispara" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <CellTemplate>
+                        <div class="d-flex align-center justify-center gap-2">
+                            <MudTooltip Text="Default">
+                                <MudIcon Icon="@Icons.Material.Filled.Star" Color="@(context.Item.FLG_DEFAULT ? Color.Success : Color.Error)"
+                                         Style="@(context.Item.FLG_DEFAULT ? "" : "opacity:.15;")" Size="Size.Small" />
+                            </MudTooltip>
+                            <MudTooltip Text="Mail">
+                                <MudIcon Icon="@Icons.Material.Filled.Email" Color="@(context.Item.FLG_DISPARADOR_MAIL ? Color.Success : Color.Error)"
+                                         Style="@(context.Item.FLG_DISPARADOR_MAIL ? "" : "opacity:.15;")" Size="Size.Small" />
+                            </MudTooltip>
+                            <MudTooltip Text="Notificación">
+                                <MudIcon Icon="@Icons.Material.Filled.Notifications" Color="@(context.Item.FLG_DISPARADOR_NOTIFICACION == true ? Color.Success : Color.Error)"
+                                         Style="@(context.Item.FLG_DISPARADOR_NOTIFICACION == true ? "" : "opacity:.15;")" Size="Size.Small" />
+                            </MudTooltip>
+                            <MudTooltip Text="Autorización">
+                                <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Color="@(context.Item.FLG_DISPARADOR_AUTORIZACION ? Color.Success : Color.Error)"
+                                         Style="@(context.Item.FLG_DISPARADOR_AUTORIZACION ? "" : "opacity:.15;")" Size="Size.Small" />
+                            </MudTooltip>
+                            <MudTooltip Text="Autorización comercial">
+                                <MudIcon Icon="@Icons.Material.Filled.Storefront" Color="@(context.Item.FLG_DISPARADOR_AUTORIZACION_COMERCIAL == true ? Color.Success : Color.Error)"
+                                         Style="@(context.Item.FLG_DISPARADOR_AUTORIZACION_COMERCIAL == true ? "" : "opacity:.15;")" Size="Size.Small" />
+                            </MudTooltip>
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Orden" SortBy="x => x.NUM_ORDEN_PRESENTACION">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="NUM_ORDEN_PRESENTACION" Activo="@(_ordenColumnaEstado == 2)" Ascendente="_ordenAscendenteEstado" OnClick="@(() => ToggleOrdenEstado(2))" />
+                            <FiltroExcelColumna T="Estado" ItemsBase="@EstadosBaseSinEstaColumna(2)"
+                                                ValorDe="@(e => e.NUM_ORDEN_PRESENTACION?.ToString())"
+                                                ValoresActivos="_filtrosEstado.GetValueOrDefault(2)"
+                                                ValoresActivosChanged="@(v => AplicarFiltroEstado(2, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.NUM_ORDEN_PRESENTACION</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false">
+                    <CellTemplate>
+                        @{ var estado = context.Item; }
+                        <AccionesBotones CodAplicacion="@_codApEstado"
+                                         CodOpcionAplicacion="@_codOpEstado"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                         OnAccion="@(b => OnAccionGrillaEstado(estado, b))" />
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;">Este tipo no tiene estados aún.</MudText></NoRecordsContent>
+            <PagerContent><MudDataGridPager T="Estado" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    }
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private string _codApTipo = "", _codOpTipo = "";
+    private string _codApEstado = "", _codOpEstado = "";
+
+    private void ResolverCodigosPorSeccion()
+    {
+        (_codApTipo, _codOpTipo)     = ResolverCod("Estandar/TiposEstados.razor");
+        (_codApEstado, _codOpEstado) = ResolverCod("Estandar/Estados.razor");
+    }
+
+    private (string App, string Opcion) ResolverCod(string formulario)
+    {
+        var r = MenuSvc.BuscarCodigosPorFormulario(formulario);
+        return r is null ? (CodAplicacion, CodOpcionAplicacion) : (r.Value.CodAplicacion, r.Value.CodOpcionAplicacion);
+    }
+
+    private List<TipoEstado> _tipos = new();
+    private readonly List<string> _printHeaders = new() { "Código", "Descripción" };
+    private List<List<string>> PrintRows() => _tipos.Select(t => new List<string>
+    {
+        t.COD_TIPO_ESTADO?.ToString() ?? "", t.DES_TIPO_ESTADO ?? ""
+    }).ToList();
+    private List<Estado> _estados = new();
+    private HashSet<Estado> _estadosSeleccionados = new();   // Punto 21: estados marcados para copiar
+    private Estado? _estadoSel;   // Punto 3: estado con foco en la grilla hija
+    private TipoEstado? _tipoSel;
+    private string _searchTipo = string.Empty;
+    private bool _loadingEstados;
+
+    // ── Filtro Excel en cascada: grilla maestro (Tipos) ── 0=Código, 1=Descripción
+    private readonly Dictionary<int, HashSet<string>?> _filtrosTipo = new();
+    private List<TipoEstado> _tiposVisibles => OrdenarTipo(AplicarTodosTipo(_tipos, excluirColumna: -1));
+    private List<TipoEstado> TiposBaseSinEstaColumna(int columna) => AplicarTodosTipo(_tipos, columna);
+
+    // ── Ordenamiento manual: grilla maestro (Tipos) ──
+    private int? _ordenColumnaTipo;
+    private bool _ordenAscendenteTipo = true;
+
+    private void ToggleOrdenTipo(int columna)
+    {
+        if (_ordenColumnaTipo == columna) _ordenAscendenteTipo = !_ordenAscendenteTipo;
+        else { _ordenColumnaTipo = columna; _ordenAscendenteTipo = true; }
+        StateHasChanged();
+    }
+
+    private List<TipoEstado> OrdenarTipo(List<TipoEstado> items) => _ordenColumnaTipo switch
+    {
+        0 => _ordenAscendenteTipo ? items.OrderBy(t => t.COD_TIPO_ESTADO).ToList() : items.OrderByDescending(t => t.COD_TIPO_ESTADO).ToList(),
+        1 => _ordenAscendenteTipo ? items.OrderBy(t => t.DES_TIPO_ESTADO).ToList() : items.OrderByDescending(t => t.DES_TIPO_ESTADO).ToList(),
+        _ => items
+    };
+
+    private List<TipoEstado> AplicarTodosTipo(List<TipoEstado> origen, int excluirColumna)
+    {
+        IEnumerable<TipoEstado> q = origen;
+        foreach (var (col, valores) in _filtrosTipo)
+        {
+            if (col == excluirColumna || valores is null) continue;
+            q = col switch
+            {
+                0 => q.Where(t => valores.Contains(t.COD_TIPO_ESTADO?.ToString() ?? "")),
+                1 => q.Where(t => valores.Contains(t.DES_TIPO_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltroTipo(int columna, HashSet<string>? valores)
+    {
+        _filtrosTipo[columna] = valores;
+        // Cascade: if selected tipo is no longer visible, clear child grid
+        if (_tipoSel is not null && !_tiposVisibles.Contains(_tipoSel))
+        {
+            _tipoSel = null;
+            _estados = new();
+        }
+        StateHasChanged();
+    }
+
+    private void LimpiarFiltrosTipo()
+    {
+        foreach (var k in _filtrosTipo.Keys.ToList()) _filtrosTipo[k] = null;
+        StateHasChanged();
+    }
+
+    // ── Filtro Excel en cascada: grilla detalle (Estados) ── 0=Cód, 1=Estado, 2=Orden
+    private readonly Dictionary<int, HashSet<string>?> _filtrosEstado = new();
+    private List<Estado> _estadosVisibles => OrdenarEstado(AplicarTodosEstado(_estados, excluirColumna: -1));
+    private List<Estado> EstadosBaseSinEstaColumna(int columna) => AplicarTodosEstado(_estados, columna);
+
+    // ── Ordenamiento manual: grilla detalle (Estados) ──
+    private int? _ordenColumnaEstado;
+    private bool _ordenAscendenteEstado = true;
+
+    private void ToggleOrdenEstado(int columna)
+    {
+        if (_ordenColumnaEstado == columna) _ordenAscendenteEstado = !_ordenAscendenteEstado;
+        else { _ordenColumnaEstado = columna; _ordenAscendenteEstado = true; }
+        StateHasChanged();
+    }
+
+    private List<Estado> OrdenarEstado(List<Estado> items) => _ordenColumnaEstado switch
+    {
+        0 => _ordenAscendenteEstado ? items.OrderBy(e => e.COD_ESTADO).ToList() : items.OrderByDescending(e => e.COD_ESTADO).ToList(),
+        1 => _ordenAscendenteEstado ? items.OrderBy(e => e.DES_ESTADO).ToList() : items.OrderByDescending(e => e.DES_ESTADO).ToList(),
+        2 => _ordenAscendenteEstado ? items.OrderBy(e => e.NUM_ORDEN_PRESENTACION).ToList() : items.OrderByDescending(e => e.NUM_ORDEN_PRESENTACION).ToList(),
+        3 => _ordenAscendenteEstado ? items.OrderBy(e => e.COD_ESTADO_ALIAS).ToList() : items.OrderByDescending(e => e.COD_ESTADO_ALIAS).ToList(),
+        _ => items
+    };
+
+    private List<Estado> AplicarTodosEstado(List<Estado> origen, int excluirColumna)
+    {
+        IEnumerable<Estado> q = origen;
+        foreach (var (col, valores) in _filtrosEstado)
+        {
+            if (col == excluirColumna || valores is null) continue;
+            q = col switch
+            {
+                0 => q.Where(e => valores.Contains(e.COD_ESTADO?.ToString() ?? "")),
+                1 => q.Where(e => valores.Contains(e.DES_ESTADO ?? "")),
+                2 => q.Where(e => valores.Contains(e.NUM_ORDEN_PRESENTACION?.ToString() ?? "")),
+                3 => q.Where(e => valores.Contains(e.COD_ESTADO_ALIAS?.ToString() ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltroEstado(int columna, HashSet<string>? valores)
+    {
+        _filtrosEstado[columna] = valores;
+        StateHasChanged();
+    }
+
+    private void LimpiarFiltrosEstado()
+    {
+        foreach (var k in _filtrosEstado.Keys.ToList()) _filtrosEstado[k] = null;
+        StateHasChanged();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        ResolverCodigosPorSeccion();
+        await AccessLog.LogNavegacionAsync("ESTANDAR", "TiposEstados");
+        await LoadTipos();
+        Cambios.Suscribir("ESTANDAR.TIPOS_ESTADOS", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => OpenTipo(null));
+
+    private async Task LoadTipos()
+    {
+        _tipos = await TipoService.GetAllAsync();
+        // Mostrar por defecto el detalle del primer registro
+        if (_tipos.Any() && _tipoSel is null)
+        {
+            _tipoSel = _tipos.First();
+            await LoadEstados();
+        }
+    }
+
+    private async Task HandleSearchTipo()
+    {
+        _tipos = string.IsNullOrWhiteSpace(_searchTipo)
+            ? await TipoService.GetAllAsync()
+            : await TipoService.SearchAsync(_searchTipo);
+    }
+
+    // Al hacer clic en una fila del maestro, cargar sus estados hijos
+    private async Task OnTipoRowClick(DataGridRowClickEventArgs<TipoEstado> args)
+        => await SelectTipo(args.Item);
+
+    /// <summary>Clase CSS para resaltar el tipo de estado seleccionado en la grilla padre.</summary>
+    private string FilaSeleccionada(TipoEstado item, int _)
+        => _tipoSel is not null && item.COD_TIPO_ESTADO == _tipoSel.COD_TIPO_ESTADO ? "fila-seleccionada" : "";
+
+    /// <summary>Punto 3: aplica el color de foco a la fila del estado seleccionado (grilla hija).</summary>
+    private string FilaFocoEstado(Estado item, int _)
+        => _estadoSel is not null && item.COD_TIPO_ESTADO == _estadoSel.COD_TIPO_ESTADO
+           && item.COD_ESTADO == _estadoSel.COD_ESTADO ? "fila-foco" : "";
+
+    private async Task SelectTipo(TipoEstado t)
+    {
+        _tipoSel = t;
+        await LoadEstados();
+    }
+
+    private async Task LoadEstados()
+    {
+        if (_tipoSel?.COD_TIPO_ESTADO is null) { _estados = new(); return; }
+        _loadingEstados = true;
+        _estados = await EstadoService.GetByTipoAsync(_tipoSel.COD_TIPO_ESTADO.Value);
+        _loadingEstados = false;
+    }
+
+    // ── Seguridad dinámica ──────────────────────────────────────────────────
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return OpenTipo(null);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaTipo(TipoEstado item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return VerTipo(item);
+        if (b.FLG_ACCION_PUT    == true) return OpenTipo(item);
+        if (b.FLG_ACCION_DELETE == true) return DeleteTipo(item);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaEstado(Estado item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return VerEstado(item);
+        if (b.FLG_ACCION_PUT    == true) return OpenEstado(item);
+        if (b.FLG_ACCION_DELETE == true) return DeleteEstado(item);
+        return Task.CompletedTask;
+    }
+
+    // ── CRUD Tipo ──
+    private async Task VerTipo(TipoEstado t)
+    {
+        var campos = new List<(string, object?)>
+        {
+            ("Código", t.COD_TIPO_ESTADO), ("Descripción", t.DES_TIPO_ESTADO), ("Imagen", t.IMG_PICTURE)
+        };
+        await DialogService.ShowAsync<VerRegistroDialog>("Tipo de estado",
+            new DialogParameters { ["Campos"] = campos }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task VerEstado(Estado e)
+    {
+        var campos = new List<(string, object?)>
+        {
+            ("Tipo", e.COD_TIPO_ESTADO), ("Código", e.COD_ESTADO), ("Descripción", e.DES_ESTADO),
+            ("Por defecto", e.FLG_DEFAULT), ("Color fondo", e.DES_BACKCOLOR), ("Color texto", e.DES_FORECOLOR),
+            ("Imagen", e.IMG_PICTURE)
+        };
+        await DialogService.ShowAsync<VerRegistroDialog>("Estado",
+            new DialogParameters { ["Campos"] = campos }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task OpenTipo(TipoEstado? t)
+    {
+        var dlg = await DialogService.ShowAsync<TipoEstadoDialog>(
+            t is null ? "Nuevo tipo de estado" : $"Editar · {t.DES_TIPO_ESTADO}",
+            new DialogParameters { ["Item"] = t, ["Modo"] = t is null ? CrudModo.Create : CrudModo.Update },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var r = await dlg.Result;
+        if (r is not null && !r.Canceled) await LoadTipos();
+    }
+
+    private async Task DeleteTipo(TipoEstado t)
+    {
+        var confirm = await DialogService.ShowMessageBox("Confirmar",
+            $"¿Eliminar el tipo '{t.DES_TIPO_ESTADO}'? Esto puede afectar sus estados.",
+            yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirm == true && t.COD_TIPO_ESTADO is not null)
+        {
+            var (ok, msg) = await TipoService.EliminarAsync(t.COD_TIPO_ESTADO.Value.ToString());
+            if (ok) { Snackbar.Add("Tipo eliminado.", Severity.Success); if (_tipoSel == t) { _tipoSel = null; _estados = new(); } await LoadTipos(); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(TiposEstados));
+        }
+    }
+
+    // ── CRUD Estado (hijo) ──
+    private async Task OpenEstado(Estado? e)
+    {
+        if (_tipoSel?.COD_TIPO_ESTADO is null) return;
+        var dlg = await DialogService.ShowAsync<EstadoDialog>(
+            e is null ? "Nuevo estado" : $"Editar · {e.DES_ESTADO}",
+            new DialogParameters { ["Item"] = e, ["CodTipoEstado"] = _tipoSel.COD_TIPO_ESTADO.Value },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var r = await dlg.Result;
+        if (r is not null && !r.Canceled) await LoadEstados();
+    }
+
+    private async Task DeleteEstado(Estado e)
+    {
+        var confirm = await DialogService.ShowMessageBox("Confirmar",
+            $"¿Eliminar el estado '{e.DES_ESTADO}'?", yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirm == true && e.COD_TIPO_ESTADO is not null && e.COD_ESTADO is not null)
+        {
+            var (ok, msg) = await EstadoService.EliminarAsync(e.COD_TIPO_ESTADO.Value, e.COD_ESTADO.Value);
+            if (ok) { Snackbar.Add("Estado eliminado.", Severity.Success); await LoadEstados(); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(TiposEstados));
+        }
+    }
+
+    // Importar estados desde el catálogo de Estados Estándar
+    private async Task OpenImportar()
+    {
+        if (_tipoSel?.COD_TIPO_ESTADO is null) return;
+        var dlg = await DialogService.ShowAsync<ImportarEstadosEstandarDialog>(
+            $"Importar estados estándar → {_tipoSel.DES_TIPO_ESTADO}",
+            new DialogParameters { ["CodTipoEstado"] = _tipoSel.COD_TIPO_ESTADO.Value },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var r = await dlg.Result;
+        if (r is not null && !r.Canceled) await LoadEstados();
+    }
+
+    // Punto 21: copiar los estados seleccionados a otro tipo de estado
+    private void OnEstadosSeleccionadosChanged(HashSet<Estado> seleccionados)
+    {
+        _estadosSeleccionados = seleccionados;
+        StateHasChanged();   // refrescar para habilitar/deshabilitar el botón Copiar
+    }
+
+    private async Task OpenCopiarEstados()
+    {
+        if (_estadosSeleccionados is null || !_estadosSeleccionados.Any()) return;
+
+        // Tipos destino: todos menos el actual
+        var destinos = _tipos.Where(t => t.COD_TIPO_ESTADO != _tipoSel?.COD_TIPO_ESTADO).ToList();
+
+        var dlg = await DialogService.ShowAsync<CopiarEstadosDialog>(
+            "Copiar estados a otro tipo",
+            new DialogParameters
+            {
+                ["Estados"] = _estadosSeleccionados.ToList(),
+                ["TiposDestino"] = destinos
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var r = await dlg.Result;
+        if (r is not null && !r.Canceled)
+        {
+            _estadosSeleccionados.Clear();
+            await LoadEstados();
+        }
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await LoadTipos(); StateHasChanged(); });
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ESTANDAR.TIPOS_ESTADOS", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

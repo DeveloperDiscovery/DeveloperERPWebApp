@@ -1,0 +1,409 @@
+@page "/comercial/tipos-impuesto"
+@attribute [Authorize]
+@using TiposImpuestoModel = KONSolutions.Shared.Models.Comercial.TiposImpuesto
+@using TiposImpuestoValoresModel = KONSolutions.Shared.Models.Comercial.TiposImpuestoValores
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject ErrorLogService ErrorLog
+@inject MenuService MenuSvc
+@implements IDisposable
+
+<PageTitle>Tipos de Impuesto · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Impuesto" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema COMERCIAL · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar tipo de impuesto..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@_codApImpuesto" CodOpcionAplicacion="@_codOpImpuesto"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+@* ── MAESTRO: Tipos de Impuesto ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="mb-4">
+    <div data-resizable-grid="tipos-impuesto-maestro" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="TiposImpuestoModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre"
+                 RowClick="OnRowClick" RowClassFunc="FilaSeleccionada">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código"
+                            Width="@Limites.ColWidth("COMERCIAL.TIPOS_IMPUESTO","COD_TIPO_IMPUESTO",60,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_TIPO_IMPUESTO" Activo="@(_ordenColumnaMaestro == 0)" Ascendente="_ordenAscendenteMaestro" OnClick="@(() => ToggleOrdenMaestro(0))" />
+                        <FiltroExcelColumna T="TiposImpuestoModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_TIPO_IMPUESTO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_IMPUESTO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción"
+                            Width="@Limites.ColWidth("COMERCIAL.TIPOS_IMPUESTO","DES_TIPO_IMPUESTO",150,400)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_IMPUESTO" Activo="@(_ordenColumnaMaestro == 1)" Ascendente="_ordenAscendenteMaestro" OnClick="@(() => ToggleOrdenMaestro(1))" />
+                        <FiltroExcelColumna T="TiposImpuestoModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_TIPO_IMPUESTO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_IMPUESTO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Cód. SUNAT" Width="110" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center justify-center gap-1"><EncabezadoOrdenable Campo="COD_TIPO_IMPUESTO_SUNAT" Activo="@(_ordenColumnaMaestro == 2)" Ascendente="_ordenAscendenteMaestro" OnClick="@(() => ToggleOrdenMaestro(2))" />
+                        <FiltroExcelColumna T="TiposImpuestoModel" ItemsBase="@Base(2)" ValorDe="@(x=>x.COD_TIPO_IMPUESTO_SUNAT?.ToString() ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_IMPUESTO_SUNAT</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@_codApImpuesto" CodOpcionAplicacion="@_codOpImpuesto"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TiposImpuestoModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@* ── DETALLE: Valores vigentes del tipo de impuesto seleccionado ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div class="d-flex align-center justify-space-between pa-3" style="border-bottom:1px solid var(--line);">
+        <div>
+            <MudText Typo="Typo.h6">Valores</MudText>
+            <MudText Class="mono" Style="opacity:.5;font-size:.78rem;">
+                @if (_sel is not null) { <text>Tipo: @_sel.DES_TIPO_IMPUESTO (@_sel.COD_TIPO_IMPUESTO) · @_valores.Count valores</text> }
+                else { <text>Seleccione un tipo de impuesto arriba</text> }
+            </MudText>
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" Disabled="_sel is null"
+                   StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => AbrirValor(null, CrudModo.Create))">Nuevo valor</MudButton>
+    </div>
+
+    @if (_sel is null)
+    {
+        <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione un tipo de impuesto para ver sus valores.</MudText>
+    }
+    else
+    {
+        <div data-resizable-grid="tipos-impuesto-valores-hija" style="position:relative;">
+        <MudDataGrid T="TiposImpuestoValoresModel" Items="@OrdenarValores(AplicarValores(_valores, -1))" Dense="true" Hover="true" Striped="true"
+                     Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+            <Columns>
+                <TemplateColumn Sortable="false" Title="Desde" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center justify-center gap-1"><EncabezadoOrdenable Campo="FEC_INICIO" Activo="@(_ordenColumnaValores == 0)" Ascendente="_ordenAscendenteValores" OnClick="@(() => ToggleOrdenValores(0))" />
+                            <FiltroExcelColumna T="TiposImpuestoValoresModel" ItemsBase="@AplicarValores(_valores, 0)" ValorDe="@(x=>x.FEC_INICIO?.ToString("dd/MM/yyyy") ?? "")"
+                                                ValoresActivos="_filtrosValores.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>{ _filtrosValores[0]=v; StateHasChanged(); })" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@(context.Item.FEC_INICIO?.ToString("dd/MM/yyyy"))</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Hasta" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center justify-center gap-1"><EncabezadoOrdenable Campo="FEC_FINAL" Activo="@(_ordenColumnaValores == 1)" Ascendente="_ordenAscendenteValores" OnClick="@(() => ToggleOrdenValores(1))" />
+                            <FiltroExcelColumna T="TiposImpuestoValoresModel" ItemsBase="@AplicarValores(_valores, 1)" ValorDe="@(x=>x.FEC_FINAL?.ToString("dd/MM/yyyy") ?? "")"
+                                                ValoresActivos="_filtrosValores.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>{ _filtrosValores[1]=v; StateHasChanged(); })" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@(context.Item.FEC_FINAL?.ToString("dd/MM/yyyy") ?? "—")</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Tasa %" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center justify-center gap-1"><EncabezadoOrdenable Campo="TAS_IMPUESTO" Activo="@(_ordenColumnaValores == 2)" Ascendente="_ordenAscendenteValores" OnClick="@(() => ToggleOrdenValores(2))" />
+                            <FiltroExcelColumna T="TiposImpuestoValoresModel" ItemsBase="@AplicarValores(_valores, 2)" ValorDe="@(x=>x.TAS_IMPUESTO?.ToString("N3", System.Globalization.CultureInfo.CurrentCulture) ?? "")"
+                                                ValoresActivos="_filtrosValores.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>{ _filtrosValores[2]=v; StateHasChanged(); })" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@(context.Item.TAS_IMPUESTO?.ToString("N3", System.Globalization.CultureInfo.CurrentCulture) ?? "—")</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Valor" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center justify-center gap-1"><EncabezadoOrdenable Campo="VAL_IMPUESTO" Activo="@(_ordenColumnaValores == 3)" Ascendente="_ordenAscendenteValores" OnClick="@(() => ToggleOrdenValores(3))" />
+                            <FiltroExcelColumna T="TiposImpuestoValoresModel" ItemsBase="@AplicarValores(_valores, 3)" ValorDe="@(x=>x.VAL_IMPUESTO?.ToString("N2", System.Globalization.CultureInfo.CurrentCulture) ?? "")"
+                                                ValoresActivos="_filtrosValores.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>{ _filtrosValores[3]=v; StateHasChanged(); })" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@(context.Item.VAL_IMPUESTO?.ToString("N2", System.Globalization.CultureInfo.CurrentCulture) ?? "—")</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false">
+                    <CellTemplate>
+                        @{ var v = context.Item; }
+                        <AccionesBotones CodAplicacion="@_codApValores" CodOpcionAplicacion="@_codOpValores"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaValor(v,b))" />
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;">Este tipo de impuesto no tiene valores registrados.</MudText></NoRecordsContent>
+            <PagerContent><MudDataGridPager T="TiposImpuestoValoresModel" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    }
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private string _codApImpuesto = "", _codOpImpuesto = "";
+    private string _codApValores = "", _codOpValores = "";
+
+    private void ResolverCodigosPorSeccion()
+    {
+        (_codApImpuesto, _codOpImpuesto) = ResolverCod("Comercial/TiposImpuesto.razor");
+        (_codApValores, _codOpValores)   = ResolverCod("Comercial/TiposImpuestoValores.razor");
+    }
+
+    private (string App, string Opcion) ResolverCod(string formulario)
+    {
+        var r = MenuSvc.BuscarCodigosPorFormulario(formulario);
+        return r is null ? (CodAplicacion, CodOpcionAplicacion) : (r.Value.CodAplicacion, r.Value.CodOpcionAplicacion);
+    }
+
+    private List<TiposImpuestoModel> _items = new();
+    private TiposImpuestoModel? _sel;
+    private List<TiposImpuestoValoresModel> _todosValores = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumnaMaestro;
+    private bool _ordenAscendenteMaestro = true;
+    private void ToggleOrdenMaestro(int columna)
+    {
+        if (_ordenColumnaMaestro == columna) _ordenAscendenteMaestro = !_ordenAscendenteMaestro;
+        else { _ordenColumnaMaestro = columna; _ordenAscendenteMaestro = true; }
+        StateHasChanged();
+    }
+    private List<TiposImpuestoModel> OrdenarMaestro(List<TiposImpuestoModel> items) => _ordenColumnaMaestro switch
+    {
+        0 => _ordenAscendenteMaestro ? items.OrderBy(x => x.COD_TIPO_IMPUESTO).ToList() : items.OrderByDescending(x => x.COD_TIPO_IMPUESTO).ToList(),
+        1 => _ordenAscendenteMaestro ? items.OrderBy(x => x.DES_TIPO_IMPUESTO).ToList() : items.OrderByDescending(x => x.DES_TIPO_IMPUESTO).ToList(),
+        2 => _ordenAscendenteMaestro ? items.OrderBy(x => x.COD_TIPO_IMPUESTO_SUNAT).ToList() : items.OrderByDescending(x => x.COD_TIPO_IMPUESTO_SUNAT).ToList(),
+        _ => items
+    };
+    private List<TiposImpuestoModel> _visibles => OrdenarMaestro(Aplicar(_items, -1));
+    private List<TiposImpuestoModel> Base(int col) => Aplicar(_items, col);
+
+    private List<TiposImpuestoValoresModel> _valores => _todosValores;
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosValores = new();
+    private int? _ordenColumnaValores;
+    private bool _ordenAscendenteValores = true;
+    private void ToggleOrdenValores(int columna)
+    {
+        if (_ordenColumnaValores == columna) _ordenAscendenteValores = !_ordenAscendenteValores;
+        else { _ordenColumnaValores = columna; _ordenAscendenteValores = true; }
+        StateHasChanged();
+    }
+    private List<TiposImpuestoValoresModel> OrdenarValores(List<TiposImpuestoValoresModel> items) => _ordenColumnaValores switch
+    {
+        0 => _ordenAscendenteValores ? items.OrderBy(x => x.FEC_INICIO).ToList() : items.OrderByDescending(x => x.FEC_INICIO).ToList(),
+        1 => _ordenAscendenteValores ? items.OrderBy(x => x.FEC_FINAL).ToList() : items.OrderByDescending(x => x.FEC_FINAL).ToList(),
+        2 => _ordenAscendenteValores ? items.OrderBy(x => x.TAS_IMPUESTO).ToList() : items.OrderByDescending(x => x.TAS_IMPUESTO).ToList(),
+        3 => _ordenAscendenteValores ? items.OrderBy(x => x.VAL_IMPUESTO).ToList() : items.OrderByDescending(x => x.VAL_IMPUESTO).ToList(),
+        _ => items
+    };
+
+    private List<TiposImpuestoValoresModel> AplicarValores(List<TiposImpuestoValoresModel> src, int ex)
+    {
+        IEnumerable<TiposImpuestoValoresModel> q = src;
+        foreach (var (c, v) in _filtrosValores)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.FEC_INICIO?.ToString("dd/MM/yyyy") ?? "")),
+                1 => q.Where(x => v.Contains(x.FEC_FINAL?.ToString("dd/MM/yyyy") ?? "")),
+                2 => q.Where(x => v.Contains(x.TAS_IMPUESTO?.ToString("N3", System.Globalization.CultureInfo.CurrentCulture) ?? "")),
+                3 => q.Where(x => v.Contains(x.VAL_IMPUESTO?.ToString("N2", System.Globalization.CultureInfo.CurrentCulture) ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private List<TiposImpuestoModel> Aplicar(List<TiposImpuestoModel> src, int ex)
+    {
+        IEnumerable<TiposImpuestoModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_TIPO_IMPUESTO)),
+                1 => q.Where(x => v.Contains(x.DES_TIPO_IMPUESTO)),
+                2 => q.Where(x => v.Contains(x.COD_TIPO_IMPUESTO_SUNAT?.ToString() ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private async Task Buscar()
+        => _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+
+    protected override async Task OnInitializedAsync()
+    {
+        ResolverCodigosPorSeccion();
+        await AccessLog.LogNavegacionAsync("COMERCIAL", "TiposImpuesto");
+        await Load();
+        Cambios.Suscribir("COMERCIAL.TIPOS_IMPUESTO", RefrescarPorCambio);
+        Cambios.Suscribir("COMERCIAL.TIPOS_IMPUESTO_VALORES", RefrescarDetalle);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load()
+    {
+        _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+        _sel = _sel is null ? null : _items.FirstOrDefault(x => x.COD_TIPO_IMPUESTO == _sel.COD_TIPO_IMPUESTO);
+        if (_sel is null && _items.Count > 0) _sel = _items.First();
+        await CargarValores();
+    }
+
+    private async Task CargarValores() => _todosValores = _sel is null ? new() : await FetchValores(_sel.COD_TIPO_IMPUESTO);
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+    private async Task RefrescarDetalle() => await InvokeAsync(async () => { await CargarValores(); StateHasChanged(); });
+
+    private async Task OnRowClick(DataGridRowClickEventArgs<TiposImpuestoModel> args)
+    {
+        _sel = args.Item;
+        await CargarValores();
+    }
+
+    private string FilaSeleccionada(TiposImpuestoModel item, int _)
+        => _sel is not null && item.COD_TIPO_IMPUESTO == _sel.COD_TIPO_IMPUESTO ? "fila-seleccionada" : "";
+
+    private async Task<List<TiposImpuestoModel>> Fetch()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposImpuestoModel>>>(
+                ApiRoutes.Comercial.TiposImpuesto);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(TiposImpuesto), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<TiposImpuestoModel>> FetchSearch(string s)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposImpuestoModel>>>(
+                $"{ApiRoutes.Comercial.TiposImpuesto}/search?search={Uri.EscapeDataString(s)}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(TiposImpuesto), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<TiposImpuestoValoresModel>> FetchValores(string codTipoImpuesto)
+    {
+        try
+        {
+            var resp = await Http.GetAsync(
+                $"{ApiRoutes.Comercial.TiposImpuestoValores}?codTipoImpuesto={Uri.EscapeDataString(codTipoImpuesto)}");
+            if (!resp.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposImpuesto), nameof(FetchValores), "No se pudo cargar el detalle de valores");
+                return new();
+            }
+            var r = await resp.Content.ReadFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposImpuestoValoresModel>>>();
+            if (r?.Success == false)
+            {
+                await ErrorDialogHelper.MostrarMensajeAsync(r.Message ?? "No se pudo cargar el detalle de valores", DialogService, nameof(TiposImpuesto));
+                return new();
+            }
+            return r?.Data ?? new();
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(TiposImpuesto)); return new(); }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(TiposImpuestoModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(TiposImpuestoModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de impuesto",
+            CrudModo.Delete => $"Eliminar · {item?.DES_TIPO_IMPUESTO}",
+            _               => $"Editar · {item?.DES_TIPO_IMPUESTO}"
+        };
+        var dlg = await DialogService.ShowAsync<TiposImpuestoDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    private Task OnAccionGrillaValor(TiposImpuestoValoresModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return AbrirValor(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return AbrirValor(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirValor(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirValor(TiposImpuestoValoresModel? item, CrudModo modo)
+    {
+        if (_sel is null) return;
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo valor de impuesto",
+            CrudModo.Delete => $"Eliminar valor · {item?.FEC_INICIO:dd/MM/yyyy}",
+            _               => $"Editar valor · {item?.FEC_INICIO:dd/MM/yyyy}"
+        };
+        var dlg = await DialogService.ShowAsync<TiposImpuestoValoresDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo, ["CodTipoImpuestoFijo"] = _sel.COD_TIPO_IMPUESTO },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) { await CargarValores(); StateHasChanged(); }
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("COMERCIAL.TIPOS_IMPUESTO", RefrescarPorCambio);
+        Cambios.Desuscribir("COMERCIAL.TIPOS_IMPUESTO_VALORES", RefrescarDetalle);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

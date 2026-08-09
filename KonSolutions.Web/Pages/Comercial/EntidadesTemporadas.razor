@@ -1,0 +1,411 @@
+@page "/comercial/entidades-temporadas"
+@attribute [Authorize]
+@using TemporadaModel = KONSolutions.Shared.Models.Comercial.EntidadesTemporadas
+@using ColeccionModel = KONSolutions.Shared.Models.Comercial.EntidadesTemporadasColecciones
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using EstandarRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+
+<PageTitle>Temporadas por Entidad · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Temporadas por Entidad" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema COMERCIAL · configuración</MudText>
+    </div>
+</div>
+
+<MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:1px solid var(--line);">
+    <AriaCombo TItem="ComboboxItem" Items="_entidades"
+               TextFunc="@(e => $"{e.Id} - {e.Texto}")" ValueFunc="@(e => e.Id)"
+               Value="@_codEntidadTexto" ValueChanged="@(v => OnEntidadChanged(v ?? ""))"
+               Label="Entidad" Style="min-width:340px;" />
+</MudPaper>
+
+@if (_codEntidad is null)
+{
+    <MudText Class="pa-6 mono" Style="opacity:.5;">Seleccione una Entidad arriba para ver sus Temporadas.</MudText>
+}
+else
+{
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);margin-bottom:16px;">
+        <div class="d-flex align-center gap-3 pa-3 grid-header-compacto">
+            <div class="grid-header-titulo">
+                <MudText Typo="Typo.h6">Temporadas</MudText>
+                <MudText Class="mono" Style="opacity:.6;font-size:.78rem;">@_temporadas.Count registros</MudText>
+            </div>
+            <div class="grid-header-divider"></div>
+            <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                             Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderTemporada" />
+        </div>
+        <div data-resizable-grid="entidades-temporadas" data-default-height="320" style="position:relative;">
+        <MudDataGrid T="TemporadaModel" Items="_temporadasVisibles" Dense="true" Hover="true" Striped="true"
+                     RowClick="OnTemporadaRowClick"
+                     RowClassFunc="@((t, i) => t.NUM_TEMPORADA == _temporadaSel?.NUM_TEMPORADA ? "fila-seleccionada" : "")"
+                     RowStyleFunc="@((t, i) => "cursor:pointer;")"
+                     FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre">
+            <Columns>
+                <TemplateColumn Sortable="false" Title="Código" Width="90">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="NUM_TEMPORADA" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                            <FiltroExcelColumna T="TemporadaModel" ItemsBase="@BaseTemporada(0)" ValorDe="@(x => x.NUM_TEMPORADA?.ToString() ?? "")"
+                                                ValoresActivos="_filtrosTemporada.GetValueOrDefault(0)" ValoresActivosChanged="@(v => FiltroTemporada(0, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.NUM_TEMPORADA</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Descripción">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TEMPORADA" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                            <FiltroExcelColumna T="TemporadaModel" ItemsBase="@BaseTemporada(1)" ValorDe="@(x => x.DES_TEMPORADA)"
+                                                ValoresActivos="_filtrosTemporada.GetValueOrDefault(1)" ValoresActivosChanged="@(v => FiltroTemporada(1, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.DES_TEMPORADA</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Año" Width="100">
+                    <CellTemplate>@context.Item.NUM_ANO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Mes" Width="140">
+                    <CellTemplate>@DescMes(context.Item.NUM_MES)</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Mes Final" Width="140">
+                    <CellTemplate>@DescMes(context.Item.MES_FINAL)</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Estado" Sortable="false" Width="120">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                            <FiltroExcelColumna T="TemporadaModel" ItemsBase="@BaseTemporada(2)" ValorDe="@(x => x.DES_ESTADO ?? "")"
+                                                ValoresActivos="_filtrosTemporada.GetValueOrDefault(2)" ValoresActivosChanged="@(v => FiltroTemporada(2, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        @if (!string.IsNullOrEmpty(context.Item.DES_ESTADO))
+                        {
+                            <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false">
+                    <CellTemplate>
+                        @{ var item = context.Item; }
+                        <div @onclick:stopPropagation="true">
+                            <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                             Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b => OnAccionGrillaTemporada(item, b))" />
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin temporadas para esta Entidad.</MudText></NoRecordsContent>
+            <PagerContent><MudDataGridPager T="TemporadaModel" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    </MudPaper>
+
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);">
+        <div class="d-flex align-center gap-3 pa-3 grid-header-compacto">
+            <div class="grid-header-titulo">
+                <MudText Typo="Typo.h6">Colecciones</MudText>
+                <MudText Class="mono" Style="opacity:.6;font-size:.78rem;">
+                    @(_temporadaSel is null ? "Ninguna temporada seleccionada" : $"Temporada: {_temporadaSel.NUM_TEMPORADA} – {_temporadaSel.DES_TEMPORADA}")
+                </MudText>
+            </div>
+            @if (_temporadaSel is not null)
+            {
+                <div class="grid-header-divider"></div>
+                <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                 Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderColeccion" />
+            }
+        </div>
+        <div data-resizable-grid="entidades-temporadas-colecciones" data-default-height="320" style="position:relative;">
+        <MudDataGrid T="ColeccionModel" Items="_coleccionesVisibles" Dense="true" Hover="true" Striped="true"
+                     FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+            <Columns>
+                <TemplateColumn Sortable="false" Title="Código" Width="90">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="NUM_COLECCION" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                            <FiltroExcelColumna T="ColeccionModel" ItemsBase="@BaseColeccion(0)" ValorDe="@(x => x.NUM_COLECCION?.ToString() ?? "")"
+                                                ValoresActivos="_filtrosColeccion.GetValueOrDefault(0)" ValoresActivosChanged="@(v => FiltroColeccion(0, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.NUM_COLECCION</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Descripción">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_COLECCION" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                            <FiltroExcelColumna T="ColeccionModel" ItemsBase="@BaseColeccion(1)" ValorDe="@(x => x.DES_COLECCION)"
+                                                ValoresActivos="_filtrosColeccion.GetValueOrDefault(1)" ValoresActivosChanged="@(v => FiltroColeccion(1, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.DES_COLECCION</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Estado" Sortable="false" Width="120">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                            <FiltroExcelColumna T="ColeccionModel" ItemsBase="@BaseColeccion(2)" ValorDe="@(x => x.DES_ESTADO ?? "")"
+                                                ValoresActivos="_filtrosColeccion.GetValueOrDefault(2)" ValoresActivosChanged="@(v => FiltroColeccion(2, v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        @if (!string.IsNullOrEmpty(context.Item.DES_ESTADO))
+                        {
+                            <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false">
+                    <CellTemplate>
+                        @{ var item = context.Item; }
+                        <div @onclick:stopPropagation="true">
+                            <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                             Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b => OnAccionGrillaColeccion(item, b))" />
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent>
+                <MudText Class="pa-6 mono" Style="opacity:.5;">
+                    @(_temporadaSel is null ? "Seleccione una temporada arriba." : "Sin colecciones para esta temporada.")
+                </MudText>
+            </NoRecordsContent>
+            <PagerContent><MudDataGridPager T="ColeccionModel" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    </MudPaper>
+}
+
+@code {
+    private Func<Task>? _onCambio0;
+    private Func<Task>? _onCambio1;
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<ComboboxItem> _entidades = new();
+    private decimal? _codEntidad;
+    private string? _codEntidadTexto;
+
+    private List<TemporadaModel> _temporadas = new();
+    private List<ColeccionModel> _colecciones = new();
+    private TemporadaModel? _temporadaSel;
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosTemporada = new();
+    private readonly Dictionary<int, HashSet<string>?> _filtrosColeccion = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+
+    private List<TemporadaModel> OrdenarTemporadas(List<TemporadaModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.NUM_TEMPORADA).ToList() : items.OrderByDescending(x => x.NUM_TEMPORADA).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TEMPORADA).ToList() : items.OrderByDescending(x => x.DES_TEMPORADA).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+    private List<ColeccionModel> OrdenarColecciones(List<ColeccionModel> items) => _ordenColumna switch
+    {
+        2 => _ordenAscendente ? items.OrderBy(x => x.NUM_COLECCION).ToList() : items.OrderByDescending(x => x.NUM_COLECCION).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_COLECCION).ToList() : items.OrderByDescending(x => x.DES_COLECCION).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+
+    private List<TemporadaModel> _temporadasVisibles => OrdenarTemporadas(AplicarTemporada(_temporadas, -1));
+    private List<TemporadaModel> BaseTemporada(int col) => AplicarTemporada(_temporadas, col);
+    private List<TemporadaModel> AplicarTemporada(List<TemporadaModel> src, int ex)
+    {
+        IEnumerable<TemporadaModel> q = src;
+        foreach (var (c, v) in _filtrosTemporada)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.NUM_TEMPORADA?.ToString() ?? "")),
+                1 => q.Where(x => v.Contains(x.DES_TEMPORADA)),
+                2 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroTemporada(int c, HashSet<string>? v) { _filtrosTemporada[c] = v; StateHasChanged(); }
+
+    private List<ColeccionModel> _coleccionesVisibles => OrdenarColecciones(AplicarColeccion(_colecciones, -1));
+    private List<ColeccionModel> BaseColeccion(int col) => AplicarColeccion(_colecciones, col);
+    private List<ColeccionModel> AplicarColeccion(List<ColeccionModel> src, int ex)
+    {
+        IEnumerable<ColeccionModel> q = src;
+        foreach (var (c, v) in _filtrosColeccion)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.NUM_COLECCION?.ToString() ?? "")),
+                1 => q.Where(x => v.Contains(x.DES_COLECCION)),
+                2 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroColeccion(int c, HashSet<string>? v) { _filtrosColeccion[c] = v; StateHasChanged(); }
+
+    // El SHOWALL de Temporadas no trae la descripción del Mes/Mes Final (no hace JOIN a
+    // ESTANDAR.MESES, solo devuelve NUM_MES/MES_FINAL crudos) — se resuelve del lado del
+    // cliente con el mismo catálogo de Meses que usa el diálogo.
+    private Dictionary<int, string> _mesesPorCodigo = new();
+    private string DescMes(int? numMes) => numMes is int n && _mesesPorCodigo.TryGetValue(n, out var d) ? $"{n} - {d}" : numMes?.ToString() ?? "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("COMERCIAL", "EntidadesTemporadas");
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(EstandarRoute.EntidadesCombobox);
+            _entidades = r?.Data ?? new();
+        }
+        catch { _entidades = new(); }
+
+        try
+        {
+            var rm = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>($"{EstandarRoute.Meses}/combobox");
+            _mesesPorCodigo = (rm?.Data ?? new()).Where(m => int.TryParse(m.Id, out _)).ToDictionary(m => int.Parse(m.Id), m => m.Texto);
+        }
+        catch { _mesesPorCodigo = new(); }
+
+        _onCambio0 = async () => await InvokeAsync(async () => { await LoadTemporadas(); StateHasChanged(); });
+        Cambios.Suscribir("COMERCIAL.ENTIDADES_TEMPORADAS", _onCambio0);
+        _onCambio1 = async () => await InvokeAsync(async () => { await LoadColecciones(); StateHasChanged(); });
+        Cambios.Suscribir("COMERCIAL.ENTIDADES_TEMPORADAS_COLECCIONES", _onCambio1);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => { if (_codEntidad is not null) return AbrirTemporada(null, CrudModo.Create); return Task.CompletedTask; });
+
+    private async Task OnEntidadChanged(string val)
+    {
+        _codEntidadTexto = val;
+        _codEntidad = decimal.TryParse(val, out var d) ? d : null;
+        _temporadaSel = null;
+        _colecciones = new();
+        if (_codEntidad is null) { _temporadas = new(); return; }
+        await LoadTemporadas();
+        _temporadaSel = _temporadas.FirstOrDefault();
+        if (_temporadaSel is not null) await LoadColecciones();
+    }
+
+    private async Task LoadTemporadas()
+    {
+        if (_codEntidad is null) { _temporadas = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TemporadaModel>>>(
+                $"{ComercialRoute.EntidadesTemporadas}?codEntidad={_codEntidad}");
+            _temporadas = r?.Data ?? new();
+        }
+        catch { _temporadas = new(); }
+    }
+
+    private async Task LoadColecciones()
+    {
+        if (_codEntidad is null || _temporadaSel?.NUM_TEMPORADA is null) { _colecciones = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ColeccionModel>>>(
+                $"{ComercialRoute.EntidadesTemporadasColecciones}?codEntidad={_codEntidad}&numTemporada={_temporadaSel.NUM_TEMPORADA}");
+            _colecciones = r?.Data ?? new();
+        }
+        catch { _colecciones = new(); }
+    }
+
+    private async Task OnTemporadaRowClick(DataGridRowClickEventArgs<TemporadaModel> args)
+    {
+        _temporadaSel = args.Item;
+        await LoadColecciones();
+    }
+
+    // ── Temporadas ──
+    private Task OnAccionHeaderTemporada(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirTemporada(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+    private Task OnAccionGrillaTemporada(TemporadaModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirTemporada(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirTemporada(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirTemporada(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+    private async Task AbrirTemporada(TemporadaModel? item, CrudModo modo)
+    {
+        if (_codEntidad is null) return;
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva temporada",
+            CrudModo.Delete => $"Eliminar · {item?.DES_TEMPORADA}",
+            CrudModo.Read   => $"Consultar · {item?.DES_TEMPORADA}",
+            _               => $"Editar · {item?.DES_TEMPORADA}"
+        };
+        var dlg = await DialogService.ShowAsync<EntidadesTemporadasDialog>(titulo,
+            new DialogParameters { ["CodEntidad"] = _codEntidad.Value, ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadTemporadas();
+    }
+
+    // ── Colecciones ──
+    private Task OnAccionHeaderColeccion(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirColeccion(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+    private Task OnAccionGrillaColeccion(ColeccionModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirColeccion(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirColeccion(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirColeccion(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+    private async Task AbrirColeccion(ColeccionModel? item, CrudModo modo)
+    {
+        if (_codEntidad is null || _temporadaSel?.NUM_TEMPORADA is null) return;
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva colección",
+            CrudModo.Delete => $"Eliminar · {item?.DES_COLECCION}",
+            CrudModo.Read   => $"Consultar · {item?.DES_COLECCION}",
+            _               => $"Editar · {item?.DES_COLECCION}"
+        };
+        var dlg = await DialogService.ShowAsync<EntidadesTemporadasColeccionesDialog>(titulo,
+            new DialogParameters
+            {
+                ["CodEntidad"] = _codEntidad.Value,
+                ["NumTemporada"] = _temporadaSel.NUM_TEMPORADA.Value,
+                ["Item"] = item ?? new ColeccionModel { DES_TEMPORADA = _temporadaSel.DES_TEMPORADA },
+                ["Modo"] = modo
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadColecciones();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("COMERCIAL.ENTIDADES_TEMPORADAS", _onCambio0 ?? (() => Task.CompletedTask));
+        Cambios.Desuscribir("COMERCIAL.ENTIDADES_TEMPORADAS_COLECCIONES", _onCambio1 ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

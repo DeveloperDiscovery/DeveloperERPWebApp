@@ -1,0 +1,19 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="_theme" />
+<MudSnackbarProvider />
+<MudDialogProvider />
+
+@Body
+
+@code {
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#b8472d", Secondary = "#4a4a32",
+            Background = "#efe9df", AppbarBackground = "#16130f"
+        },
+        Typography = new Typography { Default = new Default { FontFamily = new[] { "Archivo", "sans-serif" } } }
+    };
+}

@@ -1,0 +1,85 @@
+@using ClasesDefectosTecnicosModel = KONSolutions.Shared.Models.Controlcalidad.ClasesDefectosTecnicos
+@using ClasesDefectosTecnicosRoute = KONSolutions.Web.Services.ApiRoutes.Controlcalidad
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_CLASE_DEFECTO_TECNICO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="CONTROLCALIDAD.CLASES_DEFECTOS_TECNICOS" Columna="COD_CLASE_DEFECTO_TECNICO"
+                        @bind-Value="_model.COD_CLASE_DEFECTO_TECNICO"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="CONTROLCALIDAD.CLASES_DEFECTOS_TECNICOS" Columna="DES_CLASE_DEFECTO_TECNICO"
+                        @bind-Value="_model.DES_CLASE_DEFECTO_TECNICO"
+                        Disabled="_readonly" Obligatorio="true" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ClasesDefectosTecnicosModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private ClasesDefectosTecnicosModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(ClasesDefectosTecnicosModel m)
+    {
+        _model = new ClasesDefectosTecnicosModel
+        {
+            COD_CLASE_DEFECTO_TECNICO = m.COD_CLASE_DEFECTO_TECNICO,
+            DES_CLASE_DEFECTO_TECNICO = m.DES_CLASE_DEFECTO_TECNICO,
+        };
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<ClasesDefectosTecnicosModel>>(
+                $"{ClasesDefectosTecnicosRoute.ClasesDefectosTecnicos}/{Uri.EscapeDataString(_model.COD_CLASE_DEFECTO_TECNICO)}");
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ClasesDefectosTecnicosRoute.ClasesDefectosTecnicos;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_CLASE_DEFECTO_TECNICO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(ClasesDefectosTecnicosDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new { _model.COD_CLASE_DEFECTO_TECNICO, _model.DES_CLASE_DEFECTO_TECNICO };
+        var resp = await Http.GuardarAsync(ruta, dto, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ClasesDefectosTecnicosDialog), nameof(Submit));
+    }
+}

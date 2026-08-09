@@ -1,0 +1,623 @@
+@page "/logistica/almacenes"
+@attribute [Authorize]
+@using AlmacenesModel = KONSolutions.Shared.Models.Logistica.Almacenes
+@using UbicacionModel = KONSolutions.Shared.Models.Logistica.AlmacenesUbicacionesAlmacen
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Almacenes · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Almacenes" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema LOGISTICA · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar almacén..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+@* ── MAESTRO: Almacenes ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="mb-4">
+    <div data-resizable-grid="almacenes" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="AlmacenesModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre"
+                 RowClick="OnAlmacenRowClick" RowClassFunc="@FilaAlmacenSeleccionado">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código"
+                            Width="@Limites.ColWidth("LOGISTICA.ALMACENES","COD_ALMACEN",70,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_ALMACEN" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="AlmacenesModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_ALMACEN)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_ALMACEN</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Almacén"
+                            Width="@Limites.ColWidth("LOGISTICA.ALMACENES","DES_ALMACEN",150,300)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ALMACEN" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="AlmacenesModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_ALMACEN)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_ALMACEN</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Abreviada"
+                            Width="@Limites.ColWidth("LOGISTICA.ALMACENES","DES_ABREVIADA",100,180)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ABREVIADA" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="AlmacenesModel" ItemsBase="@Base(2)" ValorDe="@(x=>x.DES_ABREVIADA ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_ABREVIADA</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo de Almacén" Width="160">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_ALMACEN" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="AlmacenesModel" ItemsBase="@Base(3)" ValorDe="@(x=>x.DES_TIPO_ALMACEN ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_TIPO_ALMACEN ?? context.Item.COD_TIPO_ALMACEN)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Sucursal" Width="160">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_SUCURSAL" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="AlmacenesModel" ItemsBase="@Base(4)" ValorDe="@(x=>x.DES_SUCURSAL ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(4)" ValoresActivosChanged="@(v=>Filtro(4,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_SUCURSAL ?? context.Item.COD_SUCURSAL)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Zonificación" Width="160">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ZONIFICACION" Activo="@(_ordenColumna == 7)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(7))" />
+                        <FiltroExcelColumna T="AlmacenesModel" ItemsBase="@Base(7)" ValorDe="@(x=>x.DES_ZONIFICACION ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(7)" ValoresActivosChanged="@(v=>Filtro(7,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_ZONIFICACION ?? context.Item.COD_ZONIFICACION)</CellTemplate>
+            </TemplateColumn>
+            @* Señal de qué almacenes ya tienen su polígono dibujado sobre el plano. *@
+            <TemplateColumn Sortable="false" Title="Plano" Width="70" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Plano" /></HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrWhiteSpace(context.Item.DES_POLIGONO))
+                    {
+                        <MudTooltip Text="Tiene polígono dibujado">
+                            <MudIcon Icon="@Icons.Material.Filled.Polyline" Size="Size.Small" Color="Color.Success" />
+                        </MudTooltip>
+                    }
+                    else
+                    {
+                        <MudTooltip Text="Sin polígono">
+                            <MudIcon Icon="@Icons.Material.Filled.Polyline" Size="Size.Small" Style="opacity:.2;" />
+                        </MudTooltip>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Propietaria" Width="180">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_NOMBRE_COMPLETO" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="AlmacenesModel" ItemsBase="@Base(5)" ValorDe="@(x=>x.DES_NOMBRE_COMPLETO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(5)" ValoresActivosChanged="@(v=>Filtro(5,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_NOMBRE_COMPLETO ?? "—")</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Stock Negativo" Width="130" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Stock Negativo" /></HeaderTemplate>
+                <CellTemplate>
+                    @if (context.Item.FLG_STOCK_NEGATIVO == true)
+                    {
+                        <MudTooltip Text="Permite stock negativo">
+                            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Color="Color.Success" />
+                        </MudTooltip>
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.RemoveCircleOutline" Size="Size.Small" Style="opacity:.35;" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Estado" Width="110" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1 justify-center"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 6)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(6))" />
+                        <FiltroExcelColumna T="AlmacenesModel" ItemsBase="@Base(6)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(6)" ValoresActivosChanged="@(v=>Filtro(6,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrWhiteSpace(context.Item.DES_ESTADO))
+                    {
+                        <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="AlmacenesModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@* ── DETALLE del almacén seleccionado, en pestañas ──
+   Ubicaciones (LOGISTICA.ALMACENES_UBICACIONES_ALMACEN) y Tipos de Movimiento
+   (LOGISTICA.ALMACENES_TIPOS_MOVIMIENTO). Las dos cuelgan del mismo almacén de arriba. *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div class="px-3 pt-2" style="border-bottom:1px solid var(--line);">
+        <MudText Class="mono" Style="opacity:.5;font-size:.78rem;color:var(--subtitulo-color,#6b6358);">
+            @if (_almacenSel is not null) { <text>Almacén: @_almacenSel.COD_ALMACEN · @_almacenSel.DES_ALMACEN</text> }
+            else { <text>Seleccione un almacén arriba</text> }
+        </MudText>
+    </div>
+
+<MudTabs Elevation="0" ApplyEffectsToContainer="true" PanelClass="pa-0" Rounded="false" Border="false">
+<MudTabPanel Text="Ubicaciones" Icon="@Icons.Material.Filled.PinDrop">
+
+    <div class="d-flex align-center justify-space-between pa-3" style="border-bottom:1px solid var(--line);">
+        <div>
+            <MudText Typo="Typo.h6">Ubicaciones</MudText>
+            <MudText Class="mono" Style="opacity:.5;font-size:.78rem;color:var(--subtitulo-color,#6b6358);">
+                @if (_almacenSel is not null) { <text>@_ubicaciones.Count ubicaciones</text> }
+                else { <text>Sin almacén seleccionado</text> }
+            </MudText>
+        </div>
+        <div class="d-flex gap-2">
+            <GridRefreshButton OnRefresh="LoadUbicaciones" />
+            <GridClearFiltersButton OnClear="LimpiarFiltrosUbicacion" HasFilters="@(_filtrosUbicacion.Any(f=>f.Value is not null))" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       Disabled="@(_almacenSel is null || _almacenAnulado)" Size="Size.Small"
+                       OnClick="@(() => AbrirUbicacion(null, CrudModo.Create))">Nueva ubicación</MudButton>
+        </div>
+    </div>
+
+    @if (_almacenSel is null)
+    {
+        <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione un almacén para ver sus ubicaciones.</MudText>
+    }
+    else if (_loadingUbicaciones)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else
+    {
+        <div data-resizable-grid="almacenes-ubicaciones" style="position:relative;">
+        <MudDataGrid T="UbicacionModel" Items="_ubicacionesVisibles" Dense="true" Hover="true" Striped="true"
+                     Height="100%" FixedHeader="true"
+                     RowClick="@(args => _ubicacionSel = args.Item)"
+                     RowClassFunc="@FilaFocoUbicacion"
+                     RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+            <Columns>
+                <TemplateColumn Sortable="false" Title="Cód"
+                                Width="@Limites.ColWidth("LOGISTICA.ALMACENES_UBICACIONES_ALMACEN","COD_UBICACION_ALMACEN",70,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="COD_UBICACION_ALMACEN" Activo="@(_ordenColumnaUbicacion == 0)" Ascendente="_ordenAscendenteUbicacion" OnClick="@(() => ToggleOrdenUbicacion(0))" />
+                            <FiltroExcelColumna T="UbicacionModel" ItemsBase="@UbicacionesBase(0)" ValorDe="@(x=>x.COD_UBICACION_ALMACEN)"
+                                                ValoresActivos="_filtrosUbicacion.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroUbicacion(0,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.COD_UBICACION_ALMACEN</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Ubicación"
+                                Width="@Limites.ColWidth("LOGISTICA.ALMACENES_UBICACIONES_ALMACEN","DES_UBICACION_ALMACEN",150,300)">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="DES_UBICACION_ALMACEN" Activo="@(_ordenColumnaUbicacion == 1)" Ascendente="_ordenAscendenteUbicacion" OnClick="@(() => ToggleOrdenUbicacion(1))" />
+                            <FiltroExcelColumna T="UbicacionModel" ItemsBase="@UbicacionesBase(1)" ValorDe="@(x=>x.DES_UBICACION_ALMACEN)"
+                                                ValoresActivos="_filtrosUbicacion.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroUbicacion(1,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.DES_UBICACION_ALMACEN</CellTemplate>
+                </TemplateColumn>
+                @* Casillero que ocupa la ubicación. Es lo que responde "¿qué hay acá?": sin
+                   esta columna, una ubicación generada por un contenedor no se distingue de
+                   una vacía. *@
+                <TemplateColumn Sortable="false" Title="Casillero"
+                                Width="@Limites.ColWidth("LOGISTICA.CONTENEDORES_ALMACENAJE_CASILLEROS","DES_CASILLERO",150,260)">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="DES_CASILLERO" Activo="@(_ordenColumnaUbicacion == 3)" Ascendente="_ordenAscendenteUbicacion" OnClick="@(() => ToggleOrdenUbicacion(3))" />
+                            <FiltroExcelColumna T="UbicacionModel" ItemsBase="@UbicacionesBase(3)" ValorDe="@(x=>x.DES_CASILLERO ?? "")"
+                                                ValoresActivos="_filtrosUbicacion.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>FiltroUbicacion(3,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        @if (string.IsNullOrWhiteSpace(context.Item.DES_CASILLERO))
+                        {
+                            <MudTooltip Text="Ningún casillero ocupa esta ubicación">
+                                <span style="opacity:.35;">Libre</span>
+                            </MudTooltip>
+                        }
+                        else
+                        {
+                            <div class="d-flex align-center gap-1">
+                                <MudIcon Icon="@Icons.Material.Filled.Inventory2" Size="Size.Small" Style="opacity:.5;" />
+                                <span>@context.Item.DES_CASILLERO</span>
+                            </div>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                @* Marca del generador de casilleros: distingue de un vistazo lo que creó
+                   una persona de lo que vino de un contenedor. *@
+                <TemplateColumn Sortable="false" Title="Origen" Width="110" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <HeaderTemplate><EncabezadoOrdenable Texto="Origen" /></HeaderTemplate>
+                    <CellTemplate>
+                        @if (context.Item.FLG_CREACION_AUTOMATICA == true)
+                        {
+                            <MudTooltip Text="Creada automáticamente por un contenedor">
+                                <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Size="Size.Small" Color="Color.Primary" />
+                            </MudTooltip>
+                        }
+                        else
+                        {
+                            <MudTooltip Text="Creada manualmente">
+                                <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" Style="opacity:.35;" />
+                            </MudTooltip>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                @* Señal de qué ubicaciones ya tienen su polígono dibujado sobre el plano. *@
+                <TemplateColumn Sortable="false" Title="Plano" Width="70" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <HeaderTemplate><EncabezadoOrdenable Texto="Plano" /></HeaderTemplate>
+                    <CellTemplate>
+                        @if (!string.IsNullOrWhiteSpace(context.Item.DES_POLIGONO))
+                        {
+                            <MudTooltip Text="Tiene polígono dibujado">
+                                <MudIcon Icon="@Icons.Material.Filled.Polyline" Size="Size.Small" Color="Color.Success" />
+                            </MudTooltip>
+                        }
+                        else
+                        {
+                            <MudTooltip Text="Sin polígono">
+                                <MudIcon Icon="@Icons.Material.Filled.Polyline" Size="Size.Small" Style="opacity:.2;" />
+                            </MudTooltip>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false" Width="130">
+                    <CellTemplate>
+                        @{ var u = context.Item; }
+                        @* Una ubicación creada por el generador no se edita ni se borra a mano:
+                           la manda su contenedor. Borrarla dejaría al casillero apuntando a una
+                           dirección que ya no existe, y sin ninguna señal de que eso pasó. *@
+                        @{ var generada = u.FLG_CREACION_AUTOMATICA == true; }
+                        <div class="d-flex align-center gap-1">
+                            <MudTooltip Text="@(generada ? "Creada por un contenedor: se administra desde ahí" : "Modificar")">
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                                               Disabled="@(_almacenAnulado || generada)" OnClick="@(() => AbrirUbicacion(u, CrudModo.Update))" />
+                            </MudTooltip>
+                            <MudTooltip Text="@(generada ? "Creada por un contenedor: se elimina regenerando sus casilleros" : "Eliminar")">
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                               Disabled="@(_almacenAnulado || generada)" OnClick="@(() => AbrirUbicacion(u, CrudModo.Delete))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Consultar">
+                                <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" Color="Color.Info"
+                                               OnClick="@(() => AbrirUbicacion(u, CrudModo.Read))" />
+                            </MudTooltip>
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;">Este almacén no tiene ubicaciones aún.</MudText></NoRecordsContent>
+            <PagerContent><MudDataGridPager T="UbicacionModel" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    }
+
+</MudTabPanel>
+
+@* Los tipos de movimiento habilitados en el almacén. Va en su propia pestaña y no como
+   otra grilla debajo: es una asignación entre dos listas, no un listado con acciones. *@
+<MudTabPanel Text="Tipos de Movimiento" Icon="@Icons.Material.Filled.SwapHoriz">
+    <AlmacenTiposMovimientoTab Almacen="_almacenSel" SoloLectura="_almacenAnulado" />
+</MudTabPanel>
+
+</MudTabs>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<AlmacenesModel> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<AlmacenesModel> Ordenar(List<AlmacenesModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_ALMACEN).ToList() : items.OrderByDescending(x => x.COD_ALMACEN).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_ALMACEN).ToList() : items.OrderByDescending(x => x.DES_ALMACEN).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_ABREVIADA).ToList() : items.OrderByDescending(x => x.DES_ABREVIADA).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_ALMACEN).ToList() : items.OrderByDescending(x => x.DES_TIPO_ALMACEN).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_SUCURSAL).ToList() : items.OrderByDescending(x => x.DES_SUCURSAL).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_NOMBRE_COMPLETO).ToList() : items.OrderByDescending(x => x.DES_NOMBRE_COMPLETO).ToList(),
+        6 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        7 => _ordenAscendente ? items.OrderBy(x => x.DES_ZONIFICACION).ToList() : items.OrderByDescending(x => x.DES_ZONIFICACION).ToList(),
+        _ => items
+    };
+    private List<AlmacenesModel> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<AlmacenesModel> Base(int col) => Aplicar(_items, col);
+
+    private List<AlmacenesModel> Aplicar(List<AlmacenesModel> src, int ex)
+    {
+        IEnumerable<AlmacenesModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_ALMACEN)),
+                1 => q.Where(x => v.Contains(x.DES_ALMACEN)),
+                2 => q.Where(x => v.Contains(x.DES_ABREVIADA ?? "")),
+                3 => q.Where(x => v.Contains(x.DES_TIPO_ALMACEN ?? "")),
+                4 => q.Where(x => v.Contains(x.DES_SUCURSAL ?? "")),
+                5 => q.Where(x => v.Contains(x.DES_NOMBRE_COMPLETO ?? "")),
+                6 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                7 => q.Where(x => v.Contains(x.DES_ZONIFICACION ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private async Task Buscar()
+    {
+        _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+        await SincronizarAlmacenSeleccionado();
+    }
+
+    // ── DETALLE: Ubicaciones del almacén seleccionado ─────────────────────────
+    private AlmacenesModel? _almacenSel;
+    private List<UbicacionModel> _ubicaciones = new();
+    private UbicacionModel? _ubicacionSel;
+    private bool _loadingUbicaciones;
+    private Func<Task>? _onCambioUbicaciones;
+
+    // Regla transversal: si el almacén padre está anulado, sus ubicaciones son de solo lectura.
+    private bool _almacenAnulado => EstadoAlias.EsAnulado(_almacenSel?.COD_ESTADO_ALIAS);
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosUbicacion = new();
+    private int? _ordenColumnaUbicacion;
+    private bool _ordenAscendenteUbicacion = true;
+
+    private List<UbicacionModel> _ubicacionesVisibles => OrdenarUbicacion(AplicarUbicacion(_ubicaciones, -1));
+    private List<UbicacionModel> UbicacionesBase(int col) => AplicarUbicacion(_ubicaciones, col);
+
+    private void ToggleOrdenUbicacion(int columna)
+    {
+        if (_ordenColumnaUbicacion == columna) _ordenAscendenteUbicacion = !_ordenAscendenteUbicacion;
+        else { _ordenColumnaUbicacion = columna; _ordenAscendenteUbicacion = true; }
+        StateHasChanged();
+    }
+
+    private List<UbicacionModel> OrdenarUbicacion(List<UbicacionModel> items) => _ordenColumnaUbicacion switch
+    {
+        0 => _ordenAscendenteUbicacion ? items.OrderBy(x => x.COD_UBICACION_ALMACEN).ToList() : items.OrderByDescending(x => x.COD_UBICACION_ALMACEN).ToList(),
+        1 => _ordenAscendenteUbicacion ? items.OrderBy(x => x.DES_UBICACION_ALMACEN).ToList() : items.OrderByDescending(x => x.DES_UBICACION_ALMACEN).ToList(),
+        2 => _ordenAscendenteUbicacion ? items.OrderBy(x => x.FLG_CREACION_AUTOMATICA).ToList() : items.OrderByDescending(x => x.FLG_CREACION_AUTOMATICA).ToList(),
+        3 => _ordenAscendenteUbicacion ? items.OrderBy(x => x.DES_CASILLERO).ToList()          : items.OrderByDescending(x => x.DES_CASILLERO).ToList(),
+        _ => items
+    };
+
+    private List<UbicacionModel> AplicarUbicacion(List<UbicacionModel> src, int ex)
+    {
+        IEnumerable<UbicacionModel> q = src;
+        foreach (var (c, v) in _filtrosUbicacion)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_UBICACION_ALMACEN)),
+                1 => q.Where(x => v.Contains(x.DES_UBICACION_ALMACEN)),
+                3 => q.Where(x => v.Contains(x.DES_CASILLERO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void FiltroUbicacion(int c, HashSet<string>? v) { _filtrosUbicacion[c] = v; StateHasChanged(); }
+    private void LimpiarFiltrosUbicacion() { foreach (var k in _filtrosUbicacion.Keys.ToList()) _filtrosUbicacion[k] = null; StateHasChanged(); }
+
+    private string FilaAlmacenSeleccionado(AlmacenesModel item, int _)
+        => _almacenSel is not null && item.COD_ALMACEN == _almacenSel.COD_ALMACEN ? "fila-seleccionada" : "";
+
+    private string FilaFocoUbicacion(UbicacionModel item, int _)
+        => _ubicacionSel is not null && item.COD_UBICACION_ALMACEN == _ubicacionSel.COD_UBICACION_ALMACEN ? "fila-foco" : "";
+
+    private async Task OnAlmacenRowClick(DataGridRowClickEventArgs<AlmacenesModel> args)
+    {
+        _almacenSel = args.Item;
+        _ubicacionSel = null;
+        await LoadUbicaciones();
+    }
+
+    /// <summary>Tras recargar el maestro: mantiene el almacén seleccionado si sigue existiendo,
+    /// y si no, apunta al primero para que la grilla hija nunca quede huérfana.</summary>
+    private async Task SincronizarAlmacenSeleccionado()
+    {
+        if (_almacenSel is null || !_items.Any(a => a.COD_ALMACEN == _almacenSel.COD_ALMACEN))
+            _almacenSel = _items.FirstOrDefault();
+        else
+            _almacenSel = _items.First(a => a.COD_ALMACEN == _almacenSel.COD_ALMACEN);
+        await LoadUbicaciones();
+    }
+
+    private async Task LoadUbicaciones()
+    {
+        if (_almacenSel is null || string.IsNullOrWhiteSpace(_almacenSel.COD_ALMACEN)) { _ubicaciones = new(); return; }
+        _loadingUbicaciones = true;
+        try
+        {
+            // El SP SHOWALL exige @COD_ALMACEN: la ruta lleva el código del almacén padre.
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<UbicacionModel>>>(
+                $"{ApiRoutes.Logistica.AlmacenesUbicaciones}/{Uri.EscapeDataString(_almacenSel.COD_ALMACEN)}");
+            _ubicaciones = r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Almacenes), nameof(LoadUbicaciones));
+            Snackbar.Add("No se pudieron cargar las ubicaciones. Ver detalle en el log de errores.", Severity.Error);
+            _ubicaciones = new();
+        }
+        _loadingUbicaciones = false;
+    }
+
+    private async Task AbrirUbicacion(UbicacionModel? item, CrudModo modo)
+    {
+        if (_almacenSel is null) { Snackbar.Add("Seleccione primero un almacén.", Severity.Warning); return; }
+        if (_almacenAnulado && modo != CrudModo.Read)
+        {
+            Snackbar.Add("El almacén está anulado: sus ubicaciones son de solo consulta.", Severity.Warning);
+            return;
+        }
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva ubicación",
+            CrudModo.Delete => $"Eliminar · {item?.DES_UBICACION_ALMACEN}",
+            CrudModo.Read   => $"Consultar · {item?.DES_UBICACION_ALMACEN}",
+            _               => $"Editar · {item?.DES_UBICACION_ALMACEN}"
+        };
+        var dlg = await DialogService.ShowAsync<AlmacenUbicacionDialog>(titulo,
+            new DialogParameters
+            {
+                ["Item"]       = item,
+                ["Modo"]       = modo,
+                ["CodAlmacen"] = _almacenSel.COD_ALMACEN,
+                ["DesAlmacen"] = _almacenSel.DES_ALMACEN
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadUbicaciones();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("LOGISTICA", "Almacenes");
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        _onCambioUbicaciones = async () => await InvokeAsync(async () => { await LoadUbicaciones(); StateHasChanged(); });
+        Cambios.Suscribir("LOGISTICA.ALMACENES", _onCambio);
+        Cambios.Suscribir("LOGISTICA.ALMACENES_UBICACIONES_ALMACEN", _onCambioUbicaciones);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load()
+    {
+        _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+        await SincronizarAlmacenSeleccionado();
+    }
+
+    private async Task<List<AlmacenesModel>> Fetch()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<AlmacenesModel>>>(
+                ApiRoutes.Logistica.Almacenes);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Almacenes), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<AlmacenesModel>> FetchSearch(string s)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<AlmacenesModel>>>(
+                $"{ApiRoutes.Logistica.AlmacenesSearch}?search={Uri.EscapeDataString(s)}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Almacenes), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    // Regla general de la app: un almacén ANULADO ('ANU') queda congelado — solo consulta.
+    private Task OnAccionGrilla(AlmacenesModel item, BotonTreeviewItem b)
+    {
+        if (EstadoAlias.EsAnulado(item.COD_ESTADO_ALIAS) && b.FLG_ACCION_GET != true)
+        {
+            Snackbar.Add("El almacén está anulado: solo se permite consultarlo.", Severity.Warning);
+            return Task.CompletedTask;
+        }
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(AlmacenesModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo almacén",
+            CrudModo.Delete => $"Eliminar · {item?.DES_ALMACEN}",
+            CrudModo.Read   => $"Consultar · {item?.DES_ALMACEN}",
+            _               => $"Editar · {item?.DES_ALMACEN}"
+        };
+        var dlg = await DialogService.ShowAsync<AlmacenesDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("LOGISTICA.ALMACENES", _onCambio ?? (() => Task.CompletedTask));
+        Cambios.Desuscribir("LOGISTICA.ALMACENES_UBICACIONES_ALMACEN", _onCambioUbicaciones ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

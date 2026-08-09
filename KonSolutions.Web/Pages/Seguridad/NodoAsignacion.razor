@@ -1,0 +1,129 @@
+@using KONSolutions.Shared.Models
+
+<div style="margin-left:@($"{Nivel * 16}px");">
+    <div class="d-flex align-center gap-1 py-1 px-2"
+         style="cursor:pointer;user-select:none;border-radius:4px;@(_esFoco ? "background:var(--mud-palette-primary-lighten);outline:1px solid var(--mud-palette-primary);" : "")"
+         @onclick="OnClickNodo">
+
+        @* Flecha expand/collapse *@
+        @if (Nodo.Hijos.Any() || TieneBotones)
+        {
+            <MudIcon Icon="@(_expandido ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                     Style="font-size:.85rem;opacity:.5;flex-shrink:0;" />
+        }
+        else
+        {
+            <span style="width:16px;flex-shrink:0;"></span>
+        }
+
+        @* Icono tipo *@
+        @if (Nodo.EsApp)
+        {
+            <MudIcon Icon="@Icons.Material.Filled.AppsOutage"
+                     Style="font-size:.9rem;color:#b8472d;flex-shrink:0;" />
+        }
+        else if (Nodo.Hijos.Any())
+        {
+            <MudIcon Icon="@Icons.Material.Filled.Folder"
+                     Style="font-size:.9rem;color:#e6921a;flex-shrink:0;" />
+        }
+        else
+        {
+            <MudIcon Icon="@Icons.Material.Filled.ViewModule"
+                     Style="font-size:.9rem;color:#2b6cb0;flex-shrink:0;" />
+        }
+
+        @* Descripción *@
+        <span style="font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            @Nodo.Des
+            @if (!string.IsNullOrWhiteSpace(Nodo.Formula))
+            {
+                <span style="opacity:.45;margin-left:4px;">(@Nodo.Formula)</span>
+            }
+        </span>
+
+        @* Icono acceso (solo nodos opción, no app) *@
+        @if (!Nodo.EsApp && Nodo.Acceso.HasValue)
+        {
+            <MudIcon Icon="@(Nodo.Acceso.Value ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
+                     Style="@($"font-size:.9rem;margin-left:4px;flex-shrink:0;color:{(Nodo.Acceso.Value ? "#2f855a" : "#c53030")};")" />
+        }
+    </div>
+
+    @* Hijos recursivos *@
+    @if (_expandido)
+    {
+        @foreach (var hijo in Nodo.Hijos)
+        {
+            <NodoAsignacion Nodo="hijo"
+                            Nivel="@(Nivel + 1)"
+                            BotonesPorOpcion="BotonesPorOpcion"
+                            CodRol="CodRol"
+                            ExpandirTodo="ExpandirTodo"
+                            NodoFoco="NodoFoco"
+                            NodoFocoChanged="NodoFocoChanged" />
+        }
+
+        @* Botones como hojas *@
+        @if (TieneBotones && !Nodo.EsApp)
+        {
+            @foreach (var b in Botones)
+            {
+                <div style="margin-left:@(($"{(Nivel + 1) * 16}px"));display:flex;align-items:center;gap:4px;padding:2px 8px;">
+                    <span style="width:16px;flex-shrink:0;"></span>
+                    @if (b.IconoBase64 is not null)
+                    {
+                        <img src="data:image/png;base64,@b.IconoBase64"
+                             style="width:16px;height:16px;object-fit:contain;flex-shrink:0;" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.SmartButton"
+                                 Style="font-size:.85rem;color:#4a4a32;flex-shrink:0;" />
+                    }
+                    <span style="font-size:.8rem;opacity:.8;">
+                        @(string.IsNullOrWhiteSpace(b.DES_ALIAS) ? b.DES_BOTON_OPCION : b.DES_ALIAS)
+                    </span>
+                    <MudIcon Icon="@(b.FLG_HABILITADO ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
+                             Style="@($"font-size:.85rem;flex-shrink:0;color:{(b.FLG_HABILITADO ? "#2f855a" : "#c53030")};")" />
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public NodoAsignacionVm Nodo { get; set; } = null!;
+    [Parameter] public int Nivel { get; set; } = 0;
+    [Parameter] public Dictionary<string, List<BotonAsignado>> BotonesPorOpcion { get; set; } = new();
+    [Parameter] public string? CodRol { get; set; }
+    [Parameter] public bool ExpandirTodo { get; set; }
+    [Parameter] public string? NodoFoco { get; set; }
+    [Parameter] public EventCallback<string?> NodoFocoChanged { get; set; }
+
+    private bool _expandido = false;
+    private bool _esFoco => NodoFoco == $"{CodRol}|{Nodo.Cod}";
+
+    private List<BotonAsignado> Botones
+    {
+        get
+        {
+            var key = $"{CodRol}|{Nodo.Cod}";
+            return BotonesPorOpcion.TryGetValue(key, out var bs) ? bs : new();
+        }
+    }
+
+    private bool TieneBotones => !Nodo.EsApp && Botones.Any();
+
+    protected override void OnParametersSet()
+    {
+        if (ExpandirTodo && !_expandido) _expandido = true;
+        else if (!ExpandirTodo && _expandido) _expandido = false;
+    }
+
+    private async Task OnClickNodo()
+    {
+        _expandido = !_expandido;
+        await NodoFocoChanged.InvokeAsync($"{CodRol}|{Nodo.Cod}");
+    }
+}

@@ -1,0 +1,301 @@
+@using SucursalesModel = KONSolutions.Shared.Models.Estandar.Sucursales
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IAuthService AuthService
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_SUCURSAL" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="4">
+                    <CampoTexto Tabla="ESTANDAR.SUCURSALES" Columna="COD_SUCURSAL"
+                                @bind-Value="_model.COD_SUCURSAL"
+                                Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <CampoTexto Tabla="ESTANDAR.SUCURSALES" Columna="DES_SUCURSAL"
+                                @bind-Value="_model.DES_SUCURSAL"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+                <MudItem xs="12">
+                    <CampoTexto Tabla="ESTANDAR.SUCURSALES" Columna="DES_DIRECCION"
+                                @bind-Value="_model.DES_DIRECCION"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @* Ubigeo tiene ~1900 distritos — en vez de precargarlos todos,
+                       este AriaCombo busca directo en el servidor (SP _SEARCH)
+                       a partir de 2 caracteres, con debounce, y nunca trae más de
+                       lo que el usuario está buscando. *@
+                    <AriaCombo TItem="ComboboxItem" Items="Enumerable.Empty<ComboboxItem>()"
+                               TextFunc="@(x => x.Texto)" ValueFunc="@(x => x.Id)"
+                               Value="_model.COD_UBIGEO" ValueChanged="@(v => _model.COD_UBIGEO = v ?? "")"
+                               SearchFunc="BuscarUbigeo" MinCharacters="2"
+                               TextoInicial="@(Item?.DES_UBIGEO)"
+                               Label="Ubigeo*" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposSucursal" ValueFunc="@(x => x.Id)"
+                                 TextFunc="@(x => x.Texto)" @bind-Value="_model.COD_TIPO_SUCURSAL"
+                                 Label="Tipo de sucursal" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposPos" ValueFunc="@(x => x.Id)"
+                                 TextFunc="@(x => x.Texto)" @bind-Value="_model.COD_TIPO_POS"
+                                 Label="Tipo de POS" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposDireccion" ValueFunc="@(x => x.Id)"
+                                 TextFunc="@(x => x.Texto)" @bind-Value="_codTipoDireccionStr"
+                                 Label="Tipo de dirección" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @* Igual que Ubigeo: Entidades puede tener miles de registros,
+                       así que se busca en el servidor (SP _SEARCH) en vez de
+                       precargar todo el catálogo. *@
+                    <AriaCombo TItem="ComboboxItem" Items="Enumerable.Empty<ComboboxItem>()"
+                               TextFunc="@(x => x.Texto)" ValueFunc="@(x => x.Id)"
+                               Value="@(_model.COD_ENTIDAD_PROPIETARIA?.ToString())"
+                               ValueChanged="@(v => _model.COD_ENTIDAD_PROPIETARIA = decimal.TryParse(v, out var d) ? d : null)"
+                               SearchFunc="BuscarEntidad" MinCharacters="2"
+                               TextoInicial="@(Item?.DES_NOMBRE_COMPLETO)"
+                               Label="Entidad propietaria" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <EstadoCombo DesTabla="ESTANDAR.SUCURSALES" @bind-Value="_model.COD_ESTADO"
+                                 CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                                 Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudText Typo="Typo.caption" Class="mono mb-1"
+                             Style="opacity:.6;font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">
+                        Ubicación en el mapa
+                    </MudText>
+                    <MapaUbicacion @bind-Latitud="_model.VAL_LATITUD" @bind-Longitud="_model.VAL_LONGITUD" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12">
+                    <CampoTexto Tabla="ESTANDAR.SUCURSALES" Columna="DES_LINK_PATH_FACTURACION"
+                                @bind-Value="_model.DES_LINK_PATH_FACTURACION"
+                                Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12">
+                    <CampoTexto Tabla="ESTANDAR.SUCURSALES" Columna="DES_TOKEN_FACTURACION"
+                                @bind-Value="_model.DES_TOKEN_FACTURACION"
+                                Disabled="_readonly" InputType="InputType.Password" />
+                </MudItem>
+            </MudGrid>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public SucursalesModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private SucursalesModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _tiposSucursal  = new();
+    private List<ComboboxItem> _tiposPos       = new();
+    private List<ComboboxItem> _tiposDireccion = new();
+
+    // AriaCombo solo maneja Value:string — se usa proxy y se sincroniza
+    // con el campo numérico del modelo al entrar y al enviar el formulario.
+    private string? _codTipoDireccionStr;
+
+    /// <summary>Código INEI de 6 dígitos DDPPYY. Departamento = "XX0000",
+    /// provincia = "XXYY00", distrito = cualquier otro (los últimos 2 dígitos
+    /// no son "00"). Se usa en vez de FLG_DISTRITO porque la SP de búsqueda no lo llena.</summary>
+    private static bool EsDistrito(string codUbigeo) =>
+        codUbigeo.Length == 6 && codUbigeo.Substring(4, 2) != "00";
+
+    /// <summary>Busca en el servidor (PROC_ESTANDAR_UBIGEOS_SEARCH) y filtra a
+    /// distritos — nunca precarga el catálogo completo (~1900 filas) al navegador.
+    /// NOTA: esta SP no llena FLG_DISTRITO (siempre viene null/false aunque el
+    /// registro sí sea un distrito), así que se filtra por el patrón del código
+    /// INEI: 6 dígitos DDPPYY — es distrito si YY (los últimos 2) no es "00".</summary>
+    private async Task<IEnumerable<ComboboxItem>> BuscarUbigeo(string? texto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(texto) || texto.Trim().Length < 2)
+            return Enumerable.Empty<ComboboxItem>();
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<Ubigeo>>>(
+                $"{ApiRoutes.Estandar.Ubigeos}/search?search={Uri.EscapeDataString(texto.Trim())}", ct);
+            return (r?.Data ?? new())
+                .Where(u => EsDistrito(u.COD_UBIGEO))
+                .Select(u => new ComboboxItem { Id = u.COD_UBIGEO, Texto = u.DES_UBIGEO })
+                .ToList();
+        }
+        catch (OperationCanceledException) { return Enumerable.Empty<ComboboxItem>(); } // búsqueda superada por la siguiente tecla, no es error
+        catch (Exception ex)
+        {
+            // Antes: catch vacío — si la búsqueda fallaba (red, deserialización, 500...)
+            // el combo simplemente quedaba vacío sin dejar ningún rastro. Mismo
+            // tratamiento que los errores SQL: se registra en errors_*.log.
+            await ErrorLog.LogAsync(ex, "SucursalesDialog", nameof(BuscarUbigeo));
+            await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(SucursalesDialog));
+            return Enumerable.Empty<ComboboxItem>();
+        }
+    }
+
+    /// <summary>Busca en el servidor (PROC_ESTANDAR_ENTIDADES_SEARCH) — igual que
+    /// Ubigeo, sin precargar todo el catálogo de entidades. La SP no filtra bien
+    /// por el texto (devuelve el catálogo completo), así que se refuerza el
+    /// filtro acá mismo, en el cliente, sobre lo que la SP devuelva.</summary>
+    private async Task<IEnumerable<ComboboxItem>> BuscarEntidad(string? texto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(texto) || texto.Trim().Length < 2)
+            return Enumerable.Empty<ComboboxItem>();
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<Entidad>>>(
+                $"{ApiRoutes.Estandar.Entidades}/search?search={Uri.EscapeDataString(texto.Trim())}", ct);
+            var filtro = texto.Trim();
+            return (r?.Data ?? new())
+                .Where(e => e.DES_NOMBRE_COMPLETO.Contains(filtro, StringComparison.OrdinalIgnoreCase))
+                .Take(30)
+                .Select(e => new ComboboxItem { Id = e.COD_ENTIDAD?.ToString() ?? "", Texto = e.DES_NOMBRE_COMPLETO });
+        }
+        catch (OperationCanceledException) { return Enumerable.Empty<ComboboxItem>(); }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, "SucursalesDialog", nameof(BuscarEntidad));
+            await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(SucursalesDialog));
+            return Enumerable.Empty<ComboboxItem>();
+        }
+    }
+
+    private void MapearDesdeModelo(SucursalesModel m)
+    {
+        _model = new SucursalesModel
+        {
+            COD_SUCURSAL               = m.COD_SUCURSAL,
+            DES_SUCURSAL                = m.DES_SUCURSAL,
+            DES_DIRECCION              = m.DES_DIRECCION,
+            COD_UBIGEO                  = m.COD_UBIGEO,
+            COD_TIPO_SUCURSAL           = m.COD_TIPO_SUCURSAL,
+            COD_ENTIDAD_PROPIETARIA     = m.COD_ENTIDAD_PROPIETARIA,
+            DES_LINK_PATH_FACTURACION   = m.DES_LINK_PATH_FACTURACION,
+            DES_TOKEN_FACTURACION       = m.DES_TOKEN_FACTURACION,
+            COD_TIPO_POS                = m.COD_TIPO_POS,
+            COD_TIPO_DIRECCION          = m.COD_TIPO_DIRECCION,
+            VAL_LATITUD                 = m.VAL_LATITUD,
+            VAL_LONGITUD                = m.VAL_LONGITUD,
+            COD_TIPO_ESTADO             = m.COD_TIPO_ESTADO,
+            COD_ESTADO                  = m.COD_ESTADO
+        };
+        _codTipoDireccionStr = m.COD_TIPO_DIRECCION?.ToString();
+    }
+
+    /// <summary>Trae la Sucursal fresca desde SHOWBYID — evita mostrar datos desactualizados
+    /// de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<SucursalesModel>($"{ApiRoutes.Estandar.Sucursales}/{Uri.EscapeDataString(_model.COD_SUCURSAL)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        // Tipos de POS y Tipos de Dirección siguen llegando por loadcombos (son
+        // catálogos chicos). Ubigeo y Entidades ya NO se precargan — se buscan en
+        // el servidor a medida que se escribe (ver BuscarUbigeo/BuscarEntidad).
+        await CargarLoadcombos();
+        _tiposSucursal = await CargarCombo(ApiRoutes.Estandar.TiposSucursalesCombobox, "Tipo de sucursal");
+    }
+
+    private async Task CargarLoadcombos()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<SucursalesLoadCombosResult>>(ApiRoutes.Estandar.SucursalesLoadcombos);
+            _tiposPos       = r?.Data?.TiposPos       ?? new();
+            _tiposDireccion = r?.Data?.TiposDireccion ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(SucursalesDialog));
+        }
+    }
+
+    private async Task<List<ComboboxItem>> CargarCombo(string ruta, string nombre)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>(ruta);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(SucursalesDialog));
+            return new();
+        }
+    }
+
+    /// <summary>Antes: si el formulario era inválido (ej. Ubigeo vacío, que es
+    /// [Required] pero no se marca visualmente porque el combo no se integra
+    /// con el validador como los campos normales), "Crear" no hacía nada y no se
+    /// veía ningún motivo. Mismo tratamiento visual que los errores del servidor
+    /// (ErrorSqlDialog), para que sea un único lugar donde el usuario ve cualquier error.</summary>
+    private async Task OnInvalidSubmit(EditContext ctx)
+    {
+        var errores = string.Join(" · ", ctx.GetValidationMessages());
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"]  = "Faltan datos obligatorios",
+                ["Mensaje"] = string.IsNullOrWhiteSpace(errores) ? "Hay campos obligatorios sin completar." : errores
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Estandar.Sucursales;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_SUCURSAL)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(SucursalesDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        _model.COD_TIPO_DIRECCION = int.TryParse(_codTipoDireccionStr, out var td) ? td : null;
+
+        var sesion = await AuthService.GetSesionAsync();
+        _model.COD_USUARIO_REGISTRO  = sesion?.COD_USUARIO ?? "";
+        _model.COD_ESTACION_REGISTRO = "WEB";
+
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(SucursalesDialog), nameof(Submit));
+    }
+}

@@ -1,0 +1,17 @@
+@* TituloPagina.razor — encabezado H4 de las pantallas de grilla, reutilizable.
+   El texto sale de DES_OPCION_APLICACION (Seguridad › Opciones de Aplicaciones) para la
+   opción de menú por la que se abrió la pantalla (CodAplicacion/CodOpcionAplicacion, que
+   casi todas las páginas ya reciben como [Parameter]) — así el título en pantalla queda
+   configurable desde el menú en vez de hardcodeado en cada .razor. Si la pantalla se abrió
+   sin esos códigos (o la opción no está en el menú del rol activo), cae a Fallback. *@
+@inject MenuService MenuSvc
+
+<MudText Typo="Typo.h4">@Texto</MudText>
+
+@code {
+    [Parameter, EditorRequired] public string Fallback { get; set; } = "";
+    [Parameter] public string? CodAplicacion { get; set; }
+    [Parameter] public string? CodOpcionAplicacion { get; set; }
+
+    private string Texto => MenuSvc.DescripcionOpcion(CodAplicacion, CodOpcionAplicacion) ?? Fallback;
+}

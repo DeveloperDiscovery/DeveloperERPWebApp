@@ -1,0 +1,209 @@
+@page "/seguridad/aplicaciones"
+@attribute [Authorize]
+@inject CatalogoService<Aplicacion, AplicacionDto> Service
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ConfigService ConfigSvc
+@implements IDisposable
+
+<PageTitle>Aplicaciones · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Aplicaciones" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema SEGURIDAD · @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTerm" OnSearch="HandleSearch" Placeholder="Buscar aplicación..." DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Aplicaciones" Headers="@_printHeaders" Rows="@PrintRows()" />
+        <AccionesBotones CodAplicacion="@CodAplicacion"
+                         CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header"
+                         OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="aplicaciones" style="position:relative;">
+    <MudDataGrid T="Aplicacion" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Title="Icono" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate><GridImage Image="context.Item.IMG_ICONO" /></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Código" Width="@Limites.ColWidth("SEGURIDAD.APLICACIONES","COD_APLICACION",60,150)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_APLICACION" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="Aplicacion" ItemsBase="@BaseSinEstaColumna(0)"
+                                            ValorDe="@(x => x.COD_APLICACION ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_APLICACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("SEGURIDAD.APLICACIONES","DES_APLICACION",120,400)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_APLICACION" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="Aplicacion" ItemsBase="@BaseSinEstaColumna(1)"
+                                            ValorDe="@(x => x.DES_APLICACION ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_APLICACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="App Móvil" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <MudTooltip Text="Disponible en app móvil">
+                        <MudIcon Icon="@Icons.Material.Filled.Smartphone" Color="@(context.Item.FLG_APP_MOVIL ? Color.Success : Color.Error)"
+                                 Style="@(context.Item.FLG_APP_MOVIL ? "" : "opacity:.2;")" Size="Size.Small" />
+                    </MudTooltip>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Estado">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="Aplicacion" ItemsBase="@BaseSinEstaColumna(2)"
+                                            ValorDe="@(x => x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(2, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small"
+                             Color="@(context.Item.COD_ESTADO == 1 ? Color.Success : Color.Default)">
+                        @(context.Item.DES_ESTADO ?? "—")
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion"
+                                     CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                     OnAccion="@(b => OnAccionGrilla(item, b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin aplicaciones.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="Aplicacion" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<Aplicacion> _items = new();
+    private string _searchTerm = string.Empty;
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<Aplicacion> Ordenar(List<Aplicacion> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_APLICACION).ToList() : items.OrderByDescending(x => x.COD_APLICACION).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_APLICACION).ToList() : items.OrderByDescending(x => x.DES_APLICACION).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+
+    private List<Aplicacion> _visibles => Ordenar(AplicarTodos(_items, -1));
+    private List<Aplicacion> BaseSinEstaColumna(int col) => AplicarTodos(_items, col);
+
+    private List<Aplicacion> AplicarTodos(List<Aplicacion> origen, int excluir)
+    {
+        IEnumerable<Aplicacion> q = origen;
+        foreach (var (col, vals) in _filtros)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.COD_APLICACION ?? "")),
+                1 => q.Where(x => vals.Contains(x.DES_APLICACION ?? "")),
+                2 => q.Where(x => vals.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltro(int col, HashSet<string>? vals) { _filtros[col] = vals; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private readonly List<string> _printHeaders = new() { "Código", "Descripción", "App móvil", "Estado" };
+    private List<List<string>> PrintRows() => _items.Select(a => new List<string>
+        { a.COD_APLICACION ?? "", a.DES_APLICACION ?? "", a.FLG_APP_MOVIL ? "Sí" : "No", a.DES_ESTADO ?? "" }).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("SEGURIDAD", "Aplicaciones");
+        await Load();
+        Cambios.Suscribir("SEGURIDAD.APLICACIONES", RefrescarPorCambio);
+    }
+
+    private async Task HandleSearch()
+    {
+        _items = string.IsNullOrWhiteSpace(_searchTerm)
+            ? await Service.GetAllAsync()
+            : await Service.SearchAsync(_searchTerm);
+    }
+
+    private async Task Load() => _items = await Service.GetAllAsync();
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Open(null);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(Aplicacion item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Ver(item);
+        if (b.FLG_ACCION_PUT    == true) return Open(item);
+        if (b.FLG_ACCION_DELETE == true) return Delete(item);
+        return Task.CompletedTask;
+    }
+
+    private async Task Ver(Aplicacion item)    => await AbrirDialog(item, CrudModo.Read);
+    private async Task Open(Aplicacion? a)     => await AbrirDialog(a, a is null ? CrudModo.Create : CrudModo.Update);
+    private async Task Delete(Aplicacion a)    => await AbrirDialog(a, CrudModo.Delete);
+
+    private async Task AbrirDialog(Aplicacion? a, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva aplicación",
+            CrudModo.Read   => $"Ver · {a?.COD_APLICACION}",
+            CrudModo.Update => $"Editar · {a?.COD_APLICACION}",
+            CrudModo.Delete => $"Eliminar · {a?.COD_APLICACION}",
+            _ => "Aplicación"
+        };
+        var parameters = new DialogParameters { ["Aplicacion"] = a, ["Modo"] = modo };
+        var dlg = await DialogService.ShowAsync<AplicacionDialog>(titulo, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+
+    public void Dispose() => Cambios.Desuscribir("SEGURIDAD.APLICACIONES", RefrescarPorCambio);
+}

@@ -1,0 +1,91 @@
+@using TiposDescuentoModel = KONSolutions.Shared.Models.Comercial.TiposDescuento
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_DESCUENTO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            @if (!_esNuevo)
+            {
+                <CampoTexto Tabla="COMERCIAL.TIPOS_DESCUENTO" Columna="COD_TIPO_DESCUENTO"
+                            @bind-Value="_codigoStr" Disabled="true" />
+            }
+            <CampoTexto Tabla="COMERCIAL.TIPOS_DESCUENTO" Columna="DES_TIPO_DESCUENTO"
+                        @bind-Value="_model.DES_TIPO_DESCUENTO"
+                        Disabled="_readonly" Obligatorio="true" />
+            <MudNumericField @bind-Value="_model.TAS_DESCUENTO" Label="Tasa de descuento (%)" Min="0" Max="100"
+                              Format="N2" Variant="Variant.Outlined" Disabled="_readonly" Class="mb-3"
+                              Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposDescuentoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposDescuentoModel _model = new();
+    private string? _codigoStr;
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        // Mapeo inicial desde el Item que pasó la grilla — se usa como fallback mientras
+        // se resuelve el viaje a SHOWBYID (en OnInitializedAsync) o si ese viaje falla; una
+        // vez que responde, MapearDesdeModelo() pisa estos valores con los frescos de la BD.
+        if (Item is not null) MapearDesdeModelo(Item);
+        _codigoStr = _model.COD_TIPO_DESCUENTO?.ToString();
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de SHOWBYID) hacia _model.</summary>
+    private void MapearDesdeModelo(TiposDescuentoModel m)
+    {
+        _model.COD_TIPO_DESCUENTO = m.COD_TIPO_DESCUENTO;
+        _model.DES_TIPO_DESCUENTO = m.DES_TIPO_DESCUENTO;
+        _model.TAS_DESCUENTO = m.TAS_DESCUENTO;
+        _codigoStr = _model.COD_TIPO_DESCUENTO?.ToString();
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear), para no mostrar datos desactualizados de la
+    /// grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposDescuentoModel>($"{ApiRoutes.Comercial.TiposDescuento}/{_model.COD_TIPO_DESCUENTO}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Comercial.TiposDescuento;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_TIPO_DESCUENTO}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposDescuentoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposDescuentoDialog), nameof(Submit));
+    }
+}

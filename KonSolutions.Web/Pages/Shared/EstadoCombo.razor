@@ -1,0 +1,125 @@
+@*
+    EstadoCombo.razor
+    --------------------------------------------------------------------------
+    Combo de estado reutilizable. Carga los estados de una tabla a través del
+    endpoint genérico "estados-por-tabla":
+      GET /seguridad/estados-por-tabla?desTabla={DesTabla}
+    Uso:
+      <EstadoCombo DesTabla="SEGURIDAD.PERFILES_USUARIO"
+                   @bind-Value="_model.COD_ESTADO"
+                   CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                   Disabled="_readonly" />
+*@
+@inject HttpClient Http
+
+@if (_cargando)
+{
+    <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="56px" Class="@Class" Style="border-radius:4px;" />
+}
+else
+{
+    <div class="estado-combo-wrap @(!string.IsNullOrEmpty(_colorActual) ? "estado-combo-con-punto" : "")">
+        @if (!string.IsNullOrEmpty(_colorActual))
+        {
+            <div class="estado-combo-dot" style="background:@_colorActual;"></div>
+        }
+        <AriaCombo TItem="EstadoItem" Items="_estados"
+                   TextFunc="@(e => e.DesEstado)" ValueFunc="@(e => e.CodEstado.ToString())"
+                   Value="@(Value?.ToString())" ValueChanged="OnChangedStr"
+                   Label="Estado" Disabled="Disabled" Class="@Class">
+            <OptionTemplate Context="e">
+                <div class="d-flex align-center gap-2">
+                    @if (!string.IsNullOrEmpty(e.BackColor))
+                    {
+                        <div style="width:10px;height:10px;border-radius:50%;
+                                    background:@e.BackColor;flex-shrink:0;"></div>
+                    }
+                    <span>@e.DesEstado</span>
+                </div>
+            </OptionTemplate>
+        </AriaCombo>
+    </div>
+
+    @if (!_estados.Any() && !string.IsNullOrWhiteSpace(_diagnostico))
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-1 mb-2" Style="font-size:.75rem;">
+            Sin estados disponibles para "@DesTabla". @_diagnostico
+        </MudAlert>
+    }
+}
+
+@code {
+    [Parameter] public string DesTabla { get; set; } = "";
+    [Parameter] public int? Value { get; set; }
+    [Parameter] public EventCallback<int?> ValueChanged { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string Class { get; set; } = "mb-3";
+    [Parameter] public EventCallback<int?> CodTipoEstadoChanged { get; set; }
+
+    private List<EstadoItem> _estados = new();
+    private string _diagnostico = "";
+    private bool _cargando = true;
+    private int? _codTipoEstado;
+
+    private class EstadosDiag
+    {
+        public string DesTabla { get; set; } = "";
+        public int? CodTipoEstado { get; set; }
+        public int Cantidad { get; set; }
+        public string Paso { get; set; } = "";
+        public List<ComboboxItem> Estados { get; set; } = new();
+        public List<EstadoItem> EstadosDetalle { get; set; } = new();
+    }
+
+    /// <summary>Color del estado actualmente seleccionado, para el punto que se ve sobre el
+    /// combo cerrado (la lista desplegada ya lo muestra por cada opción vía OptionTemplate).</summary>
+    private string? _colorActual;
+    private void ActualizarColorActual()
+        => _colorActual = _estados.FirstOrDefault(e => e.CodEstado == Value)?.BackColor;
+
+    protected override void OnParametersSet() => ActualizarColorActual();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<EstadosDiag>>(
+                $"{ApiRoutes.Seguridad.EstadosPorTabla}?desTabla={Uri.EscapeDataString(DesTabla)}");
+
+            if (r?.Data is not null)
+            {
+                _estados = r.Data.EstadosDetalle?.Count > 0
+                    ? r.Data.EstadosDetalle
+                    : (r.Data.Estados ?? new()).Select(c => new EstadoItem
+                      {
+                          CodEstado = int.TryParse(c.Id, out var n) ? n : 0,
+                          DesEstado = c.Texto
+                      }).ToList();
+
+                _diagnostico  = r.Data.Paso ?? "";
+                _codTipoEstado = r.Data.CodTipoEstado;
+
+                if (CodTipoEstadoChanged.HasDelegate)
+                    await CodTipoEstadoChanged.InvokeAsync(_codTipoEstado);
+            }
+        }
+        catch (Exception ex) { _diagnostico = $"Error de red: {ex.Message}"; }
+        finally { _cargando = false; }
+
+        // Ceder control al padre para que termine su init, luego auto-seleccionar default solo si sigue en null
+        await Task.Yield();
+        if (Value is null && _estados.Any())
+        {
+            var def = _estados.FirstOrDefault(e => e.EsDefault) ?? _estados.First();
+            await ValueChanged.InvokeAsync(def.CodEstado);
+        }
+        ActualizarColorActual();
+    }
+
+    private async Task OnChangedStr(string? v)
+    {
+        Value = int.TryParse(v, out var n) ? n : null;
+        ActualizarColorActual();
+        await ValueChanged.InvokeAsync(Value);
+    }
+}

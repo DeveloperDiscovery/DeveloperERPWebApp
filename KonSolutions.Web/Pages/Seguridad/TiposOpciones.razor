@@ -1,0 +1,211 @@
+@page "/seguridad/tipos-opciones"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Seguridad
+@inject CatalogoService<TipoOpcion, TipoOpcionDto> Service
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ConfigService ConfigSvc
+@implements IDisposable
+
+<PageTitle>Tipos de Opciones · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Opciones" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema SEGURIDAD · @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTerm" OnSearch="HandleSearch" Placeholder="Buscar tipo de opción..." DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Tipos de Opciones" Headers="@_printHeaders" Rows="@PrintRows()" />
+        <AccionesBotones CodAplicacion="@CodAplicacion"
+                         CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header"
+                         OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="tipos-opciones" style="position:relative;">
+    <MudDataGrid T="TipoOpcion" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Title="Icono" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <GridImage Image="context.Item.IMG_ICONO" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Código" Width="@Limites.ColWidth("SEGURIDAD.TIPOS_OPCIONES_APLICACION","COD_TIPO_OPCION_APLICACION",60,150)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_TIPO_OPCION_APLICACION" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TipoOpcion" ItemsBase="@BaseSinEstaColumna(0)"
+                                            ValorDe="@(x => x.COD_TIPO_OPCION_APLICACION ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_OPCION_APLICACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("SEGURIDAD.TIPOS_OPCIONES_APLICACION","DES_TIPO_OPCION_APLICACION",120,350)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TIPO_OPCION_APLICACION" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TipoOpcion" ItemsBase="@BaseSinEstaColumna(1)"
+                                            ValorDe="@(x => x.DES_TIPO_OPCION_APLICACION ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_OPCION_APLICACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Tipo" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <div class="d-flex align-center justify-center gap-2">
+                        <MudTooltip Text="Módulo">
+                            <MudIcon Icon="@Icons.Material.Filled.ViewModule" Color="@(context.Item.FLG_MODULO == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_MODULO == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                        <MudTooltip Text="Carpeta">
+                            <MudIcon Icon="@Icons.Material.Filled.Folder" Color="@(context.Item.FLG_CARPETA == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_CARPETA == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                        <MudTooltip Text="Separador">
+                            <MudIcon Icon="@Icons.Material.Filled.HorizontalRule" Color="@(context.Item.FLG_SEPARADOR == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_SEPARADOR == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion"
+                                     CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                     OnAccion="@(b => OnAccionGrilla(item, b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin tipos de opciones.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TipoOpcion" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<TipoOpcion> _items = new();
+    private string _searchTerm = string.Empty;
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<TipoOpcion> Ordenar(List<TipoOpcion> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_OPCION_APLICACION).ToList() : items.OrderByDescending(x => x.COD_TIPO_OPCION_APLICACION).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_OPCION_APLICACION).ToList() : items.OrderByDescending(x => x.DES_TIPO_OPCION_APLICACION).ToList(),
+        _ => items
+    };
+
+    private List<TipoOpcion> _visibles => Ordenar(AplicarTodos(_items, -1));
+    private List<TipoOpcion> BaseSinEstaColumna(int col) => AplicarTodos(_items, col);
+
+    private List<TipoOpcion> AplicarTodos(List<TipoOpcion> origen, int excluir)
+    {
+        IEnumerable<TipoOpcion> q = origen;
+        foreach (var (col, vals) in _filtros)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.COD_TIPO_OPCION_APLICACION ?? "")),
+                1 => q.Where(x => vals.Contains(x.DES_TIPO_OPCION_APLICACION ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltro(int col, HashSet<string>? vals) { _filtros[col] = vals; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private readonly List<string> _printHeaders = new() { "Código", "Descripción", "Módulo", "Carpeta", "Separador" };
+    private List<List<string>> PrintRows() => _items.Select(t => new List<string>
+    {
+        t.COD_TIPO_OPCION_APLICACION, t.DES_TIPO_OPCION_APLICACION ?? "",
+        t.FLG_MODULO == true ? "Sí" : "No",
+        t.FLG_CARPETA == true ? "Sí" : "No",
+        t.FLG_SEPARADOR == true ? "Sí" : "No"
+    }).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("SEGURIDAD", "TiposOpciones");
+        await Load();
+        Cambios.Suscribir("SEGURIDAD.TIPOS_OPCIONES_APLICACION", RefrescarPorCambio);
+    }
+
+    private async Task Load() => _items = await Service.GetAllAsync();
+
+    private async Task HandleSearch()
+    {
+        _items = string.IsNullOrWhiteSpace(_searchTerm)
+            ? await Service.GetAllAsync()
+            : await Service.SearchAsync(_searchTerm);
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Open(null);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(TipoOpcion item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Ver(item);
+        if (b.FLG_ACCION_PUT    == true) return Open(item);
+        if (b.FLG_ACCION_DELETE == true) return Delete(item);
+        var n = (b.DES_BOTON_OPCION ?? b.DES_ALIAS ?? "").ToUpperInvariant();
+        if (n.Contains("VER") || n.Contains("DETALL") || n.Contains("CONSULT")) return Ver(item);
+        if (n.Contains("MODIF") || n.Contains("EDIT") || n.Contains("ACTUALIZ")) return Open(item);
+        if (n.Contains("ELIM") || n.Contains("BORR") || n.Contains("DELETE")) return Delete(item);
+        return Task.CompletedTask;
+    }
+
+    private async Task Ver(TipoOpcion item) => await AbrirDialog(item, CrudModo.Read);
+    private async Task Open(TipoOpcion? t)  => await AbrirDialog(t, t is null ? CrudModo.Create : CrudModo.Update);
+    private async Task Delete(TipoOpcion t) => await AbrirDialog(t, CrudModo.Delete);
+
+    private async Task AbrirDialog(TipoOpcion? t, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de opción",
+            CrudModo.Read   => $"Ver · {t?.COD_TIPO_OPCION_APLICACION}",
+            CrudModo.Delete => $"Eliminar · {t?.COD_TIPO_OPCION_APLICACION}",
+            _ => "Tipo de opción"
+        };
+        var parameters = new DialogParameters { ["Item"] = t, ["Modo"] = modo };
+        var dlg = await DialogService.ShowAsync<TiposOpcionesDialog>(titulo, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+
+    public void Dispose() => Cambios.Desuscribir("SEGURIDAD.TIPOS_OPCIONES_APLICACION", RefrescarPorCambio);
+}

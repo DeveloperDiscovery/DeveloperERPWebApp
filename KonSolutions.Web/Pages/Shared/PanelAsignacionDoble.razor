@@ -1,0 +1,285 @@
+@typeparam TItem
+@inject ConfigService ConfigSvc
+
+@* Par de grillas «asignados | disponibles» con switch de marcado y menú contextual.
+   Es el mismo control que estrenó Almacenes › Tipos de Movimiento, extraído acá porque los
+   cuatro hijos del rol lo repiten idéntico: si mañana cambia el switch o el menú, cambia en
+   los cinco lugares a la vez y no en cinco copias que se van desincronizando.
+
+   Los dos lados usan el MISMO TItem a propósito: los SP _DISPONIBLES devuelven las mismas
+   columnas que los asignados, así que no hace falta un segundo tipo sólo para la otra grilla. *@
+
+@if (Cargando)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Spacing="0">
+
+        @* ── ASIGNADOS ── *@
+        <MudItem xs="12" md="6">
+            <div style="border-right:1px solid var(--line);">
+                <div class="d-flex align-center justify-space-between px-3 py-2"
+                     style="border-bottom:1px solid var(--line);background:var(--mud-palette-background-grey);">
+                    <div class="d-flex align-center gap-2">
+                        @SwitchMarcaTodo(EstadoMarcaAsignados, MarcarTodosAsignados, Color.Primary)
+                        <MudText Typo="Typo.subtitle2">Asignados</MudText>
+                        @if (_marcadosAsignados.Count > 0)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">@_marcadosAsignados.Count</MudChip>
+                        }
+                    </div>
+                    <MudTooltip Text="@($"Quitar {EtiquetaPlural} marcados")">
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Error"
+                                   StartIcon="@Icons.Material.Filled.ChevronRight"
+                                   Disabled="@(_marcadosAsignados.Count == 0 || SoloLectura || Procesando)"
+                                   OnClick="DesasignarMarcadosAsync">Quitar</MudButton>
+                    </MudTooltip>
+                </div>
+
+                <div data-resizable-grid="@($"{NombreGrilla}-asignados")" style="position:relative;">
+                <MudDataGrid T="TItem" Items="Asignados" Dense="true" Hover="true" Striped="true"
+                             Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo"
+                             RowClassFunc="ClaseFilaAsignado"
+                             RowClick="@(new EventCallback<DataGridRowClickEventArgs<TItem>>(this, OnFilaAsignadaAsync))">
+                    <Columns>
+                        <TemplateColumn Sortable="false" Title="" Width="60" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                            <CellTemplate>
+                                @{ var k = Clave(context.Item); }
+                                @SwitchMarca(_marcadosAsignados.Contains(k), v => Marcar(_marcadosAsignados, k, v), Color.Primary)
+                            </CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="Código" Width="110" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="Código" /></HeaderTemplate>
+                            <CellTemplate><span class="mono">@Codigo(context.Item)</span></CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="@TituloColumna">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="@TituloColumna" /></HeaderTemplate>
+                            <CellTemplate>
+                                @{ var it = context.Item; }
+                                @* El menú contextual es la acción individual; el switch es la
+                                   masiva. Dos caminos para lo mismo, sin estorbarse. *@
+                                <MudMenu ActivationEvent="@MouseEvent.RightClick" Dense="true" FullWidth="true"
+                                         AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+                                    <ActivatorContent>
+                                        <div style="cursor:context-menu;">
+                                            <MudText Typo="Typo.body2">@Descripcion(it)</MudText>
+                                            @if (Secundaria is not null && !string.IsNullOrWhiteSpace(Secundaria(it)))
+                                            {
+                                                <MudText Class="mono" Style="opacity:.5;font-size:.7rem;">@Secundaria(it)</MudText>
+                                            }
+                                        </div>
+                                    </ActivatorContent>
+                                    <ChildContent>
+                                        <MudMenuItem Icon="@Icons.Material.Filled.ChevronRight" IconColor="Color.Error"
+                                                     OnClick="@(() => DesasignarAsync(new List<TItem> { it }))">
+                                            @($"Quitar del {EtiquetaPadre}")
+                                        </MudMenuItem>
+                                    </ChildContent>
+                                </MudMenu>
+                            </CellTemplate>
+                        </TemplateColumn>
+                    </Columns>
+                    <NoRecordsContent>
+                        <MudText Class="pa-4 mono" Style="opacity:.5;">@VacioAsignados</MudText>
+                    </NoRecordsContent>
+                    <PagerContent><MudDataGridPager T="TItem" /></PagerContent>
+                </MudDataGrid>
+                <div class="grid-resize-handle"></div>
+                </div>
+            </div>
+        </MudItem>
+
+        @* ── DISPONIBLES ── *@
+        <MudItem xs="12" md="6">
+            <div>
+                <div class="d-flex align-center justify-space-between px-3 py-2"
+                     style="border-bottom:1px solid var(--line);background:var(--mud-palette-background-grey);">
+                    <MudTooltip Text="@($"Agregar los {EtiquetaPlural} marcados")">
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Success"
+                                   StartIcon="@Icons.Material.Filled.ChevronLeft"
+                                   Disabled="@(_marcadosDisponibles.Count == 0 || SoloLectura || Procesando)"
+                                   OnClick="AsignarMarcadosAsync">Asignar</MudButton>
+                    </MudTooltip>
+                    <div class="d-flex align-center gap-2">
+                        @if (_marcadosDisponibles.Count > 0)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">@_marcadosDisponibles.Count</MudChip>
+                        }
+                        <MudText Typo="Typo.subtitle2">Disponibles</MudText>
+                        @SwitchMarcaTodo(EstadoMarcaDisponibles, MarcarTodosDisponibles, Color.Success)
+                    </div>
+                </div>
+
+                <div data-resizable-grid="@($"{NombreGrilla}-disponibles")" style="position:relative;">
+                <MudDataGrid T="TItem" Items="Disponibles" Dense="true" Hover="true" Striped="true"
+                             Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+                    <Columns>
+                        <TemplateColumn Sortable="false" Title="" Width="60" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                            <CellTemplate>
+                                @{ var k = Clave(context.Item); }
+                                @SwitchMarca(_marcadosDisponibles.Contains(k), v => Marcar(_marcadosDisponibles, k, v), Color.Success)
+                            </CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="Código" Width="110" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="Código" /></HeaderTemplate>
+                            <CellTemplate><span class="mono">@Codigo(context.Item)</span></CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="@TituloColumna">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="@TituloColumna" /></HeaderTemplate>
+                            <CellTemplate>
+                                @{ var it = context.Item; }
+                                <MudMenu ActivationEvent="@MouseEvent.RightClick" Dense="true" FullWidth="true"
+                                         AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft">
+                                    <ActivatorContent>
+                                        <div style="cursor:context-menu;">
+                                            <MudText Typo="Typo.body2">@Descripcion(it)</MudText>
+                                            @if (Secundaria is not null && !string.IsNullOrWhiteSpace(Secundaria(it)))
+                                            {
+                                                <MudText Class="mono" Style="opacity:.5;font-size:.7rem;">@Secundaria(it)</MudText>
+                                            }
+                                        </div>
+                                    </ActivatorContent>
+                                    <ChildContent>
+                                        <MudMenuItem Icon="@Icons.Material.Filled.ChevronLeft" IconColor="Color.Success"
+                                                     OnClick="@(() => AsignarAsync(new List<TItem> { it }))">
+                                            @($"Asignar al {EtiquetaPadre}")
+                                        </MudMenuItem>
+                                    </ChildContent>
+                                </MudMenu>
+                            </CellTemplate>
+                        </TemplateColumn>
+                    </Columns>
+                    <NoRecordsContent>
+                        <MudText Class="pa-4 mono" Style="opacity:.5;">@VacioDisponibles</MudText>
+                    </NoRecordsContent>
+                    <PagerContent><MudDataGridPager T="TItem" /></PagerContent>
+                </MudDataGrid>
+                <div class="grid-resize-handle"></div>
+                </div>
+            </div>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<TItem> Asignados { get; set; } = Array.Empty<TItem>();
+    [Parameter, EditorRequired] public IReadOnlyList<TItem> Disponibles { get; set; } = Array.Empty<TItem>();
+
+    /// <summary>Identidad de la fila para el marcado. Debe ser única en las dos listas: cuando
+    /// la PK es compuesta, se concatena (p. ej. "clase|tipo").</summary>
+    [Parameter, EditorRequired] public Func<TItem, string> Clave { get; set; } = _ => "";
+    [Parameter, EditorRequired] public Func<TItem, string> Codigo { get; set; } = _ => "";
+    [Parameter, EditorRequired] public Func<TItem, string> Descripcion { get; set; } = _ => "";
+    /// <summary>Línea chica bajo la descripción (observación, clase…). Null = no se muestra.</summary>
+    [Parameter] public Func<TItem, string?>? Secundaria { get; set; }
+
+    [Parameter] public string TituloColumna { get; set; } = "Descripción";
+    /// <summary>Cómo se nombra al padre en los menús: "rol", "almacén"…</summary>
+    [Parameter] public string EtiquetaPadre { get; set; } = "rol";
+    [Parameter] public string EtiquetaPlural { get; set; } = "registros";
+    [Parameter] public string VacioAsignados { get; set; } = "Nada asignado todavía.";
+    [Parameter] public string VacioDisponibles { get; set; } = "No queda nada por asignar.";
+    /// <summary>Prefijo para el alto persistido de cada grilla (data-resizable-grid).</summary>
+    [Parameter, EditorRequired] public string NombreGrilla { get; set; } = "asignacion";
+
+    [Parameter] public bool SoloLectura { get; set; }
+    [Parameter] public bool Cargando { get; set; }
+    [Parameter] public bool Procesando { get; set; }
+
+    [Parameter] public EventCallback<List<TItem>> OnAsignar { get; set; }
+    [Parameter] public EventCallback<List<TItem>> OnDesasignar { get; set; }
+
+    /// <summary>Fila de asignados elegida — sólo lo usa el panel de almacenes, que abre debajo
+    /// los tipos de movimiento de ese almacén. Si nadie escucha, la grilla no resalta nada.</summary>
+    [Parameter] public EventCallback<TItem> OnSeleccionar { get; set; }
+    [Parameter] public Func<TItem, bool>? EsSeleccionado { get; set; }
+
+    private readonly HashSet<string> _marcadosAsignados = new();
+    private readonly HashSet<string> _marcadosDisponibles = new();
+
+    /// <summary>Switch de marcado de una fila. Centralizado para que las dos grillas usen
+    /// exactamente el mismo control.</summary>
+    private RenderFragment SwitchMarca(bool marcado, Action<bool> alCambiar, Color color) => __builder =>
+    {
+        <MudSwitch T="bool" Value="marcado" ValueChanged="@(new EventCallback<bool>(this, alCambiar))"
+                   Color="@color" Size="Size.Small" Disabled="@(SoloLectura || Procesando)" />
+    };
+
+    /// <summary>Switch del encabezado. Tri-estado: en «algunos marcados» se muestra apagado
+    /// pero con color, porque un switch no tiene estado intermedio propio como el check.</summary>
+    private RenderFragment SwitchMarcaTodo(bool? estado, Action<bool> alCambiar, Color color) => __builder =>
+    {
+        <MudTooltip Text="@(estado == true ? "Desmarcar todos" : "Marcar todos")">
+            <MudSwitch T="bool" Value="@(estado == true)" ValueChanged="@(new EventCallback<bool>(this, alCambiar))"
+                       Color="@(estado is null ? Color.Warning : color)" Size="Size.Small"
+                       Disabled="@(SoloLectura || Procesando)" />
+        </MudTooltip>
+    };
+
+    /// <summary>Las marcas se descartan cuando cambian las listas: un switch que sobrevive a la
+    /// recarga apuntaría a filas que ya no están.</summary>
+    public void LimpiarMarcas()
+    {
+        _marcadosAsignados.Clear();
+        _marcadosDisponibles.Clear();
+        StateHasChanged();
+    }
+
+    private void Marcar(HashSet<string> destino, string clave, bool marcado)
+    {
+        if (marcado) destino.Add(clave); else destino.Remove(clave);
+    }
+
+    // null = algunos marcados. Deja ver de un vistazo si la selección es parcial.
+    private bool? EstadoMarcaAsignados =>
+        _marcadosAsignados.Count == 0 ? false
+        : _marcadosAsignados.Count == Asignados.Count ? true : null;
+
+    private bool? EstadoMarcaDisponibles =>
+        _marcadosDisponibles.Count == 0 ? false
+        : _marcadosDisponibles.Count == Disponibles.Count ? true : null;
+
+    private void MarcarTodosAsignados(bool valor)
+    {
+        _marcadosAsignados.Clear();
+        if (!valor) return;
+        foreach (var a in Asignados) _marcadosAsignados.Add(Clave(a));
+    }
+
+    private void MarcarTodosDisponibles(bool valor)
+    {
+        _marcadosDisponibles.Clear();
+        if (!valor) return;
+        foreach (var d in Disponibles) _marcadosDisponibles.Add(Clave(d));
+    }
+
+    private Task AsignarMarcadosAsync()
+        => AsignarAsync(Disponibles.Where(d => _marcadosDisponibles.Contains(Clave(d))).ToList());
+
+    private Task DesasignarMarcadosAsync()
+        => DesasignarAsync(Asignados.Where(a => _marcadosAsignados.Contains(Clave(a))).ToList());
+
+    private async Task AsignarAsync(List<TItem> items)
+    {
+        if (SoloLectura || Procesando || items.Count == 0) return;
+        await OnAsignar.InvokeAsync(items);
+        LimpiarMarcas();
+    }
+
+    private async Task DesasignarAsync(List<TItem> items)
+    {
+        if (SoloLectura || Procesando || items.Count == 0) return;
+        await OnDesasignar.InvokeAsync(items);
+        LimpiarMarcas();
+    }
+
+    private async Task OnFilaAsignadaAsync(DataGridRowClickEventArgs<TItem> args)
+    {
+        if (OnSeleccionar.HasDelegate) await OnSeleccionar.InvokeAsync(args.Item);
+    }
+
+    private string ClaseFilaAsignado(TItem item, int _)
+        => EsSeleccionado is not null && EsSeleccionado(item) ? "fila-seleccionada" : "";
+}

@@ -1,0 +1,188 @@
+@using KONSolutions.Shared.Models.Seguridad
+@using Microsoft.AspNetCore.Components.Web
+
+@* Componente recursivo que representa un nodo del árbol de opciones. *@
+
+<div>
+    @* Fila del nodo — TreeList: Descripción (indentada) | Tipo | Formulario | Estado *@
+    <div class="tl-row @(EsActual ? "tl-row-seleccionada" : "")"
+         style="cursor:pointer;user-select:none;"
+         @onclick="ToggleYSeleccionar"
+         @oncontextmenu="OnRightClick"
+         @oncontextmenu:preventDefault="true"
+         @oncontextmenu:stopPropagation="true">
+
+        <div class="d-flex align-center gap-1 tl-col-desc" style="@($"padding-left:{8 + Nivel * 16}px;")">
+            @* Flecha expand/collapse *@
+            @if (Nodo.Hijos.Any())
+            {
+                <MudIcon Icon="@(_expandido ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                         Style="font-size:.9rem;opacity:.5;flex-shrink:0;" />
+            }
+            else
+            {
+                <span style="width:18px;flex-shrink:0;"></span>
+            }
+
+            @* Icono cargado (lazy, vía endpoint /logos) si existe; si no, el fijo por tipo *@
+            @{ var _logo = LogoDe(Nodo.COD_CHILDREN); }
+            @if (_logo is { Length: > 0 })
+            {
+                <img src="@($"data:image/png;base64,{Convert.ToBase64String(_logo)}")"
+                     style="width:16px;height:16px;object-fit:contain;flex-shrink:0;" />
+            }
+            else
+            {
+                <MudIcon Icon="@IconoPorTipo(Nodo.COD_TIPO)"
+                         Style="@($"font-size:.95rem;color:{ColorPorTipo(Nodo.COD_TIPO)};flex-shrink:0;")" />
+            }
+
+            @* Descripción *@
+            <span style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                @(string.IsNullOrWhiteSpace(Nodo.DES_OPCION) ? Nodo.COD_CHILDREN : Nodo.DES_OPCION)
+            </span>
+
+            @if (Nodo.FLG_EXIGE_PASSWORD == true)
+            {
+                <MudTooltip Text="Exige contraseña">
+                    <MudIcon Icon="@Icons.Material.Filled.Password" Style="font-size:.85rem;margin-left:2px;flex-shrink:0;color:#2b6cb0;" />
+                </MudTooltip>
+            }
+            @if (Nodo.FLG_TECLADO_VIRTUAL == true)
+            {
+                <MudTooltip Text="Teclado virtual habilitado">
+                    <MudIcon Icon="@Icons.Material.Filled.Keyboard" Style="font-size:.85rem;margin-left:2px;flex-shrink:0;color:#2b6cb0;" />
+                </MudTooltip>
+            }
+        </div>
+
+        <div class="tl-col-tipo">
+            <span class="tl-badge" style="@($"color:{ColorPorTipo(Nodo.COD_TIPO)};background:{ColorPorTipo(Nodo.COD_TIPO)}1a;")">
+                @DescTipo(Nodo.COD_TIPO)
+            </span>
+        </div>
+
+        <div class="tl-col-form mono" style="font-size:.74rem;opacity:.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            @(string.IsNullOrWhiteSpace(Nodo.DES_PAGINA) ? "—" : Nodo.DES_PAGINA)
+        </div>
+
+        <div class="tl-col-estado">
+            @if (Nodo.COD_TIPO is "MDL" or "SMD")
+            {
+                <MudIcon Icon="@IconoEstado(Nodo.COD_ESTADO)" Style="@($"font-size:1rem;color:{ColorEstado(Nodo.COD_ESTADO)};")" />
+            }
+        </div>
+    </div>
+
+    @* Hijos (recursivo) *@
+    @if (_expandido && Nodo.Hijos.Any())
+    {
+        @foreach (var hijo in Nodo.Hijos)
+        {
+            <NodoArbol Nodo="hijo"
+                       Nivel="@(Nivel + 1)"
+                       OnSeleccionar="OnSeleccionar"
+                       OnContextMenu="OnContextMenu"
+                       NodoActual="NodoActual"
+                       ExpandirTodo="ExpandirTodo"
+                       Logos="Logos" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public NodoOpcion  Nodo          { get; set; } = null!;
+    [Parameter] public int         Nivel         { get; set; } = 0;
+    [Parameter] public EventCallback<NodoOpcion> OnSeleccionar { get; set; }
+    [Parameter] public EventCallback<(NodoOpcion Nodo, double X, double Y)> OnContextMenu { get; set; }
+    [Parameter] public NodoOpcion? NodoActual    { get; set; }
+    [Parameter] public bool        ExpandirTodo  { get; set; }
+    // Íconos cargados en paralelo vía /aplicaciones-opciones-treeview/logos (no bloquea el
+    // primer render del árbol); clave = COD_CHILDREN. Null mientras no hayan llegado todavía.
+    [Parameter] public Dictionary<string, byte[]?>? Logos { get; set; }
+
+    private byte[]? LogoDe(string codChildren)
+        => Logos is not null && Logos.TryGetValue(codChildren, out var b) ? b : null;
+
+    private bool _expandido = false;
+    private bool _ultimoExpandirTodo;
+    private bool _inicializado;
+
+    // BUG anterior: esto corría en CADA re-render del padre (ej. al solo hacer clic
+    // en cualquier nodo para seleccionarlo), y como "!ExpandirTodo && _expandido" era
+    // cierto apenas el usuario expandía un nodo a mano (ExpandirTodo sigue en false),
+    // lo volvía a colapsar de inmediato — el clic para expandir/contraer nunca se
+    // notaba. Ahora solo reacciona cuando ExpandirTodo REALMENTE cambia (botones
+    // "Expandir todo"/"Contraer todo"), no en cualquier otro re-render.
+    protected override void OnParametersSet()
+    {
+        if (!_inicializado) { _ultimoExpandirTodo = ExpandirTodo; _inicializado = true; return; }
+        if (ExpandirTodo != _ultimoExpandirTodo)
+        {
+            _expandido = ExpandirTodo && Nodo.Hijos.Any();
+            _ultimoExpandirTodo = ExpandirTodo;
+        }
+    }
+
+    private bool EsActual => NodoActual?.COD_CHILDREN == Nodo.COD_CHILDREN;
+
+    private void ToggleYSeleccionar()
+    {
+        if (Nodo.Hijos.Any()) _expandido = !_expandido;
+        OnSeleccionar.InvokeAsync(Nodo);
+    }
+
+    private Task OnRightClick(MouseEventArgs e)
+    {
+        OnSeleccionar.InvokeAsync(Nodo);
+        return OnContextMenu.InvokeAsync((Nodo, e.ClientX, e.ClientY));
+    }
+
+    private static string IconoPorTipo(string tipo) => tipo switch
+    {
+        "ROT" => Icons.Material.Filled.AccountTree,
+        "APP" => Icons.Material.Filled.AppsOutage,
+        "CRP" => Icons.Material.Filled.Folder,
+        "MDL" => Icons.Material.Filled.ViewModule,
+        "SMD" => Icons.Material.Filled.ViewQuilt,
+        "BTN" => Icons.Material.Filled.SmartButton,
+        _     => Icons.Material.Filled.Circle
+    };
+
+    private static string ColorPorTipo(string tipo) => tipo switch
+    {
+        "ROT" => "#16130f",
+        "APP" => "#b8472d",
+        "CRP" => "#e6921a",
+        "MDL" => "#2b6cb0",
+        "BTN" => "#4a4a32",
+        _     => "#888"
+    };
+
+    private static string DescTipo(string tipo) => tipo switch
+    {
+        "ROT" => "Raíz",
+        "APP" => "Aplicación",
+        "CRP" => "Carpeta",
+        "MDL" => "Módulo",
+        "SMD" => "Sub módulo",
+        "BTN" => "Botón",
+        _     => tipo
+    };
+
+    private static string IconoEstado(int? cod) => cod switch
+    {
+        1 => Icons.Material.Filled.CheckCircle,   // Activo
+        2 => Icons.Material.Filled.Engineering,   // En desarrollo
+        3 => Icons.Material.Filled.Engineering,   // En desarrollo (alias)
+        _ => Icons.Material.Filled.Cancel         // Inactivo
+    };
+
+    private static string ColorEstado(int? cod) => cod switch
+    {
+        1 => "#2f855a",   // verde  — Activo
+        2 => "#c27803",   // naranja — En desarrollo
+        3 => "#c27803",   // naranja — En desarrollo
+        _ => "#c53030"    // rojo   — Inactivo
+    };
+}

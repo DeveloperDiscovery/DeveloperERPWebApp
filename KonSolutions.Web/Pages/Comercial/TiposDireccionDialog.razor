@@ -1,0 +1,93 @@
+@using TiposDireccionModel = KONSolutions.Shared.Models.Comercial.TiposDireccion
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_DIRECCION" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            @if (!_esNuevo)
+            {
+                <CampoTexto Tabla="COMERCIAL.TIPOS_DIRECCION" Columna="COD_TIPO_DIRECCION"
+                            @bind-Value="_codigoStr" Disabled="true" />
+            }
+            <CampoTexto Tabla="COMERCIAL.TIPOS_DIRECCION" Columna="DES_TIPO_DIRECCION"
+                        @bind-Value="_model.DES_TIPO_DIRECCION"
+                        Disabled="_readonly" Obligatorio="true" />
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.Payments" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_COBRANZA" Color="Color.Primary" Label="Cobranza" Disabled="_readonly" /></div>
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.LocalShipping" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_ENTREGA" Color="Color.Secondary" Label="Entrega" Disabled="_readonly" /></div>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposDireccionModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposDireccionModel _model = new();
+    private string? _codigoStr;
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        // Mapeo inicial desde el Item que pasó la grilla — se usa como fallback mientras
+        // se resuelve el viaje a SHOWBYID (en OnInitializedAsync) o si ese viaje falla; una
+        // vez que responde, MapearDesdeModelo() pisa estos valores con los frescos de la BD.
+        if (Item is not null) MapearDesdeModelo(Item);
+        _codigoStr = _model.COD_TIPO_DIRECCION?.ToString();
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de SHOWBYID) hacia _model.</summary>
+    private void MapearDesdeModelo(TiposDireccionModel m)
+    {
+        _model.COD_TIPO_DIRECCION = m.COD_TIPO_DIRECCION;
+        _model.DES_TIPO_DIRECCION = m.DES_TIPO_DIRECCION;
+        _model.FLG_COBRANZA = m.FLG_COBRANZA;
+        _model.FLG_ENTREGA = m.FLG_ENTREGA;
+        _codigoStr = _model.COD_TIPO_DIRECCION?.ToString();
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear), para no mostrar datos desactualizados de la
+    /// grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposDireccionModel>($"{ApiRoutes.Comercial.TiposDireccion}/{_model.COD_TIPO_DIRECCION}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Comercial.TiposDireccion;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_TIPO_DIRECCION}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposDireccionDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposDireccionDialog), nameof(Submit));
+    }
+}

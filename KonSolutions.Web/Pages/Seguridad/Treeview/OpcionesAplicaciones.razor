@@ -1,0 +1,413 @@
+@page "/seguridad/treeview/opciones-aplicaciones"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ConfigService ConfigSvc
+@inject IJSRuntime JS
+@using KONSolutions.Shared.Models.Seguridad
+@using KONSolutions.Shared.Common
+
+@* Treeview jerárquico de opciones de aplicaciones + grilla de botones del nodo seleccionado. *@
+
+<PageTitle>Opciones Aplicaciones · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<style>
+    .ctx-item {
+        display: flex; align-items: center; gap: 8px;
+        padding: 8px 14px; cursor: pointer; font-size: .85rem;
+        transition: background .15s;
+    }
+    .ctx-item:hover { background: rgba(0,0,0,.06); }
+    .ctx-item-danger:hover { background: rgba(229,62,62,.08); color: #e53e3e; }
+
+    /* ── Layout principal ── */
+    /* flex:1 (no un calc(100vh - Npx) adivinado): el contenedor de la pestaña
+       (.ws-tab-content) ahora SIEMPRE llena el alto disponible, así que esta
+       tarjeta solo necesita crecer para ocupar todo ese espacio — sin números
+       mágicos que nunca calzaban y dejaban un hueco al final. */
+    .oa-root {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding-bottom: 14px;
+        box-sizing: border-box;
+    }
+    .oa-title-bar { flex-shrink: 0; display:flex; align-items:center; justify-content:space-between; }
+
+    .oa-main-panel {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: row;
+        overflow: hidden;
+        border-radius: 6px;
+    }
+    /* Columna izquierda: cabecera + TreeList, crece para ocupar el espacio restante. */
+    .oa-arbol-col {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    /* El árbol ocupa TODO el espacio disponible de su columna (crece con flex:1). */
+    .oa-arbol-scroll { flex: 1 1 auto; overflow-y: auto; overflow-x: auto; min-height: 0; }
+    /* El panel de botones que vivia a la derecha del arbol se movio al dialogo de la
+       opcion (OpcionBotonesPanel); por eso el arbol ocupa ahora todo el ancho. */
+</style>
+
+@* ── Menú contextual ── *@
+@if (_ctxVisible)
+{
+    <div style="position:fixed;left:@(_ctxX)px;top:@(_ctxY)px;z-index:9999;
+                background:var(--menu-back,#2b2622);color:var(--menu-fore,#fff);border:1px solid var(--line);border-radius:6px;
+                box-shadow:0 4px 20px rgba(0,0,0,.18);min-width:190px;padding:4px 0;"
+         @onclick:stopPropagation="true">
+        <div class="ctx-item" @onclick="@(() => AbrirDialogoOpcion(_ctxNodo!, CrudModo.Create))">
+            <MudIcon Icon="@Icons.Material.Filled.AddCircleOutline" Style="font-size:1rem;color:#2b6cb0;" />
+            Nuevo nodo hijo
+        </div>
+        <div class="ctx-item" @onclick="@(() => AbrirDialogoOpcion(_ctxNodo!, CrudModo.Update))">
+            <MudIcon Icon="@Icons.Material.Filled.Edit" Style="font-size:1rem;color:#e6921a;" />
+            Modificar
+        </div>
+        <div class="ctx-item" @onclick="@(() => AbrirDialogoOpcion(_ctxNodo!, CrudModo.Read))">
+            <MudIcon Icon="@Icons.Material.Filled.Visibility" Style="font-size:1rem;color:#2f855a;" />
+            Consultar
+        </div>
+        <div class="ctx-item" @onclick="@(() => AbrirDialogoMover(_ctxNodo!))">
+            <MudIcon Icon="@Icons.Material.Filled.DriveFileMove" Style="font-size:1rem;color:#6b46c1;" />
+            Mover
+        </div>
+        <div style="border-top:1px solid var(--line);margin:4px 0;"></div>
+        <div class="ctx-item ctx-item-danger" @onclick="@(() => AbrirDialogoOpcion(_ctxNodo!, CrudModo.Delete))">
+            <MudIcon Icon="@Icons.Material.Filled.DeleteForever" Style="font-size:1rem;color:#e53e3e;" />
+            Eliminar
+        </div>
+    </div>
+}
+
+<div class="oa-root" @onclick="CerrarContextMenu">
+
+    @* ── Título ── *@
+    <div class="oa-title-bar">
+        <div>
+            <TituloPagina Fallback="Opciones de Aplicaciones" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+            <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+                Schema SEGURIDAD · estructura jerárquica
+            </MudText>
+        </div>
+        <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="Cargar" Size="Size.Small">Actualizar</MudButton>
+    </div>
+
+    @* ── Panel principal — oculto detrás del overlay de carga hasta que estén los datos ── *@
+    <CargaOverlay Show="_cargando">
+        <MudPaper Elevation="1" Style="border:1px solid var(--line);" Class="oa-main-panel">
+
+            <div class="oa-arbol-col">
+                @* Cabecera del panel *@
+                <div class="pa-3 tl-toolbar" style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">
+                    <MudIcon Icon="@Icons.Material.Filled.AccountTree" Style="font-size:1rem;opacity:.8;color:inherit;" />
+                    <MudText Typo="Typo.subtitle2" Style="font-weight:700;color:inherit;">Estructura</MudText>
+                    <span class="mono" style="font-size:.72rem;opacity:.7;margin-left:auto;">@_totalNodos nodos</span>
+                    <MudTooltip Text="Expandir todo">
+                        <MudIconButton Icon="@Icons.Material.Filled.UnfoldMore" Size="Size.Small"
+                                       OnClick="@(() => { _expandirTodo = true; StateHasChanged(); })" />
+                    </MudTooltip>
+                    <MudTooltip Text="Contraer todo">
+                        <MudIconButton Icon="@Icons.Material.Filled.UnfoldLess" Size="Size.Small"
+                                       OnClick="@(() => { _expandirTodo = false; StateHasChanged(); })" />
+                    </MudTooltip>
+                    <GridClearFiltersButton OnClear="@(() => { _filtroTipo = null; _filtroEstado = null; StateHasChanged(); })"
+                                            HasFilters="@(_filtroTipo is not null || _filtroEstado is not null)" />
+                </div>
+
+                @* Árbol *@
+                <div class="tl-header px-2">
+                    <div>Descripción</div>
+                    <div class="d-flex align-center gap-1">
+                        <span>Tipo</span>
+                        <FiltroExcelColumna T="NodoOpcion" ItemsBase="@_nodosFlat" ValorDe="@(n => DescTipoFiltro(n.COD_TIPO))"
+                                            ValoresActivos="_filtroTipo" ValoresActivosChanged="@(v => { _filtroTipo = v; StateHasChanged(); })" />
+                    </div>
+                    <div>Formulario</div>
+                    <div class="d-flex align-center gap-1">
+                        <span>Estado</span>
+                        <FiltroExcelColumna T="NodoOpcion" ItemsBase="@_nodosFlat" ValorDe="@(n => DescEstadoFiltro(n))"
+                                            ValoresActivos="_filtroEstado" ValoresActivosChanged="@(v => { _filtroEstado = v; StateHasChanged(); })" />
+                    </div>
+                </div>
+                <div class="oa-arbol-scroll pa-2" @onclick="CerrarContextMenu">
+                    @foreach (var raiz in _raicesVisibles)
+                    {
+                        <NodoArbol Nodo="raiz"
+                                   OnSeleccionar="Seleccionar"
+                                   OnContextMenu="MostrarContextMenu"
+                                   NodoActual="_seleccionado"
+                                   ExpandirTodo="_expandirTodo"
+                                   Logos="_logos" />
+                    }
+                </div>
+            </div>
+
+        </MudPaper>
+    </CargaOverlay>
+
+</div>
+
+@code {
+    [Parameter] public string CodAplicacion      { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<NodoOpcion> _raices      = new();
+    private NodoOpcion?      _seleccionado;
+    private bool             _cargando;
+    private int              _totalNodos;
+    private bool             _expandirTodo;
+
+    // Íconos del árbol: se piden en paralelo, sin bloquear el primer render (texto ya
+    // visible con Cargar()); clave = COD_CHILDREN.
+    private Dictionary<string, byte[]?> _logos = new();
+
+    // ── Filtros Excel de columna (Tipo / Estado) ──
+    private HashSet<string>? _filtroTipo;
+    private HashSet<string>? _filtroEstado;
+
+    private List<NodoOpcion> _nodosFlat => Aplanar(_raices);
+    private static List<NodoOpcion> Aplanar(List<NodoOpcion> raices)
+    {
+        var result = new List<NodoOpcion>();
+        void Walk(NodoOpcion n) { result.Add(n); foreach (var h in n.Hijos) Walk(h); }
+        foreach (var r in raices) Walk(r);
+        return result;
+    }
+
+    private static string DescTipoFiltro(string tipo) => tipo switch
+    {
+        "ROT" => "Raíz", "APP" => "Aplicación", "CRP" => "Carpeta",
+        "MDL" => "Módulo", "SMD" => "Sub módulo", "BTN" => "Botón", _ => tipo
+    };
+
+    private static string DescEstadoFiltro(NodoOpcion n) =>
+        n.COD_TIPO is "MDL" or "SMD"
+            ? (n.COD_ESTADO switch { 1 => "Activo", 2 or 3 => "En desarrollo", _ => "Inactivo" })
+            : "—";
+
+    // Un nodo queda visible si él mismo cumple los filtros, o si algún descendiente
+    // los cumple (para no romper la jerarquía ocultando el padre de un match).
+    private List<NodoOpcion> _raicesVisibles
+    {
+        get
+        {
+            if (_filtroTipo is null && _filtroEstado is null) return _raices;
+
+            bool Cumple(NodoOpcion n) =>
+                (_filtroTipo is null  || _filtroTipo.Contains(DescTipoFiltro(n.COD_TIPO))) &&
+                (_filtroEstado is null || _filtroEstado.Contains(DescEstadoFiltro(n)));
+
+            NodoOpcion? Filtrar(NodoOpcion n)
+            {
+                var hijosFiltrados = n.Hijos.Select(Filtrar).Where(h => h is not null).Select(h => h!).ToList();
+                if (!Cumple(n) && !hijosFiltrados.Any()) return null;
+                var copia = new NodoOpcion
+                {
+                    COD_PARENT = n.COD_PARENT, COD_CHILDREN = n.COD_CHILDREN, DES_OPCION = n.DES_OPCION,
+                    COD_OPCION = n.COD_OPCION, COD_APLICACION_ORIGINAL = n.COD_APLICACION_ORIGINAL,
+                    COD_OPCION_ORIGINAL = n.COD_OPCION_ORIGINAL, COD_BOTON_ORIGINAL = n.COD_BOTON_ORIGINAL,
+                    DES_PAGINA = n.DES_PAGINA, COD_TIPO = n.COD_TIPO, IMG_ICONO = n.IMG_ICONO,
+                    COD_ESTADO = n.COD_ESTADO, DES_APLICACION = n.DES_APLICACION,
+                    DES_OPCION_APLICACION = n.DES_OPCION_APLICACION,
+                    DES_OPCION_APLICACION_PADRE = n.DES_OPCION_APLICACION_PADRE,
+                    COD_OPCION_APLICACION_PADRE = n.COD_OPCION_APLICACION_PADRE,
+                    FLG_EXIGE_PASSWORD = n.FLG_EXIGE_PASSWORD, FLG_TECLADO_VIRTUAL = n.FLG_TECLADO_VIRTUAL,
+                    Hijos = hijosFiltrados
+                };
+                return copia;
+            }
+
+            return _raices.Select(Filtrar).Where(n => n is not null).Select(n => n!).ToList();
+        }
+    }
+
+    private bool       _ctxVisible;
+    private double     _ctxX, _ctxY;
+    private NodoOpcion? _ctxNodo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Cargar();
+        _ = CargarLogosAsync();
+    }
+
+    private async Task CargarLogosAsync()
+    {
+        var t0 = DateTime.Now;
+        Console.WriteLine($"[TRACE] {t0:HH:mm:ss.fff} — CARGA DE ICONOS - OpcionesAplicaciones: inicio TreeviewLogos");
+        try
+        {
+            var resp = await Http.GetFromJsonAsync<ApiResp<List<NodoOpcionLogo>>>(
+                ApiRoutes.Seguridad.AplicacionesOpcionesTreeviewLogos);
+            Console.WriteLine($"[TRACE] {DateTime.Now:HH:mm:ss.fff} — CARGA DE ICONOS - OpcionesAplicaciones: fin TreeviewLogos (+{(DateTime.Now - t0).TotalMilliseconds:0}ms, nodos={resp?.Data?.Count ?? 0})");
+            if (resp?.Data is null) return;
+            foreach (var n in resp.Data)
+                _logos[n.COD_CHILDREN] = n.IMG_ICONO;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] CARGA DE ICONOS - OpcionesAplicaciones.CargarLogosAsync falló (+{(DateTime.Now - t0).TotalMilliseconds:0}ms): {ex.Message}");
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_raices.Any())
+        {
+            await Cargar();
+            StateHasChanged();
+        }
+    }
+
+    private async Task Cargar()
+    {
+        _cargando     = true;
+        _seleccionado = null;
+        _raices.Clear();
+        try
+        {
+            var resp = await Http.GetFromJsonAsync<ApiResp<List<NodoOpcion>>>(
+                ApiRoutes.Seguridad.AplicacionesOpcionesTreeview);
+            if (resp?.Data is not null)
+            {
+                // El SP del treeview no siempre trae FLG_EXIGE_PASSWORD/FLG_TECLADO_VIRTUAL —
+                // se fusionan aquí desde el maestro de opciones. El endpoint GetAll (sin
+                // parámetros) devuelve 400 en este ambiente, así que se pide por app usando
+                // /by-app, que es el mismo que ya usa el diálogo de edición y funciona bien.
+                try
+                {
+                    var flagsMapa = new Dictionary<(string, string), AplicacionesOpcionesFlagsRow>();
+                    var apps = resp.Data.Select(n => n.COD_APLICACION_ORIGINAL).Where(a => !string.IsNullOrWhiteSpace(a)).Distinct().ToList();
+                    foreach (var app in apps)
+                    {
+                        var flagsResp = await Http.GetFromJsonAsync<ApiResp<List<AplicacionesOpcionesFlagsRow>>>(
+                            $"{ApiRoutes.Seguridad.AplicacionesOpciones}/by-app?codAplicacion={Uri.EscapeDataString(app)}");
+                        if (flagsResp?.Data is not null)
+                            foreach (var f in flagsResp.Data)
+                                flagsMapa[(f.COD_APLICACION, f.COD_OPCION_APLICACION)] = f;
+                    }
+
+                    foreach (var n in resp.Data)
+                    {
+                        if (flagsMapa.TryGetValue((n.COD_APLICACION_ORIGINAL, n.COD_OPCION_ORIGINAL), out var f))
+                        {
+                            n.FLG_EXIGE_PASSWORD  = f.FLG_EXIGE_PASSWORD;
+                            n.FLG_TECLADO_VIRTUAL = f.FLG_TECLADO_VIRTUAL;
+                        }
+                    }
+                }
+                catch { /* si falla la fusión, el árbol igual se muestra sin los iconos de flags */ }
+
+                _totalNodos = resp.Data.Count;
+                _raices     = ArmarArbol(resp.Data);
+            }
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(OpcionesAplicaciones)); }
+        finally { _cargando = false; }
+    }
+
+    private static List<NodoOpcion> ArmarArbol(List<NodoOpcion> planos)
+    {
+        var sinDuplicados = planos.GroupBy(n => n.COD_CHILDREN).Select(g => g.First()).ToList();
+        var mapa = sinDuplicados.ToDictionary(n => n.COD_CHILDREN);
+        foreach (var nodo in sinDuplicados)
+            if (!string.IsNullOrWhiteSpace(nodo.COD_PARENT) && mapa.TryGetValue(nodo.COD_PARENT, out var padre))
+                padre.Hijos.Add(nodo);
+        var raices = sinDuplicados
+            .Where(n => string.IsNullOrWhiteSpace(n.COD_PARENT) || !mapa.ContainsKey(n.COD_PARENT))
+            .ToList();
+        if (!raices.Any())
+        {
+            var rot = sinDuplicados.FirstOrDefault(n => n.COD_TIPO == "ROT");
+            if (rot is not null) raices.Add(rot);
+        }
+        if (raices.Count == 1 && raices[0].COD_TIPO == "ROT" && raices[0].Hijos.Any())
+            return raices[0].Hijos;
+        return raices;
+    }
+
+    private async Task Seleccionar(NodoOpcion nodo)
+    {
+        // Antes esto tambien cargaba los botones de la opcion para el panel lateral.
+        // Los botones se administran ahora dentro del dialogo de la opcion
+        // (OpcionBotonesPanel), asi que aca solo queda marcar el nodo activo.
+        _seleccionado = nodo;
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+
+    private async Task MostrarContextMenu((NodoOpcion Nodo, double X, double Y) args)
+    {
+        // e.ClientX/Y vienen en coordenadas reales del viewport, pero #app tiene un
+        // transform:scale (appZoom.js) que lo convierte en el "containing block" de
+        // los descendientes position:fixed — hay que dividir entre el factor de zoom
+        // para que el menú aparezca justo donde se hizo clic (si no, queda desplazado
+        // hacia arriba/izquierda cuando el zoom es distinto de 100%).
+        var scale = 1.0;
+        try { scale = await JS.InvokeAsync<double>("appZoom.getScale"); } catch { }
+        if (scale <= 0) scale = 1.0;
+        _ctxNodo = args.Nodo; _ctxX = args.X / scale; _ctxY = args.Y / scale; _ctxVisible = true;
+    }
+
+    private void CerrarContextMenu() => _ctxVisible = false;
+
+    private async Task AbrirDialogoOpcion(NodoOpcion nodo, CrudModo modo)
+    {
+        _ctxVisible = false;
+        var esPadre = modo == CrudModo.Create;
+        var parametros = new DialogParameters
+        {
+            ["Item"]  = esPadre ? null : nodo,
+            ["Padre"] = esPadre ? nodo : null,
+            ["Modo"]  = modo
+        };
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva opción de menú",
+            CrudModo.Update => "Modificar opción",
+            CrudModo.Read   => "Consultar opción",
+            CrudModo.Delete => "Eliminar opción",
+            _               => "Detalle"
+        };
+        var dialog = await DialogService.ShowAsync<AplicacionesOpcionesDialog>(titulo, parametros,
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await Cargar();
+    }
+
+    private async Task AbrirDialogoMover(NodoOpcion nodo)
+    {
+        _ctxVisible = false;
+        if (string.IsNullOrWhiteSpace(nodo.COD_APLICACION_ORIGINAL) || string.IsNullOrWhiteSpace(nodo.COD_OPCION_ORIGINAL))
+        {
+            Snackbar.Add("Este nodo no se puede mover.", Severity.Warning);
+            return;
+        }
+        var parametros = new DialogParameters
+        {
+            ["CodAplicacionOrigen"] = nodo.COD_APLICACION_ORIGINAL,
+            ["CodOpcionOrigen"]     = nodo.COD_OPCION_ORIGINAL,
+            ["DesOpcionOrigen"]     = string.IsNullOrWhiteSpace(nodo.DES_OPCION) ? nodo.COD_CHILDREN : nodo.DES_OPCION
+        };
+        var dialog = await DialogService.ShowAsync<MoverOpcionDialog>("Mover opción", parametros,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await Cargar();
+    }
+
+    private record ApiResp<T>(bool Success, T? Data, string? Message);
+}

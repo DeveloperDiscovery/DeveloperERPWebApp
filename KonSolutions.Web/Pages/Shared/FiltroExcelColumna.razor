@@ -1,0 +1,197 @@
+@*
+    FiltroExcelColumna.razor
+    --------------------------------------------------------------------------
+    Filtro de columna estilo Excel: lista de valores únicos con checkboxes,
+    buscador de texto, y "Seleccionar todos". Genérico para cualquier tipo T.
+
+    El padre le pasa los ítems YA filtrados por las demás columnas (cascada)
+    y la función para extraer el valor de texto de esta columna.
+    Al confirmar, notifica el conjunto de valores que deben quedar visibles.
+*@
+@typeparam T
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div @ref="_root">
+<MudMenu Dense="true" @bind-Open="_abierto"
+         AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft"
+         PositionAtCursor="false">
+    <ActivatorContent>
+        <MudIconButton Icon="@(TieneFiltroActivo ? Icons.Material.Filled.FilterAlt : Icons.Material.Outlined.FilterAlt)"
+                       Size="Size.Small" OnClick="LeerFuenteGrilla"
+                       Style="@($"color:{(TieneFiltroActivo ? "#e6921a" : "#fff")};padding:2px;")" />
+    </ActivatorContent>
+    <ChildContent>
+        <div class="filtro-excel-col" style="@($"width:240px;padding:8px;position:relative;z-index:9999;{_estiloFuente}")" @onclick:stopPropagation="true">
+            <CampoTextoEstable @bind-Value="_busqueda" Placeholder="Buscar..." Immediate="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-2 filtro-excel-buscar"
+                          Style="@_estiloFuente"
+                          UserAttributes="@(new Dictionary<string,object> { ["autocomplete"] = "off" })" />
+
+            <div class="d-flex align-center gap-2 px-1 mb-1" style="border-bottom:1px solid var(--line);padding-bottom:4px;">
+                <MudCheckBox T="bool" Value="@TodosMarcados" ValueChanged="ToggleTodos" Dense="true" />
+                <span style="@($"{_estiloFuente}font-weight:600;color:var(--grilla-texto, #efe9df);")">(Seleccionar todos)</span>
+            </div>
+
+            <div style="max-height:220px;overflow-y:auto;">
+                @foreach (var v in ValoresFiltrados)
+                {
+                    var valor = v;
+                    <div class="d-flex align-center gap-2 px-1" style="cursor:pointer;" @onclick="@(() => Toggle(valor))">
+                        <MudCheckBox T="bool" Value="@_seleccionados.Contains(valor)" ValueChanged="@(_ => Toggle(valor))" Dense="true" />
+                        <span style="@($"{_estiloFuente}color:var(--grilla-texto, #efe9df);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;")">
+                            @(string.IsNullOrWhiteSpace(valor) ? "(en blanco)" : valor)
+                        </span>
+                    </div>
+                }
+                @if (!ValoresFiltrados.Any())
+                {
+                    <div class="px-1" style="@($"{_estiloFuente}opacity:.5;")">Sin coincidencias.</div>
+                }
+            </div>
+
+            <div class="d-flex justify-space-between gap-2 mt-2" style="border-top:1px solid var(--line);padding-top:6px;">
+                <MudButton Size="Size.Small" Variant="Variant.Filled" OnClick="LimpiarFiltro" Disabled="@(!TieneFiltroActivo)"
+                           StartIcon="@Icons.Material.Filled.FilterAltOff" Class="filtro-excel-btn-limpiar">
+                    @* Span propio en vez de texto plano: MudBlazor envuelve el label en un
+                       <span> con su propio font-size !important (misma regla genérica de
+                       .mud-popover span que afecta la lista) — hay que ganarle ahí mismo. *@
+                    <span style="@_estiloFuente">Limpiar</span>
+                </MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Filled" OnClick="Aplicar"
+                           StartIcon="@Icons.Material.Filled.Check" Class="filtro-excel-btn-aplicar">
+                    <span style="@_estiloFuente">Aplicar</span>
+                </MudButton>
+            </div>
+        </div>
+    </ChildContent>
+</MudMenu>
+</div>
+
+@code {
+    /// <summary>Ítems ya filtrados por las demás columnas (cascada) — la base sobre la que se calculan los valores únicos.</summary>
+    [Parameter] public IReadOnlyList<T> ItemsBase { get; set; } = Array.Empty<T>();
+
+    /// <summary>Extrae el valor de texto de esta columna para un ítem.</summary>
+    [Parameter] public Func<T, string?> ValorDe { get; set; } = _ => null;
+
+    /// <summary>Conjunto de valores actualmente seleccionados (null = sin filtro, todos visibles).</summary>
+    [Parameter] public HashSet<string>? ValoresActivos { get; set; }
+
+    /// <summary>Notifica al padre el nuevo conjunto de valores activos (null = filtro removido).</summary>
+    [Parameter] public EventCallback<HashSet<string>?> ValoresActivosChanged { get; set; }
+
+    private string _busqueda = "";
+    private HashSet<string> _seleccionados = new();
+    private bool _inicializado;
+    private bool _abierto;
+    private ElementReference _root;
+    private DotNetObjectReference<FiltroExcelColumna<T>>? _selfRef;
+
+    /// <summary>Fuente/tamaño leídos de la primera fila de la grilla contenedora (computed
+    /// style vía JS), para que el filtro se vea idéntico a la grilla sin importar qué
+    /// variable CSS termine ganando la cascada. Se recalcula cada vez que se abre.</summary>
+    private string _estiloFuente = "";
+
+    private bool TieneFiltroActivo => ValoresActivos is not null;
+
+    /// <summary>Valores únicos presentes en ItemsBase para esta columna (recalculado en cada apertura — cascada real).</summary>
+    private List<string> ValoresUnicos => ItemsBase
+        .Select(i => ValorDe(i) ?? "")
+        .Distinct()
+        .OrderBy(v => v)
+        .ToList();
+
+    private List<string> ValoresFiltrados => string.IsNullOrWhiteSpace(_busqueda)
+        ? ValoresUnicos
+        : ValoresUnicos.Where(v => v.Contains(_busqueda, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private bool TodosMarcados => ValoresFiltrados.Any() && ValoresFiltrados.All(v => _seleccionados.Contains(v));
+
+    protected override void OnParametersSet()
+    {
+        if (!_inicializado)
+        {
+            _seleccionados = ValoresActivos is not null
+                ? new HashSet<string>(ValoresActivos)
+                : new HashSet<string>(ValoresUnicos);
+            _inicializado = true;
+        }
+    }
+
+    private record FuenteGrilla(string? FontFamily, string? FontSize);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("filtroExcelColumna.observarTab", _root, _selfRef); } catch { }
+        }
+    }
+
+    /// <summary>Se dispara directo del click real del ícono (no depende de detectar el cambio
+    /// de estado de MudMenu, que puede no sincronizar a tiempo) — lee la fuente/tamaño ANTES
+    /// de que el popup termine de abrirse.</summary>
+    private async Task LeerFuenteGrilla()
+    {
+        try
+        {
+            var f = await JS.InvokeAsync<FuenteGrilla?>("filtroExcelColumna.obtenerFuenteGrilla", _root);
+            // !important: MudBlazor trae reglas propias sobre ".mud-popover span/p/div" con
+            // font-size !important — un inline SIN !important perdería contra esa regla.
+            // Si no encontró ninguna celda (ej. la grilla quedó en 0 filas tras un filtro
+            // previo), se conserva el último estilo válido en vez de resetear al default.
+            if (f is not null)
+                _estiloFuente = $"font-family:{f.FontFamily} !important;font-size:{f.FontSize} !important;";
+        }
+        catch { _estiloFuente = ""; }
+        StateHasChanged();
+    }
+
+    /// <summary>Invocado desde JS cuando el tab del Workspace donde vive esta grilla deja de estar activo.</summary>
+    [JSInvokable]
+    public void CerrarDesdeJs()
+    {
+        if (!_abierto) return;
+        _abierto = false;
+        StateHasChanged();
+    }
+
+    private void Toggle(string valor)
+    {
+        if (!_seleccionados.Remove(valor)) _seleccionados.Add(valor);
+    }
+
+    private void ToggleTodos(bool marcarTodos)
+    {
+        foreach (var v in ValoresFiltrados)
+        {
+            if (marcarTodos) _seleccionados.Add(v);
+            else _seleccionados.Remove(v);
+        }
+    }
+
+    private async Task Aplicar()
+    {
+        // Si están todos marcados, equivale a "sin filtro" (null) para no acarrear un Set enorme innecesario.
+        var nuevoFiltro = _seleccionados.Count == ValoresUnicos.Count ? null : new HashSet<string>(_seleccionados);
+        await ValoresActivosChanged.InvokeAsync(nuevoFiltro);
+        _abierto = false;
+    }
+
+    private async Task LimpiarFiltro()
+    {
+        _seleccionados = new HashSet<string>(ValoresUnicos);
+        _busqueda = "";
+        await ValoresActivosChanged.InvokeAsync(null);
+        _abierto = false;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("filtroExcelColumna.dispose", _root); } catch { }
+        _selfRef?.Dispose();
+    }
+}

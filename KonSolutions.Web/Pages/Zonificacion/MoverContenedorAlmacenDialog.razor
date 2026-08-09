@@ -1,0 +1,90 @@
+@using ContenedorModel = KONSolutions.Shared.Models.Logistica.ContenedoresAlmacenaje
+@using AlmacenesModel = KONSolutions.Shared.Models.Logistica.Almacenes
+@using KONSolutions.Shared.Common
+
+@* Cambia el contenedor de almacén conservando su posición RELATIVA. Es un diálogo aparte y
+   no una acción directa porque el cambio arrastra consecuencias sobre los casilleros, y eso
+   hay que decirlo antes, no después. *@
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.MoveDown" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">Mover a otro almacén</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            <b>@Contenedor?.DES_CONTENDOR</b> · hoy en @_desAlmacenActual
+        </MudText>
+
+        @if (!_destinos.Any())
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">
+                No hay otro almacén dibujado en este piso al que mudarlo. El almacén de destino
+                necesita tener su contorno definido para poder calcular la posición equivalente.
+            </MudAlert>
+        }
+        else
+        {
+            <AriaCombo TItem="ComboboxItem" Items="_destinos"
+                       TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                       @bind-Value="_codDestino" Label="Almacén de destino" Class="mb-3" />
+
+            <div class="d-flex align-center gap-2 mb-3" style="height:40px;">
+                <MudIcon Icon="@Icons.Material.Filled.OpenWith" Color="Color.Primary" />
+                <MudText Typo="Typo.body2" Style="opacity:.75;">
+                    Cae en la posición equivalente dentro del nuevo almacén, con el mismo
+                    tamaño y la misma orientación.
+                </MudText>
+            </div>
+
+            @* Lo que de verdad importa advertir: la geometría se recalcula sola, pero las
+               ubicaciones a las que apuntan los casilleros son del almacén viejo. *@
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                Los @(Contenedor?.TotalCasilleros ?? 0) casilleros de este contenedor siguen
+                apuntando a ubicaciones del almacén actual. Después de mover, vuelva a generar
+                los casilleros desde Contenedores de Almacenaje para que sus ubicaciones
+                correspondan al almacén nuevo.
+            </MudAlert>
+
+            @if (Contenedor?.TotalCasilleros > 0)
+            {
+                <MudText Typo="Typo.caption" Style="opacity:.6;">
+                    Si esos casilleros ya tienen stock asignado, regenerarlos lo deja sin dirección:
+                    revíselo antes de mover.
+                </MudText>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => MudDialog.Cancel())">Cancelar</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.MoveDown"
+                   Disabled="@string.IsNullOrWhiteSpace(_codDestino)"
+                   OnClick="@(() => MudDialog.Close(DialogResult.Ok(_codDestino!)))">
+            Mover
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ContenedorModel? Contenedor { get; set; }
+    /// <summary>Almacenes del piso que YA tienen contorno dibujado: sin contorno no hay
+    /// posición relativa que calcular.</summary>
+    [Parameter] public List<AlmacenesModel> Almacenes { get; set; } = new();
+
+    private List<ComboboxItem> _destinos = new();
+    private string? _codDestino;
+
+    private string _desAlmacenActual => Almacenes
+        .FirstOrDefault(a => a.COD_ALMACEN == Contenedor?.COD_ALMACEN)?.DES_ALMACEN
+        ?? Contenedor?.COD_ALMACEN ?? "—";
+
+    protected override void OnInitialized()
+    {
+        _destinos = Almacenes
+            .Where(a => a.COD_ALMACEN != Contenedor?.COD_ALMACEN)
+            .Select(a => new ComboboxItem { Id = a.COD_ALMACEN, Texto = a.DES_ALMACEN ?? a.COD_ALMACEN })
+            .ToList();
+    }
+}

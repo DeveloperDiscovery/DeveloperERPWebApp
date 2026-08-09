@@ -1,0 +1,310 @@
+@page "/login"
+@layout EmptyLayout
+@inject IAuthService AuthService
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject CatalogoService<Perfil, PerfilDto> PerfilSvc
+@inject ConfigService ConfigSvc
+@inject ConfiguracionGeneralService CfgGeneralSvc
+@inject IJSRuntime JS
+
+<PageTitle>Ingreso · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<style>
+    /* Campo transparente: se ve el fondo del panel del Login (--login-back) a través
+       del input, en vez de un rectángulo sólido propio. Las letras siguen usando
+       --login-fore para mantenerse legibles sobre ese fondo. */
+    .login-field .mud-input-root,
+    .login-field .mud-input-root-outlined,
+    .login-field .mud-input-slot,
+    .login-field .mud-input-outlined,
+    .login-field input,
+    .login-field textarea {
+        background: transparent !important;
+        background-color: transparent !important;
+    }
+    /* El autofill de Chrome no admite transparente de verdad (pinta blanco/amarillo por su
+       cuenta) — se fuerza a --paper (el mismo fondo claro del label/panel, NO el oscuro
+       --login-back) para que el campo autocompletado se vea IGUAL que el resto del campo
+       en vez de un parche de otro color mal contrastado sobre el marco claro. */
+    .login-field input:-webkit-autofill,
+    .login-field input:-webkit-autofill:hover,
+    .login-field input:-webkit-autofill:focus {
+        -webkit-box-shadow: 0 0 0 1000px var(--paper, #efe9df) inset !important;
+        box-shadow: 0 0 0 1000px var(--paper, #efe9df) inset !important;
+        -webkit-text-fill-color: var(--ink, #16130f) !important;
+    }
+    /* El box-shadow de arriba solo pinta DENTRO del <input> — el ícono (usuario/candado)
+       vive en un contenedor hermano (.mud-input-adornment-icon), que se queda con su fondo
+       transparente de siempre y por eso se veía como un recuadro suelto sin pintar cuando
+       el navegador autocompletaba el campo. Con :has() se detecta el <input> autofilled
+       desde el contenedor del campo y se le pinta el mismo fondo a TODO (incluido el
+       ícono), para que quede parejo. */
+    .login-field .mud-input-root:has(input:-webkit-autofill) {
+        background: var(--paper, #efe9df) !important;
+    }
+    .login-field .mud-input-root:has(input:-webkit-autofill) .mud-input-adornment-icon,
+    .login-field .mud-input-root:has(input:-webkit-autofill) .mud-icon-root {
+        color: var(--ink, #16130f) !important;
+    }
+    /* El label ("Usuario"/"Contraseña") SÍ necesita un fondo sólido — MudBlazor lo recuesta
+       sobre el borde para tapar la línea detrás cuando el campo tiene foco/valor, y con
+       "transparent" se veía el borde atravesándolo. Antes usaba --login-back (el fondo
+       OSCURO del panel izquierdo de branding) — pero el campo vive en el panel DERECHO,
+       que no tiene ese fondo (hereda el de la página, --paper), así que el label quedaba
+       como un parche oscuro flotando sobre un fondo claro. Se usa --paper (el fondo real
+       detrás del campo) en vez de --login-fore/back para que se mimetice de verdad. */
+    .login-field .mud-input-label,
+    .login-field .mud-input-label-outlined,
+    .login-field .mud-input-label-animated {
+        background: var(--paper, #efe9df) !important;
+        color: var(--login-fore, #efe9df) !important;
+        padding: 0 4px !important;
+    }
+    /* El texto y los íconos (usuario/candado/ojo) usan el color de texto del
+       Login configurado (--login-fore), no el gris apagado default de MudBlazor.
+       -webkit-text-fill-color es necesario porque Chrome, en un input autofilled,
+       ignora "color" y solo respeta esta propiedad para el texto visible. */
+    .login-field input {
+        color: var(--login-fore, #efe9df) !important;
+        -webkit-text-fill-color: var(--login-fore, #efe9df) !important;
+        caret-color: var(--login-fore, #efe9df);
+    }
+    .login-field .mud-input-adornment-icon,
+    .login-field .mud-icon-root {
+        color: var(--login-fore, #efe9df) !important;
+    }
+    /* Ícono ⌨ del teclado virtual (wwwroot/js/virtualKeyboard.js, clase .vk-ic):
+       mismo color que los íconos del login en vez del negro/gris heredado. */
+    .login-field .vk-ic {
+        color: var(--login-fore, #efe9df) !important;
+    }
+</style>
+
+<div style="display:grid;grid-template-columns:1.1fr .9fr;min-height:100vh;">
+    @* ── Lado izquierdo: branding ── *@
+    @* Fondo fijo (#16130f), a propósito NO usa var(--login-back, ...) — antes mostraba este
+       mismo negro por defecto mientras cargaba (sin datos de BD aún) y luego "parpadeaba" al
+       color configurado (LoginFondo) apenas terminaba de cargar ConfiguraciónGeneral. Pedido
+       explícito: mantener siempre este fondo, ignorando el valor configurable. *@
+    <div style="background:#16130f;color:var(--login-fore, #efe9df);padding:4rem;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden;">
+        @if (!string.IsNullOrEmpty(_logoApp))
+        {
+            <img src="@($"data:image/png;base64,{_logoApp}")" class="logo-dvd" alt="logo" />
+        }
+        <div style="position:relative;font-weight:800;letter-spacing:.2em;font-size:1.2rem;">
+            @{ var parts = _nombreApp.Split(' ', 2); }
+            @if (parts.Length == 2)
+            {
+                <span style="color:rgba(255,255,255,.85);">@parts[0] </span><span style="color:var(--rust,#b8472d);">@parts[1]</span>
+            }
+            else { @_nombreApp }
+        </div>
+        <div style="position:relative;">
+            @if (!string.IsNullOrWhiteSpace(_nombreEmpresa))
+            {
+                <div style="font-size:3.2rem;font-weight:800;line-height:1.05;letter-spacing:-.02em;color:var(--login-fore, #efe9df);">
+                    @_nombreEmpresa
+                </div>
+            }
+            else
+            {
+                <div style="font-size:3.2rem;font-weight:800;line-height:1.05;letter-spacing:-.02em;">
+                    Sistema de<br/>gestión de<br/><span style="color:var(--rust);">costos textiles</span>
+                </div>
+            }
+            <div class="mono" style="margin-top:1.5rem;opacity:.5;font-size:.85rem;">
+                Producción · Comercial · Finanzas · RRHH
+            </div>
+        </div>
+        <div class="mono" style="position:relative;opacity:.35;font-size:.72rem;">v1.0 · ON-PREMISE</div>
+    </div>
+
+    @* ── Lado derecho: formulario de credenciales ── *@
+    <div style="display:flex;align-items:center;justify-content:center;padding:2rem;">
+        <div style="width:100%;max-width:360px;">
+            <MudText Typo="Typo.h5" Style="font-weight:800;">Iniciar sesión</MudText>
+            <MudText Class="mono mb-6" Style="opacity:.5;font-size:.8rem;">Ingrese sus credenciales</MudText>
+
+            <EditForm Model="_model" OnValidSubmit="HandleLogin">
+                <DataAnnotationsValidator />
+                <CampoTextoEstable @bind-Value="_model.COD_USUARIO" Label="Usuario" Variant="Variant.Outlined"
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Person"
+                              Class="mb-4 login-field" For="@(() => _model.COD_USUARIO)" />
+                <div style="position:relative;" class="mb-6">
+                    @* data-vk-ignore="1": el ícono ⌨ del teclado virtual (virtualKeyboard.js) se
+                       posiciona a ~22px del borde derecho del input — el MISMO lugar donde vive
+                       el botón del ojo de acá abajo (absolutamente posicionado, no reserva
+                       espacio real dentro del input como sí hace el Clearable nativo de
+                       MudBlazor). Sin esto, ambos íconos quedan superpuestos. *@
+                    <CampoTextoEstable @bind-Value="_model.COD_PASSWORD" Label="Contraseña" Variant="Variant.Outlined"
+                                  InputType="@(_show ? InputType.Text : InputType.Password)"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Lock"
+                                  Clearable="false"
+                                  UserAttributes="@(new Dictionary<string,object> { ["data-vk-ignore"] = "1" })"
+                                  Class="login-field" For="@(() => _model.COD_PASSWORD)" />
+                    <MudIconButton Icon="@(_show ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                                   OnClick="@(() => _show = !_show)"
+                                   Size="Size.Small"
+                                   Style="position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--login-fore, #efe9df);" />
+                </div>
+                <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
+                           FullWidth="true" Size="Size.Large" Disabled="_loading"
+                           Style="height:48px;font-weight:700;">
+                    @if (_loading) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                    INGRESAR
+                </MudButton>
+            </EditForm>
+        </div>
+    </div>
+</div>
+
+@code {
+    private LoginRequest _model = new();
+    private bool _loading, _show;
+    private string? _logoApp;
+    private string  _nombreApp     = "Cargando...";
+    private string  _nombreEmpresa = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await ConfigSvc.LoadAsync();
+            // LoadAsync solo deserializa el XML cacheado en memoria — no aplica las
+            // variables CSS (--env-fore, etc.) al documento. Sin esto, en un login
+            // recién cargado (sin sesión previa en esta pestaña) el ícono/texto del
+            // formulario quedaban con el color de fallback en vez del configurado.
+            await ConfigSvc.AplicarAsync();
+            _logoApp = ConfigSvc.Current.LogoApp;
+        }
+        catch { }
+        try
+        {
+            var cfg = await CfgGeneralSvc.GetPublicAsync();
+            if (!string.IsNullOrWhiteSpace(cfg?.DES_NOMBRE_APLICACION))
+                _nombreApp = cfg.DES_NOMBRE_APLICACION;
+            if (!string.IsNullOrWhiteSpace(cfg?.DES_NOMBRE_EMPRESA))
+                _nombreEmpresa = cfg.DES_NOMBRE_EMPRESA;
+            if (cfg?.IMG_LOGO_APLICACION is { Length: > 0 })
+                _logoApp = Convert.ToBase64String(cfg.IMG_LOGO_APLICACION);
+        }
+        catch { }
+
+        // JwtMessageHandler redirige aquí con ?expirada=1 cuando cualquier request
+        // recibe 401 (token vencido) — se le avisa al usuario por qué volvió al login,
+        // en vez de dejarlo pensando que cerró sesión solo o hubo un error random.
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var query = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
+        var expirada = query.Any(p => p.Equals("expirada=1", StringComparison.OrdinalIgnoreCase));
+        if (expirada)
+            Snackbar.Add("Tu sesión expiró por inactividad. Vuelve a iniciar sesión.", Severity.Warning);
+    }
+
+    private async Task HandleLogin()
+    {
+        _loading = true;
+        var (ok, error) = await AuthService.LoginAsync(_model);
+        _loading = false;
+
+        if (!ok) { await ErrorDialogHelper.MostrarMensajeAsync(error ?? "No se pudo iniciar sesión.", DialogService, nameof(Login)); return; }
+
+        // Cambio de contraseña obligatorio (password NULL o vencido) — siempre primero
+        if (error == "CAMBIO_PASSWORD")
+        {
+            var cambiado = await MostrarCambioPasswordObligatorio();
+            if (!cambiado)
+            {
+                await AuthService.LogoutAsync();
+                Snackbar.Add("Debe cambiar su contraseña para ingresar.", Severity.Warning);
+                return;
+            }
+        }
+
+        // Verificación facial — solo si el usuario tiene FLG_LOGIN_FACE activo
+        var sesion = await AuthService.GetSesionAsync();
+        if (sesion?.FLG_LOGIN_FACE == true)
+        {
+            if (sesion.FLG_REGISTRO_FACIAL != true)
+            {
+                // Login face activado pero sin biometría registrada → bloquear con mensaje claro
+                await AuthService.LogoutAsync();
+                Snackbar.Add("Su cuenta requiere verificación facial pero no tiene biometría registrada. Contacte al administrador.", Severity.Error);
+                return;
+            }
+
+            var nombre = sesion.DES_USUARIO ?? _model.COD_USUARIO;
+            var dlg = await DialogService.ShowAsync<VerificacionFacialDialog>(
+                "Verificación facial",
+                new DialogParameters
+                {
+                    ["CodUsuario"]      = _model.COD_USUARIO,
+                    ["NombreUsuario"]   = nombre,
+                    ["TimeoutSegundos"] = ConfigSvc.Current.FaceTimeoutSegundos
+                },
+                new DialogOptions
+                {
+                    MaxWidth         = MaxWidth.Small,
+                    FullWidth        = true,
+                    CloseOnEscapeKey = false,
+                    BackdropClick    = false
+                });
+
+            var result = await dlg.Result;
+            if (result is { Canceled: false, Data: true })
+            {
+                Navigation.NavigateTo("/");
+            }
+            else
+            {
+                await AuthService.LogoutAsync();
+                var esTimeout = result is { Canceled: false, Data: "timeout" };
+                if (esTimeout)
+                {
+                    Snackbar.Add("Tiempo de verificación facial agotado. Sesión cerrada.", Severity.Error);
+                    await Task.Delay(1500);
+                    try { await JS.InvokeVoidAsync("window.close"); } catch { }
+                    Navigation.NavigateTo("/login");
+                }
+                else
+                {
+                    Snackbar.Add("Verificación facial cancelada. Sesión cerrada.", Severity.Warning);
+                }
+            }
+            return;
+        }
+
+        Navigation.NavigateTo("/");
+    }
+
+    private async Task<bool> MostrarCambioPasswordObligatorio()
+    {
+        string? codComplejidad = null;
+        var sesion = await AuthService.GetSesionAsync();
+        if (sesion is not null && !string.IsNullOrWhiteSpace(sesion.COD_PERFIL_USUARIO))
+        {
+            var perfil = await PerfilSvc.GetByIdAsync(sesion.COD_PERFIL_USUARIO);
+            codComplejidad = perfil?.COD_PASSWORD_COMPLEJIDAD;
+        }
+
+        var dlg = await DialogService.ShowAsync<CambiarPasswordDialog>("Debe cambiar su contraseña",
+            new DialogParameters
+            {
+                ["CodUsuario"]    = _model.COD_USUARIO,
+                ["CodComplejidad"] = codComplejidad,
+                ["Obligatorio"]   = true
+            },
+            new DialogOptions
+            {
+                MaxWidth        = MaxWidth.ExtraSmall,
+                FullWidth       = true,
+                CloseOnEscapeKey = false,
+                BackdropClick   = false
+            });
+
+        var r = await dlg.Result;
+        return r is not null && !r.Canceled;
+    }
+}

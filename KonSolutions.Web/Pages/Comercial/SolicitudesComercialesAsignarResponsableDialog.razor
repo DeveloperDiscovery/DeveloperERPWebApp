@@ -1,0 +1,109 @@
+@using SolicitudModel = KONSolutions.Shared.Models.Comercial.SolicitudesComerciales
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using AdministracionRoute = KONSolutions.Web.Services.ApiRoutes.Administracion
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:35vw;min-width:420px;min-height:47vh;">
+    <TitleContent>
+        <CrudDialogTitle Modo="CrudModo.Update" Descripcion="@("Asignar Responsable · " + Item?.DES_SOLICITUD_COMERCIAL)" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="4">
+                    <MudTextField Value="@Item?.NUM_SOLICITUD_COMERCIAL.ToString()" Label="Nº Solicitud" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <MudTextField Value="@Item?.DES_SOLICITUD_COMERCIAL" Label="Solicitud Comercial" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+                </MudItem>
+            </MudGrid>
+
+            <MudTextField Value="@Item?.DES_TIPO_SOLICITUD_COMERICAL" Label="Tipo de Solicitud Comercial" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+            <MudTextField Value="@Item?.DES_NOMBRE_COMPLETO" Label="Entidad Cliente" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="6">
+                    <MudTextField Value="@Item?.DES_TEMPORADA" Label="Temporada" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField Value="@Item?.DES_COLECCION" Label="Colección" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="6">
+                    <MudTextField Value="@(Item?.FEC_SOLICITUD_COMERCIAL?.ToString("dd/MM/yyyy"))" Label="Fecha Solicitud" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField Value="@(Item?.FEC_REQUERIDA_ATENCION?.ToString("dd/MM/yyyy"))" Label="Fecha Requerida de Atención" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+                </MudItem>
+            </MudGrid>
+
+            <MudTextField Value="@(Item?.DES_NOMBRE_COMPLETO_RESPONSABLE ?? "(sin asignar)")" Label="Responsable actual" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+
+            <AriaCombo TItem="ComboboxItem" Items="_responsables"
+                       TextFunc="@(e => $"{e.Id} - {e.Texto}")" ValueFunc="@(e => e.Id)"
+                       Value="@(_model.COD_ENTIDAD_RESPONSABLE == 0 ? null : _model.COD_ENTIDAD_RESPONSABLE.ToString())"
+                       ValueChanged="@(v => _model.COD_ENTIDAD_RESPONSABLE = decimal.TryParse(v, out var d) ? d : 0)"
+                       Label="Nuevo responsable" Obligatorio="true" />
+
+            <CampoTextoEstable @bind-Value="_model.DES_OBSERVACIONES" Label="Observaciones" Lines="4"
+                          Variant="Variant.Outlined" Class="mb-3" />
+
+            <CrudDialogActions Modo="CrudModo.Update" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public SolicitudModel? Item { get; set; }
+
+    // Pantalla desde la que se asigna. El SP las reenvía a la notificación para dejarla
+    // registrada contra la opción de origen; las recibe la página desde AbrirTabOpcion.
+    [Parameter] public string? CodAplicacion { get; set; }
+    [Parameter] public string? CodOpcionAplicacion { get; set; }
+
+    // Etiqueta de Búsqueda que resuelve el Área/personas asignables como Responsable vía
+    // PROC_ADMINISTRACION_AREAS_CARGOS_ENTIDADES. La define la página que abre el diálogo
+    // (mismo mecanismo que SolicitudesComercialesReasignarAsesorDialog).
+    [Parameter, EditorRequired] public string CodEtiquetaBusqueda { get; set; } = "";
+
+    private KONSolutions.Shared.Models.Comercial.SolicitudesComercialesAsignarResponsableDto _model = new();
+    private bool _saving;
+
+    private List<ComboboxItem> _responsables = new();
+
+    protected override void OnInitialized()
+    {
+        if (Item is null) return;
+        _model.NUM_SOLICITUD_COMERCIAL = Item.NUM_SOLICITUD_COMERCIAL;
+        _model.COD_TIPO_SOLICITUD_COMERCIAL = Item.COD_TIPO_SOLICITUD_COMERCIAL ?? "";
+        _model.COD_TIPO_ESTADO = Item.COD_TIPO_ESTADO ?? 0;
+        _model.COD_ENTIDAD_RESPONSABLE = Item.COD_ENTIDAD_RESPONSABLE ?? 0;
+        _model.DES_OBSERVACIONES = Item.DES_OBSERVACIONES;
+        _model.COD_APLICACION_ORIGEN = CodAplicacion;
+        _model.COD_OPCION_APLICACION_ORIGEN = CodOpcionAplicacion;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var url = $"{AdministracionRoute.AsesoresPorEtiqueta}?codEtiquetaBusqueda={Uri.EscapeDataString(CodEtiquetaBusqueda)}";
+        _responsables = (await Http.SafeGetAsync<List<ComboboxItem>>(url)) ?? new();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var resp = await Http.PostAsJsonAsync(ComercialRoute.SolicitudesComercialesAsignarResponsable, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add("Responsable asignado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(SolicitudesComercialesAsignarResponsableDialog), nameof(Submit));
+    }
+}

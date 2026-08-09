@@ -1,0 +1,229 @@
+@page "/estandar/estados-estandar"
+@attribute [Authorize]
+@inject CatalogoService<EstadoEstandar, EstadoEstandarDto> Service
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject ConfigService ConfigSvc
+@implements IDisposable
+
+<PageTitle>Estados Estándar · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Estados Estándar" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_itemsVisibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTerm" OnSearch="HandleSearch" Placeholder="Buscar estado estándar..." DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros"
+                            HasFilters="@(_filtros.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Estados Estándar" Headers="@_printHeaders" Rows="@PrintRows()" />
+        <AccionesBotones CodAplicacion="@CodAplicacion"
+                         CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header"
+                         OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="estados-estandar" style="position:relative;">
+    <MudDataGrid T="EstadoEstandar" Items="_itemsVisibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Title="Imagen" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <GridImage Image="context.Item.IMG_PICTURE" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Código" SortBy="x => x.COD_ESTADO" Width="@Limites.ColWidth("ESTANDAR.ESTADOS_ESTANDAR","COD_ESTADO",60,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_ESTADO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="EstadoEstandar" ItemsBase="@BaseSinEstaColumna(0)"
+                                            ValorDe="@(e => e.COD_ESTADO?.ToString())"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_ESTADO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Alias" SortBy="x => x.COD_ESTADO_ALIAS" Width="@Limites.ColWidth("ESTANDAR.ESTADOS_ESTANDAR","COD_ESTADO_ALIAS",70,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_ESTADO_ALIAS" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="EstadoEstandar" ItemsBase="@BaseSinEstaColumna(2)"
+                                            ValorDe="@(e => e.COD_ESTADO_ALIAS?.ToString() ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(2, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_ESTADO_ALIAS</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Estado" SortBy="x => x.DES_ESTADO" Width="@Limites.ColWidth("ESTANDAR.ESTADOS_ESTANDAR","DES_ESTADO",120,300)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="EstadoEstandar" ItemsBase="@BaseSinEstaColumna(1)"
+                                            ValorDe="@(e => e.DES_ESTADO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <EstadoChip Estado="@context.Item.DES_ESTADO"
+                                BackColor="@context.Item.DES_BACKCOLOR"
+                                ForeColor="@context.Item.DES_FORECOLOR" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion"
+                                     CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                     OnAccion="@(b => OnAccionGrilla(item, b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin estados estándar.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="EstadoEstandar" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<EstadoEstandar> _items = new();
+    private readonly List<string> _printHeaders = new() { "Código", "Descripción", "Fondo", "Texto" };
+    private List<List<string>> PrintRows() => _items.Select(e => new List<string> { e.COD_ESTADO?.ToString() ?? "", e.DES_ESTADO ?? "", e.DES_BACKCOLOR ?? "", e.DES_FORECOLOR ?? "" }).ToList();
+    private string _searchTerm = string.Empty;
+
+    // ── Filtro Excel en cascada ── 0=Código, 1=Estado
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+
+    private List<EstadoEstandar> _itemsVisibles => Ordenar(AplicarTodos(_items, excluirColumna: -1));
+    private List<EstadoEstandar> BaseSinEstaColumna(int columna) => AplicarTodos(_items, columna);
+
+    // ── Ordenamiento manual (clic en el título de columna) ──
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+
+    private List<EstadoEstandar> Ordenar(List<EstadoEstandar> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(e => e.COD_ESTADO).ToList() : items.OrderByDescending(e => e.COD_ESTADO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(e => e.DES_ESTADO).ToList() : items.OrderByDescending(e => e.DES_ESTADO).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(e => e.COD_ESTADO_ALIAS).ToList() : items.OrderByDescending(e => e.COD_ESTADO_ALIAS).ToList(),
+        _ => items
+    };
+
+    private List<EstadoEstandar> AplicarTodos(List<EstadoEstandar> origen, int excluirColumna)
+    {
+        IEnumerable<EstadoEstandar> q = origen;
+        foreach (var (col, valores) in _filtros)
+        {
+            if (col == excluirColumna || valores is null) continue;
+            q = col switch
+            {
+                0 => q.Where(e => valores.Contains(e.COD_ESTADO?.ToString() ?? "")),
+                1 => q.Where(e => valores.Contains(e.DES_ESTADO ?? "")),
+                2 => q.Where(e => valores.Contains(e.COD_ESTADO_ALIAS?.ToString() ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltro(int columna, HashSet<string>? valores)
+    {
+        _filtros[columna] = valores;
+        StateHasChanged();
+    }
+
+    private void LimpiarFiltros()
+    {
+        foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null;
+        StateHasChanged();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ESTANDAR", "EstadosEstandar");
+        await Load();
+        Cambios.Suscribir("ESTANDAR.ESTADOS_ESTANDAR", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Open(null));
+
+    private async Task Load() => _items = await Service.GetAllAsync();
+
+    private async Task HandleSearch()
+    {
+        _items = string.IsNullOrWhiteSpace(_searchTerm)
+            ? await Service.GetAllAsync()
+            : await Service.SearchAsync(_searchTerm);
+    }
+
+    // ── Seguridad dinámica ──────────────────────────────────────────────────
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Open(null);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(EstadoEstandar item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Ver(item);
+        if (b.FLG_ACCION_PUT    == true) return Open(item);
+        if (b.FLG_ACCION_DELETE == true) return Delete(item);
+        return Task.CompletedTask;
+    }
+
+    // ── Acciones ────────────────────────────────────────────────────────────
+    private async Task Ver(EstadoEstandar item) => await AbrirDialog(item, CrudModo.Read);
+
+    private async Task Open(EstadoEstandar? e) => await AbrirDialog(e, e is null ? CrudModo.Create : CrudModo.Update);
+
+    private async Task Delete(EstadoEstandar e) => await AbrirDialog(e, CrudModo.Delete);
+
+    private async Task AbrirDialog(EstadoEstandar? e, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo registro",
+            CrudModo.Read   => $"Ver · {e?.DES_ESTADO}",
+            CrudModo.Update => $"Editar · {e?.DES_ESTADO}",
+            CrudModo.Delete => $"Eliminar · {e?.DES_ESTADO}",
+            _ => "Registro"
+        };
+        var parameters = new DialogParameters { ["Item"] = e, ["Modo"] = modo };
+        var dlg = await DialogService.ShowAsync<EstadoEstandarDialog>(titulo, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var result = await dlg.Result;
+        if (result is not null && !result.Canceled) await Load();
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ESTANDAR.ESTADOS_ESTANDAR", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

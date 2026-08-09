@@ -1,0 +1,293 @@
+@page "/estandar/sucursales"
+@attribute [Authorize]
+@using SucursalesModel = KONSolutions.Shared.Models.Estandar.Sucursales
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Sucursales · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Sucursales" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar sucursal..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+@* ── MAESTRO: Sucursales ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="mb-4">
+    <div data-resizable-grid="sucursales" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="SucursalesModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre"
+                 RowClick="OnSucursalRowClick" RowClassFunc="@FilaSucursalSeleccionada">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código"
+                            Width="@Limites.ColWidth("ESTANDAR.SUCURSALES","COD_SUCURSAL",70,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_SUCURSAL" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="SucursalesModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_SUCURSAL)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_SUCURSAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Sucursal"
+                            Width="@Limites.ColWidth("ESTANDAR.SUCURSALES","DES_SUCURSAL",150,300)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_SUCURSAL" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="SucursalesModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_SUCURSAL)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_SUCURSAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Dirección"
+                            Width="@Limites.ColWidth("ESTANDAR.SUCURSALES","DES_DIRECCION",150,320)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_DIRECCION" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="SucursalesModel" ItemsBase="@Base(3)" ValorDe="@(x=>x.DES_DIRECCION ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_DIRECCION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Ubigeo"
+                            Width="@Limites.ColWidth("ESTANDAR.SUCURSALES","DES_UBIGEO",120,220)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_UBIGEO" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="SucursalesModel" ItemsBase="@Base(2)" ValorDe="@(x=>x.DES_UBIGEO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_UBIGEO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo POS"
+                            Width="@Limites.ColWidth("ESTANDAR.SUCURSALES","DES_TIPO_POS",100,180)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_POS" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="SucursalesModel" ItemsBase="@Base(4)" ValorDe="@(x=>x.DES_TIPO_POS ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(4)" ValoresActivosChanged="@(v=>Filtro(4,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_POS</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Estado" Width="110" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1 justify-center"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="SucursalesModel" ItemsBase="@Base(5)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(5)" ValoresActivosChanged="@(v=>Filtro(5,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrWhiteSpace(context.Item.DES_ESTADO))
+                    {
+                        <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="SucursalesModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@* ── DETALLE: tablas hijas de la sucursal seleccionada, una por pestaña ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <MudTabs Elevation="0" ApplyEffectsToContainer="true" PanelClass="pa-0" Rounded="false" Border="false">
+        <MudTabPanel Text="Zonificación" Icon="@Icons.Material.Filled.Map">
+            <SucursalZonificacionTab CodSucursal="@(_sucursalSel?.COD_SUCURSAL ?? "")"
+                                     DesSucursal="@(_sucursalSel?.DES_SUCURSAL ?? "")" />
+        </MudTabPanel>
+        <MudTabPanel Text="Tipos de Comprobante" Icon="@Icons.Material.Filled.ReceiptLong">
+            <SucursalTiposComprobanteTab CodSucursal="@(_sucursalSel?.COD_SUCURSAL ?? "")"
+                                         DesSucursal="@(_sucursalSel?.DES_SUCURSAL ?? "")" />
+        </MudTabPanel>
+    </MudTabs>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<SucursalesModel> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<SucursalesModel> Ordenar(List<SucursalesModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_SUCURSAL).ToList() : items.OrderByDescending(x => x.COD_SUCURSAL).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_SUCURSAL).ToList() : items.OrderByDescending(x => x.DES_SUCURSAL).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_DIRECCION).ToList() : items.OrderByDescending(x => x.DES_DIRECCION).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_UBIGEO).ToList() : items.OrderByDescending(x => x.DES_UBIGEO).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_POS).ToList() : items.OrderByDescending(x => x.DES_TIPO_POS).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+    private List<SucursalesModel> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<SucursalesModel> Base(int col) => Aplicar(_items, col);
+
+    private List<SucursalesModel> Aplicar(List<SucursalesModel> src, int ex)
+    {
+        IEnumerable<SucursalesModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_SUCURSAL)),
+                1 => q.Where(x => v.Contains(x.DES_SUCURSAL)),
+                2 => q.Where(x => v.Contains(x.DES_UBIGEO ?? "")),
+                3 => q.Where(x => v.Contains(x.DES_DIRECCION ?? "")),
+                4 => q.Where(x => v.Contains(x.DES_TIPO_POS ?? "")),
+                5 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private async Task Buscar()
+    {
+        _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+        SincronizarSucursalSeleccionada();
+    }
+
+    // ── Sucursal seleccionada: alimenta las pestañas hijas ────────────────────
+    private SucursalesModel? _sucursalSel;
+
+    private string FilaSucursalSeleccionada(SucursalesModel item, int _)
+        => _sucursalSel is not null && item.COD_SUCURSAL == _sucursalSel.COD_SUCURSAL ? "fila-seleccionada" : "";
+
+    private void OnSucursalRowClick(DataGridRowClickEventArgs<SucursalesModel> args)
+    {
+        // Basta con cambiar la referencia: cada pestaña detecta el nuevo COD_SUCURSAL
+        // en su OnParametersSetAsync y recarga sola.
+        _sucursalSel = args.Item;
+        StateHasChanged();
+    }
+
+    /// <summary>Tras recargar el maestro: mantiene la sucursal seleccionada si sigue existiendo,
+    /// y si no, apunta a la primera para que las pestañas nunca queden huérfanas.</summary>
+    private void SincronizarSucursalSeleccionada()
+        => _sucursalSel = _sucursalSel is not null && _items.Any(s => s.COD_SUCURSAL == _sucursalSel.COD_SUCURSAL)
+            ? _items.First(s => s.COD_SUCURSAL == _sucursalSel.COD_SUCURSAL)
+            : _items.FirstOrDefault();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ESTANDAR", "Sucursales");
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("ESTANDAR.SUCURSALES", _onCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load()
+    {
+        _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+        SincronizarSucursalSeleccionada();
+    }
+
+    private async Task<List<SucursalesModel>> Fetch()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<SucursalesModel>>>(
+                ApiRoutes.Estandar.Sucursales);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Sucursales), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<SucursalesModel>> FetchSearch(string s)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<SucursalesModel>>>(
+                $"{ApiRoutes.Estandar.Sucursales}/search?search={Uri.EscapeDataString(s)}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(Sucursales), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(SucursalesModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(SucursalesModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva sucursal",
+            CrudModo.Delete => $"Eliminar · {item?.DES_SUCURSAL}",
+            _               => $"Editar · {item?.DES_SUCURSAL}"
+        };
+        var dlg = await DialogService.ShowAsync<SucursalesDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ESTANDAR.SUCURSALES", _onCambio ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

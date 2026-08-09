@@ -1,0 +1,82 @@
+@*
+    AuditoriaDialog.razor
+    --------------------------------------------------------------------------
+    Diálogo que muestra la auditoría completa de un registro (creación y
+    última modificación) sin restricciones de espacio ni scroll horizontal.
+*@
+@inject IJSRuntime JS
+
+<MudDialog>
+    <DialogContent>
+        <div class="d-flex align-center gap-2 mb-3">
+            <MudIcon Icon="@Icons.Material.Filled.FactCheck" Color="Color.Default" />
+            <MudText Typo="Typo.h6">Auditoría del registro</MudText>
+        </div>
+
+        <MudGrid Spacing="3">
+            @* Creación *@
+            <MudItem xs="12" sm="6">
+                <MudPaper Elevation="0" Class="pa-3" Style="border:1px solid var(--line);height:100%;">
+                    <MudText Typo="Typo.caption" Class="mono mb-2" Style="opacity:.55;letter-spacing:.05em;">
+                        CREACIÓN
+                    </MudText>
+                    <div class="mb-2">
+                        <div style="font-size:.7rem;opacity:.5;">Usuario</div>
+                        <div style="font-size:.95rem;font-weight:600;">@(CodUsuarioRegistro ?? "—")</div>
+                    </div>
+                    <div class="mb-2">
+                        <div style="font-size:.7rem;opacity:.5;">Estación</div>
+                        <div style="font-size:.95rem;">@(CodEstacionRegistro ?? "—")</div>
+                    </div>
+                    <div>
+                        <div style="font-size:.7rem;opacity:.5;">Fecha</div>
+                        <div style="font-size:.95rem;">@FormatoFecha(FecRegistro)</div>
+                    </div>
+                </MudPaper>
+            </MudItem>
+
+            @* Última modificación *@
+            <MudItem xs="12" sm="6">
+                <MudPaper Elevation="0" Class="pa-3" Style="border:1px solid var(--line);height:100%;">
+                    <MudText Typo="Typo.caption" Class="mono mb-2" Style="opacity:.55;letter-spacing:.05em;">
+                        ÚLTIMA MODIFICACIÓN
+                    </MudText>
+                    <div class="mb-2">
+                        <div style="font-size:.7rem;opacity:.5;">Usuario</div>
+                        <div style="font-size:.95rem;font-weight:600;">@(CodUsuarioActualizacion ?? "—")</div>
+                    </div>
+                    <div class="mb-2">
+                        <div style="font-size:.7rem;opacity:.5;">Estación</div>
+                        <div style="font-size:.95rem;">@(CodEstacionActualizacion ?? "—")</div>
+                    </div>
+                    <div>
+                        <div style="font-size:.7rem;opacity:.5;">Fecha</div>
+                        <div style="font-size:.95rem;">@FormatoFecha(FecActualizacion)</div>
+                    </div>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+
+        <div class="d-flex justify-end mt-4 dialog-acciones-fijas">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowBack"
+                       Style="background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));"
+                       OnClick="@(async () => { try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { } MudDialog.Close(); })">
+                Regresar
+            </MudButton>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string? CodUsuarioRegistro { get; set; }
+    [Parameter] public string? CodEstacionRegistro { get; set; }
+    [Parameter] public DateTime? FecRegistro { get; set; }
+    [Parameter] public string? CodUsuarioActualizacion { get; set; }
+    [Parameter] public string? CodEstacionActualizacion { get; set; }
+    [Parameter] public DateTime? FecActualizacion { get; set; }
+
+    private string FormatoFecha(DateTime? f)
+        => f.HasValue ? f.Value.ToString("dd/MM/yyyy HH:mm:ss") : "—";
+}

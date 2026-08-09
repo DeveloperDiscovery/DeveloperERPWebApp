@@ -1,0 +1,361 @@
+@* Panel reutilizable de documentos por carpeta — insertable en cualquier diálogo que necesite
+   adjuntar archivos (Solicitudes Comerciales, Entidades, etc.). Los archivos se guardan como
+   archivos físicos en una carpeta (dentro de la ruta configurada en ENTORNO.PATHFILES bajo la
+   clave CodKeyPathfile) con nombre = Identificador. No hay tabla de metadatos: esta grilla
+   lista directamente el contenido del directorio (vía DocumentosCarpetaController).
+
+   Uso: <DocumentosCarpetaPanel CodKeyPathfile="KEY_PATH_FILE_SOLICITUDES_DOCUMENTOS"
+                                 Identificador="@_model.NUM_SOLICITUD_COMERCIAL.ToString()"
+                                 ReadOnly="_readonly" /> *@
+@using KONSolutions.Shared.Models.Entorno
+@using System.Net.Http.Json
+@implements IAsyncDisposable
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+@inject ConfigService ConfigSvc
+
+@* Igual que Notificaciones/Aprobaciones: el visor debe ocupar TODA la altura del diálogo (al
+   lado de todo el formulario), no solo al lado de esta grilla. Por eso este componente ya NO
+   dibuja el visor — solo la grilla + controles de carga. El diálogo que lo aloja renderiza el
+   visor por su cuenta (componente VisorArchivoPanel) usando el estado expuesto acá
+   (@bind-DocSeleccionado, @bind-BlobUrl, @bind-PreviewCargando, @bind-PreviewAbierto) y,
+   para cerrarlo, invoca @ref="_docsPanelRef" → _docsPanelRef.CerrarPreviewAsync(). *@
+<div class="mb-3">
+    <div class="d-flex align-center justify-space-between mb-2">
+        <MudText Typo="Typo.subtitle2">Documentos</MudText>
+        @if (!ReadOnly)
+        {
+            <div class="d-flex align-center gap-2">
+                <MudTooltip Text="Pegar imagen del portapapeles">
+                    <MudIconButton Icon="@Icons.Material.Filled.ContentPaste" Size="Size.Small" Color="Color.Default"
+                                   OnClick="PegarImagenAsync" Disabled="_subiendo" />
+                </MudTooltip>
+                <MudFileUpload T="IBrowserFile" Accept=".pdf,.jpg,.jpeg,.png" FilesChanged="SubirAsync" Disabled="_subiendo">
+                    <ActivatorContent>
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.UploadFile" Disabled="_subiendo">
+                            Cargar archivo
+                        </MudButton>
+                    </ActivatorContent>
+                </MudFileUpload>
+            </div>
+        }
+    </div>
+
+    <div>
+        @* Control de imagen pegada — igual estilo que ImagePicker (miniatura + acciones), pero
+           acá además pide un nombre de archivo antes de guardarla como documento. *@
+        @if (_imagenPegada is not null)
+        {
+            <div class="d-flex align-center gap-3 pa-2 mb-2" style="border:1px dashed var(--line, #bbb);border-radius:8px;">
+                <MudImage Src="@($"data:image/png;base64,{Convert.ToBase64String(_imagenPegada)}")" Width="72" Height="72"
+                          ObjectFit="ObjectFit.Contain" Style="border-radius:6px;flex-shrink:0;" />
+                <CampoTextoEstable @bind-Value="_nombreImagenPegada" Label="Nombre del archivo" Variant="Variant.Outlined"
+                              Adornment="Adornment.End" AdornmentText=".png" Class="flex-grow-1" Immediate="true" />
+                <MudTooltip Text="Guardar como documento">
+                    <MudIconButton Icon="@Icons.Material.Filled.Save" Color="Color.Primary"
+                                   Disabled="@(string.IsNullOrWhiteSpace(_nombreImagenPegada) || _subiendo)"
+                                   OnClick="GuardarImagenPegadaAsync" />
+                </MudTooltip>
+                <MudTooltip Text="Descartar">
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="@(() => _imagenPegada = null)" />
+                </MudTooltip>
+            </div>
+        }
+
+        @if (_cargando)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+        }
+        else
+        {
+            <div data-resizable-grid="@($"documentos-carpeta-{CodKeyPathfile}")" style="position:relative;">
+            <MudDataGrid T="DocumentoCarpetaDto" Items="_documentos" Dense="true" Hover="true" Bordered="true" Striped="true"
+                         FixedHeader="true" Height="260px" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+                <Columns>
+                    <TemplateColumn Sortable="false" Title="" CellStyle="text-align:center;" HeaderStyle="text-align:center;width:36px;">
+                        <CellTemplate>
+                            <MudIcon Icon="@IconoDe(context.Item.Extension)" Size="Size.Small" />
+                        </CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Sortable="false" Title="Archivo">
+                        <CellTemplate>
+                            <span style="@(DocSeleccionado == context.Item ? "font-weight:700;" : "")">@context.Item.NombreArchivo</span>
+                        </CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Sortable="false" Title="Tamaño" HeaderStyle="width:90px;">
+                        <CellTemplate>@FormatoTamano(context.Item.TamanoBytes)</CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Sortable="false" Title="Modificado" HeaderStyle="width:140px;">
+                        <CellTemplate>@context.Item.FechaModificacion.ToString("dd/MM/yyyy HH:mm")</CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Sortable="false" Title="Acciones" CellStyle="text-align:center;" HeaderStyle="text-align:center;width:90px;">
+                        <CellTemplate>
+                            <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" Color="Color.Primary"
+                                           Title="Ver" OnClick="@(() => VerAsync(context.Item))" />
+                            @if (!ReadOnly)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                               Title="Eliminar" OnClick="@(() => EliminarAsync(context.Item))" />
+                            }
+                        </CellTemplate>
+                    </TemplateColumn>
+                </Columns>
+                <NoRecordsContent><MudText Align="Align.Center" Class="pa-4" Style="opacity:.6;">Sin documentos cargados.</MudText></NoRecordsContent>
+                <PagerContent><MudDataGridPager T="DocumentoCarpetaDto" /></PagerContent>
+            </MudDataGrid>
+            <div class="grid-resize-handle"></div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>Clave de ENTORNO.PATHFILES (PROC_ENTORNO_PATHFILES_SHOWBYID) que resuelve la
+    /// ruta base donde se guardan los documentos de este módulo.</summary>
+    [Parameter, EditorRequired] public string CodKeyPathfile { get; set; } = "";
+
+    /// <summary>Subcarpeta dentro de la ruta base — normalmente el identificador del registro
+    /// dueño de los documentos (N° de Solicitud, código de Entidad, etc.).</summary>
+    [Parameter, EditorRequired] public string Identificador { get; set; } = "";
+
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>El estado del visor (¿abierto?, documento seleccionado, blob: URL, ¿cargando?)
+    /// se comparte con el padre vía binding de dos vías (@bind-Xxx), porque el visor en sí ya
+    /// no lo dibuja este componente — lo dibuja el diálogo que lo aloja, usando
+    /// VisorArchivoPanel, para poder ubicarlo al lado de TODO el formulario (no solo al lado
+    /// de esta grilla), igual que hace NotificacionAprobacionDialog.
+    /// Uso típico en el padre:
+    /// &lt;DocumentosCarpetaPanel @ref="_docsPanelRef" @bind-PreviewAbierto="_previewDocAbierto"
+    ///                            @bind-DocSeleccionado="_docSeleccionado" @bind-BlobUrl="_blobUrl"
+    ///                            @bind-PreviewCargando="_previewCargando" ... /&gt;
+    /// @if (_previewDocAbierto) {
+    ///     &lt;VisorArchivoPanel Documento="_docSeleccionado" BlobUrl="@_blobUrl" Cargando="_previewCargando"
+    ///                          OnCerrar="@(() =&gt; _docsPanelRef!.CerrarPreviewAsync())" /&gt;
+    /// }</summary>
+    [Parameter] public bool PreviewAbierto { get; set; }
+    [Parameter] public EventCallback<bool> PreviewAbiertoChanged { get; set; }
+
+    [Parameter] public DocumentoCarpetaDto? DocSeleccionado { get; set; }
+    [Parameter] public EventCallback<DocumentoCarpetaDto?> DocSeleccionadoChanged { get; set; }
+
+    [Parameter] public string? BlobUrl { get; set; }
+    [Parameter] public EventCallback<string?> BlobUrlChanged { get; set; }
+
+    [Parameter] public bool PreviewCargando { get; set; }
+    [Parameter] public EventCallback<bool> PreviewCargandoChanged { get; set; }
+
+    private List<DocumentoCarpetaDto> _documentos = new();
+    private bool _cargando, _subiendo;
+
+    private byte[]? _imagenPegada;
+    private string _nombreImagenPegada = "";
+
+    private string Ruta => KONSolutions.Web.Services.ApiRoutes.Entorno.DocumentosCarpeta(CodKeyPathfile, Identificador);
+
+    protected override async Task OnInitializedAsync() => await CargarAsync();
+
+    private async Task CargarAsync()
+    {
+        _cargando = true; StateHasChanged();
+        _documentos = await Http.SafeGetAsync<List<DocumentoCarpetaDto>>(Ruta) ?? new();
+        _cargando = false; StateHasChanged();
+    }
+
+    private async Task SubirAsync(IBrowserFile? archivo)
+    {
+        if (archivo is null) return;
+        using var stream = archivo.OpenReadStream(20 * 1024 * 1024);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        await SubirBytesAsync(ms.ToArray(), archivo.Name);
+    }
+
+    /// <summary>Sube tanto los archivos elegidos con "Cargar archivo" (MudFileUpload) como
+    /// las imágenes pegadas del portapapeles (GuardarImagenPegadaAsync) — mismo endpoint multipart.</summary>
+    private async Task SubirBytesAsync(byte[] bytes, string nombreArchivo)
+    {
+        _subiendo = true; StateHasChanged();
+        try
+        {
+            using var contenido = new MultipartFormDataContent();
+            using var streamContent = new ByteArrayContent(bytes);
+            contenido.Add(streamContent, "archivo", nombreArchivo);
+
+            var resp = await Http.PostAsync(Ruta, contenido);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Archivo cargado.", Severity.Success);
+                await CargarAsync();
+            }
+            else
+            {
+                var msg = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"No se pudo cargar el archivo: {msg}", Severity.Error);
+            }
+        }
+        finally
+        {
+            _subiendo = false; StateHasChanged();
+        }
+    }
+
+    /// <summary>Trae la imagen del portapapeles (mismo mecanismo que ImagePicker: botón
+    /// "Pegar", no un listener pasivo de Ctrl+V) y la deja en espera de un nombre antes de
+    /// subirla como documento.</summary>
+    private async Task PegarImagenAsync()
+    {
+        try
+        {
+            var b64 = await JS.InvokeAsync<string>("imageClipboard.paste");
+            if (string.IsNullOrEmpty(b64))
+            {
+                Snackbar.Add("No hay imagen en el portapapeles.", Severity.Info);
+                return;
+            }
+            _imagenPegada = Convert.FromBase64String(b64);
+            _nombreImagenPegada = $"pegado_{DateTime.Now:yyyyMMdd_HHmmss}";
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"No se pudo pegar la imagen: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task GuardarImagenPegadaAsync()
+    {
+        if (_imagenPegada is null || string.IsNullOrWhiteSpace(_nombreImagenPegada)) return;
+        var bytes = _imagenPegada;
+        var nombre = $"{_nombreImagenPegada.Trim()}.png";
+        _imagenPegada = null;
+        _nombreImagenPegada = "";
+        await SubirBytesAsync(bytes, nombre);
+    }
+
+    private async Task EliminarAsync(DocumentoCarpetaDto doc)
+    {
+        var confirmado = await DialogService.ShowMessageBox(
+            "Eliminar documento", $"¿Eliminar el archivo \"{doc.NombreArchivo}\"?", yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirmado != true) return;
+
+        var resp = await Http.DeleteAsync($"{Ruta}/{Uri.EscapeDataString(doc.NombreArchivo)}");
+        if (resp.IsSuccessStatusCode)
+        {
+            Snackbar.Add("Archivo eliminado.", Severity.Success);
+            if (DocSeleccionado == doc) await CerrarPreviewAsync();
+            await CargarAsync();
+        }
+        else
+        {
+            var msg = await resp.Content.ReadAsStringAsync();
+            Snackbar.Add($"No se pudo eliminar: {msg}", Severity.Error);
+        }
+    }
+
+    /// <summary>Calcado literal de NotificacionAprobacionDialog.VerPdf: la API (HTTPS) hace de
+    /// proxy de la ruta UNC y devuelve los bytes, que se muestran como blob: URL en un iframe.
+    /// Asignación directa de campos (no por los wrappers SetXxxAsync) y un solo
+    /// StateHasChanged, igual que el original — para descartar que el binding de dos vías
+    /// introdujera alguna diferencia de timing frente al mecanismo ya probado.</summary>
+    private async Task VerAsync(DocumentoCarpetaDto doc)
+    {
+        await LiberarBlobActual();
+        DocSeleccionado = doc;
+        await DocSeleccionadoChanged.InvokeAsync(doc);
+        PreviewAbierto = true;
+        await PreviewAbiertoChanged.InvokeAsync(true);
+
+        PreviewCargando = true;
+        StateHasChanged();
+        try
+        {
+            var url = $"api/v1/entorno/documentos/ver?ruta={Uri.EscapeDataString(doc.RutaCompleta)}";
+            // GetByteArrayAsync descarta el cuerpo de la respuesta cuando falla (solo informa
+            // el status code) — con GetAsync + leer el body a mano, si el servidor devuelve el
+            // motivo real (ver DocumentosController.Ver), lo mostramos tal cual en vez de un
+            // mensaje genérico que oculta la causa.
+            var resp = await Http.GetAsync(url);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var detalle = await resp.Content.ReadAsStringAsync();
+                throw new Exception(string.IsNullOrWhiteSpace(detalle)
+                    ? $"HTTP {(int)resp.StatusCode} {resp.StatusCode} · URL: {resp.RequestMessage?.RequestUri}"
+                    : $"{detalle} · URL: {resp.RequestMessage?.RequestUri}");
+            }
+            var bytes = await resp.Content.ReadAsByteArrayAsync();
+
+            // Verificación de contenido: si lo que llegó es HTML, NO se arma el blob. Sin esto
+            // el <iframe> mostraba esa página dentro del visor — de ahí venían el "404 — Página
+            // no encontrada" y el "KON SOLUTIONS ERP" que se veían: era la propia aplicación
+            // renderizada dentro del visor, no el archivo. Se reporta el Content-Type real y la
+            // URL absoluta a la que se resolvió la petición, para saber quién respondió.
+            var tipoRecibido = resp.Content.Headers.ContentType?.MediaType;
+            var pareceHtml = (tipoRecibido is not null && tipoRecibido.Contains("html", StringComparison.OrdinalIgnoreCase))
+                             || (bytes.Length > 0 && bytes[0] == (byte)'<');
+            if (pareceHtml)
+                throw new Exception(
+                    $"La respuesta no es un archivo: llegó HTML (Content-Type '{tipoRecibido ?? "sin especificar"}', " +
+                    $"{bytes.Length} bytes) desde {resp.RequestMessage?.RequestUri}. " +
+                    "Eso indica que la petición no fue atendida por el endpoint del API.");
+
+            var contentType = doc.Extension.ToUpperInvariant() switch
+            {
+                "PDF" => "application/pdf",
+                "JPG" or "JPEG" => "image/jpeg",
+                "PNG" => "image/png",
+                _ => "application/octet-stream"
+            };
+            BlobUrl = await JS.InvokeAsync<string>("blobViewer.crear", bytes, contentType);
+
+            await BlobUrlChanged.InvokeAsync(BlobUrl);
+        }
+        catch (Exception ex)
+        {
+            await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(DocumentosCarpetaPanel));
+        }
+        finally
+        {
+            PreviewCargando = false;
+            await PreviewCargandoChanged.InvokeAsync(false);
+            StateHasChanged();
+        }
+    }
+
+    private async Task LiberarBlobActual()
+    {
+        if (BlobUrl is null) return;
+        try { await JS.InvokeVoidAsync("blobViewer.liberar", BlobUrl); } catch { }
+        BlobUrl = null;
+        await BlobUrlChanged.InvokeAsync(null);
+    }
+
+    /// <summary>Pública: la invoca el diálogo que aloja este componente (vía @ref) cuando el
+    /// usuario cierra el visor que él mismo dibuja (VisorArchivoPanel) — calcado de CerrarPdf.</summary>
+    public async Task CerrarPreviewAsync()
+    {
+        await LiberarBlobActual();
+        PreviewAbierto = false;
+        await PreviewAbiertoChanged.InvokeAsync(false);
+        DocSeleccionado = null;
+        await DocSeleccionadoChanged.InvokeAsync(null);
+    }
+
+    private static string IconoDe(string extension) => extension.ToUpperInvariant() switch
+    {
+        "PDF" => Icons.Material.Filled.PictureAsPdf,
+        "JPG" or "JPEG" or "PNG" => Icons.Material.Filled.Image,
+        _ => Icons.Material.Filled.InsertDriveFile
+    };
+
+    private static string FormatoTamano(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:0.#} KB";
+        return $"{bytes / (1024.0 * 1024.0):0.#} MB";
+    }
+
+    public async ValueTask DisposeAsync() => await LiberarBlobActual();
+}

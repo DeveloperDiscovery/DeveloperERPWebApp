@@ -1,0 +1,296 @@
+@using TipoOperacionModel = KONSolutions.Shared.Models.Estandar.TipoOperacion
+@using TipoOperacionRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(900px,95vw);" Class="dialog-alto-ampliado">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_OPERACION" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm EditContext="_editContext" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <MudTextField Value="@CodClaseOperacionTexto" Label="Clase de operación"
+                                  Variant="Variant.Outlined" Disabled="true" Class="mb-3" Margin="Margin.Normal" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="ESTANDAR.TIPOS_OPERACION" Columna="COD_TIPO_OPERACION"
+                                @bind-Value="_model.COD_TIPO_OPERACION"
+                                Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+                </MudItem>
+            </MudGrid>
+            <CampoTexto Tabla="ESTANDAR.TIPOS_OPERACION" Columna="DES_TIPO_OPERACION"
+                        @bind-Value="_model.DES_TIPO_OPERACION"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposEntidad"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_ENTIDAD"
+                               Label="Tipo de entidad" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposProducto"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_PRODUCTO_DEFECTO"
+                               Label="Tipo de producto por defecto" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposPedido"
+                               TextFunc="@(t => t.Texto)" ValueFunc="@(t => t.Id)"
+                               Value="@(_model.COD_TIPO_PEDIDO_COMERCIAL?.ToString())"
+                               ValueChanged="@(v => _model.COD_TIPO_PEDIDO_COMERCIAL = int.TryParse(v, out var n) ? n : null)"
+                               Label="Tipo de pedido comercial" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposPrecio"
+                               TextFunc="@(t => t.Texto)" ValueFunc="@(t => t.Id)"
+                               Value="@(_model.COD_TIPO_PRECIO?.ToString())"
+                               ValueChanged="@(v => _model.COD_TIPO_PRECIO = int.TryParse(v, out var n) ? n : null)"
+                               Label="Tipo de precio" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_condicionesPago"
+                               TextFunc="@(t => t.Texto)" ValueFunc="@(t => t.Id)"
+                               Value="@(_model.COD_CONDICION_PAGO?.ToString())"
+                               ValueChanged="@(v => _model.COD_CONDICION_PAGO = int.TryParse(v, out var n) ? n : null)"
+                               Label="Condición de pago" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="ESTANDAR.TIPOS_OPERACION" Columna="COD_TIPO_OPERACION_SUNAT"
+                                @bind-Value="_model.COD_TIPO_OPERACION_SUNAT"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_clasesOperacion"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id.Trim())"
+                               Value="@(_model.COD_CLASE_OPERACION_SINCRONIZADA?.Trim())"
+                               ValueChanged="OnClaseSincronizadaChanged"
+                               Label="Clase de operación sincronizada" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposSincronizados"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_OPERACION_SINCRONIZADA"
+                               Label="Tipo de operación sincronizada"
+                               Disabled="@(_readonly || string.IsNullOrEmpty(_model.COD_CLASE_OPERACION_SINCRONIZADA))" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposEstado"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               Value="@(_model.COD_TIPO_ESTADO_RELACIONADO?.ToString())"
+                               ValueChanged="@(v => _model.COD_TIPO_ESTADO_RELACIONADO = int.TryParse(v, out var n) ? n : null)"
+                               Label="Tipo de estado relacionado" Disabled="_readonly" />
+                </MudItem>
+            </MudGrid>
+
+            <MudText Typo="Typo.caption" Class="mono mb-2" Style="opacity:.55;display:block;">CARACTERÍSTICAS</MudText>
+            <MudGrid Class="mb-3">
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_POSITIVO" Color="Color.Primary" Disabled="_readonly" Label="Positivo" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Schedule" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_PROVISION" Color="Color.Primary" Disabled="_readonly" Label="Provisión" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Cancel" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_CANCELACION" Color="Color.Primary" Disabled="_readonly" Label="Cancelación" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_BIEN" Color="Color.Primary" Disabled="_readonly" Label="Bien" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.KeyboardReturn" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_DEVOLUCION" Color="Color.Primary" Disabled="_readonly" Label="Devolución" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Block" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_ANULACION" Color="Color.Primary" Disabled="_readonly" Label="Anulación" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Payments" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_ANTICIPO" Color="Color.Primary" Disabled="_readonly" Label="Anticipo" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.RequestQuote" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_CENTRO_COSTO" Color="Color.Primary" Disabled="_readonly" Label="Centro de costo" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Engineering" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_PROYECTO" Color="Color.Primary" Disabled="_readonly" Label="Proyecto" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Numbers" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_LOTE_CONTROL" Color="Color.Primary" Disabled="_readonly" Label="Lote / control" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.PointOfSale" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_CAJA" Color="Color.Primary" Disabled="_readonly" Label="Caja" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.AccountBalanceWallet" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_BANCO" Color="Color.Primary" Disabled="_readonly" Label="Banco" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Undo" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_EXTORNO" Color="Color.Primary" Disabled="_readonly" Label="Extorno" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Public" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_COMERCIO_EXTERIOR" Color="Color.Primary" Disabled="_readonly" Label="Comercio exterior" /></div></MudItem>
+            </MudGrid>
+
+            <EstadoCombo DesTabla="ESTANDAR.TIPOS_OPERACION"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+        </EditForm>
+    </DialogContent>
+    <DialogActions>
+        <CrudDialogActions Modo="Modo" Saving="_saving" SubmitButton="false"
+                           OnConfirm="ConfirmarDesdeFooter" OnCancel="@(() => MudDialog.Cancel())">
+            <LeftContent>
+                <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                FecRegistro="@Item?.FEC_REGISTRO"
+                                CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+            </LeftContent>
+        </CrudDialogActions>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TipoOperacionModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public string CodClaseOperacion { get; set; } = "";
+    [Parameter] public string DesClaseOperacion { get; set; } = "";
+
+    private TipoOperacionModel _model = new();
+    // El botón Crear/Modificar vive en DialogActions (footer fijo), fuera del <EditForm>
+    // (ver DialogContent) — por eso el EditContext se maneja a mano en vez de depender
+    // de un botón type="submit" dentro del form.
+    private EditContext _editContext = default!;
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+    private string CodClaseOperacionTexto => string.IsNullOrEmpty(DesClaseOperacion)
+        ? _model.COD_CLASE_OPERACION
+        : $"{_model.COD_CLASE_OPERACION} - {DesClaseOperacion}";
+
+    private List<ComboboxItem> _tiposEntidad    = new();
+    private List<ComboboxItem> _tiposProducto   = new();
+    private List<ComboboxItem> _tiposPedido     = new();
+    private List<ComboboxItem> _tiposPrecio     = new();
+    private List<ComboboxItem> _condicionesPago = new();
+    private List<ComboboxItem> _clasesOperacion   = new();
+    private List<ComboboxItem> _tiposSincronizados = new();
+    private List<ComboboxItem> _tiposEstado       = new();
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        else
+        {
+            _model.COD_CLASE_OPERACION = CodClaseOperacion;
+        }
+        _editContext = new EditContext(_model);
+    }
+
+    private void MapearDesdeModelo(TipoOperacionModel m)
+    {
+        _model.COD_CLASE_OPERACION               = m.COD_CLASE_OPERACION;
+        _model.COD_TIPO_OPERACION                = m.COD_TIPO_OPERACION;
+        _model.DES_TIPO_OPERACION                = m.DES_TIPO_OPERACION;
+        _model.FLG_POSITIVO                      = m.FLG_POSITIVO;
+        _model.FLG_PROVISION                     = m.FLG_PROVISION;
+        _model.FLG_CANCELACION                   = m.FLG_CANCELACION;
+        _model.FLG_BIEN                          = m.FLG_BIEN;
+        _model.FLG_DEVOLUCION                    = m.FLG_DEVOLUCION;
+        _model.FLG_ANULACION                     = m.FLG_ANULACION;
+        _model.FLG_ANTICIPO                      = m.FLG_ANTICIPO;
+        _model.FLG_CENTRO_COSTO                  = m.FLG_CENTRO_COSTO;
+        _model.FLG_PROYECTO                      = m.FLG_PROYECTO;
+        _model.FLG_LOTE_CONTROL                  = m.FLG_LOTE_CONTROL;
+        _model.FLG_CAJA                          = m.FLG_CAJA;
+        _model.FLG_BANCO                         = m.FLG_BANCO;
+        _model.FLG_EXTORNO                       = m.FLG_EXTORNO;
+        _model.FLG_COMERCIO_EXTERIOR             = m.FLG_COMERCIO_EXTERIOR;
+        _model.COD_TIPO_OPERACION_SUNAT          = m.COD_TIPO_OPERACION_SUNAT;
+        _model.COD_TIPO_ENTIDAD                  = m.COD_TIPO_ENTIDAD;
+        _model.COD_TIPO_PRODUCTO_DEFECTO         = m.COD_TIPO_PRODUCTO_DEFECTO;
+        _model.COD_TIPO_PEDIDO_COMERCIAL         = m.COD_TIPO_PEDIDO_COMERCIAL;
+        _model.COD_TIPO_PRECIO                   = m.COD_TIPO_PRECIO;
+        _model.COD_CONDICION_PAGO                = m.COD_CONDICION_PAGO;
+        _model.COD_CLASE_OPERACION_SINCRONIZADA  = m.COD_CLASE_OPERACION_SINCRONIZADA;
+        _model.COD_TIPO_OPERACION_SINCRONIZADA   = m.COD_TIPO_OPERACION_SINCRONIZADA;
+        _model.COD_TIPO_ESTADO_RELACIONADO       = m.COD_TIPO_ESTADO_RELACIONADO;
+        _model.COD_TIPO_ESTADO                   = m.COD_TIPO_ESTADO;
+        _model.COD_ESTADO                        = m.COD_ESTADO;
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TipoOperacionModel>(
+            $"{TipoOperacionRoute.TiposOperacion}/{Uri.EscapeDataString(_model.COD_CLASE_OPERACION)}/{Uri.EscapeDataString(_model.COD_TIPO_OPERACION)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    // Invocado por el botón Crear/Modificar del footer (fuera del <EditForm>): dispara
+    // la validación manualmente antes de guardar, ya que no hay un botón submit nativo
+    // dentro del form que lo haga por nosotros.
+    private async Task ConfirmarDesdeFooter()
+    {
+        if (!_editContext.Validate())
+        {
+            await ErrorDialogHelper.MostrarValidacionAsync(_editContext, DialogService, nameof(TipoOperacionDialog));
+            return;
+        }
+        await Submit();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        var tEntidad    = Http.SafeGetAsync<List<ComboboxItem>>(TipoOperacionRoute.TiposEntidadesCombobox);
+        var tProducto   = Http.SafeGetAsync<List<ComboboxItem>>(TipoOperacionRoute.TiposProductoCombobox);
+        var tPedido     = Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Comercial.TiposPedidoComercialCombobox);
+        var tPrecio     = Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Comercial.TiposPrecioCombobox);
+        var tCondicion  = Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Comercial.CondicionesPagoCombobox);
+        // No se usa el endpoint /combobox de Clases de Operación: el SP SHOWCOMBOX devuelve
+        // las columnas completas (COD_CLASE_OPERACION/DES_CLASE_OPERACION), no Id/Texto, así
+        // que Dapper no las mapea — se arma el combo a mano desde el listado completo.
+        var tClases     = Http.SafeGetAsync<List<KONSolutions.Shared.Models.Estandar.ClaseOperacion>>(TipoOperacionRoute.ClasesOperacion);
+        var tEstado     = Http.SafeGetAsync<List<ComboboxItem>>(TipoOperacionRoute.TiposEstadosCombobox);
+        await Task.WhenAll(tEntidad, tProducto, tPedido, tPrecio, tCondicion, tClases, tEstado);
+        _tiposEntidad    = (await tEntidad)    ?? new();
+        _tiposProducto   = (await tProducto)   ?? new();
+        _tiposPedido     = (await tPedido)     ?? new();
+        _tiposPrecio     = (await tPrecio)     ?? new();
+        _condicionesPago = (await tCondicion)  ?? new();
+        _tiposEstado     = (await tEstado)     ?? new();
+        _clasesOperacion = ((await tClases) ?? new())
+            .Select(c => new ComboboxItem { Id = c.COD_CLASE_OPERACION.Trim(), Texto = c.DES_CLASE_OPERACION })
+            .ToList();
+
+        if (!string.IsNullOrEmpty(_model.COD_CLASE_OPERACION_SINCRONIZADA))
+            await CargarTiposSincronizados(_model.COD_CLASE_OPERACION_SINCRONIZADA);
+    }
+
+    private async Task OnClaseSincronizadaChanged(string? codClase)
+    {
+        _model.COD_CLASE_OPERACION_SINCRONIZADA = codClase ?? "";
+        _model.COD_TIPO_OPERACION_SINCRONIZADA = "";
+        await CargarTiposSincronizados(codClase);
+    }
+
+    private async Task CargarTiposSincronizados(string? codClase)
+    {
+        if (string.IsNullOrEmpty(codClase)) { _tiposSincronizados = new(); return; }
+        var r = await Http.SafeGetAsync<List<TipoOperacionModel>>(
+            $"{TipoOperacionRoute.TiposOperacion}?codClaseOperacion={Uri.EscapeDataString(codClase)}");
+        _tiposSincronizados = (r ?? new())
+            .Select(t => new ComboboxItem { Id = t.COD_TIPO_OPERACION, Texto = t.DES_TIPO_OPERACION })
+            .ToList();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = TipoOperacionRoute.TiposOperacion;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync(
+                $"{ruta}/{Uri.EscapeDataString(_model.COD_CLASE_OPERACION)}/{Uri.EscapeDataString(_model.COD_TIPO_OPERACION)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TipoOperacionDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new
+        {
+            _model.COD_CLASE_OPERACION, _model.COD_TIPO_OPERACION, _model.DES_TIPO_OPERACION,
+            _model.FLG_POSITIVO, _model.FLG_PROVISION, _model.FLG_CANCELACION, _model.FLG_BIEN,
+            _model.FLG_DEVOLUCION, _model.FLG_ANULACION, _model.FLG_ANTICIPO, _model.FLG_CENTRO_COSTO,
+            _model.FLG_PROYECTO, _model.FLG_LOTE_CONTROL, _model.FLG_CAJA, _model.FLG_BANCO, _model.FLG_EXTORNO,
+            _model.FLG_COMERCIO_EXTERIOR,
+            _model.COD_TIPO_OPERACION_SUNAT, _model.COD_TIPO_ENTIDAD, _model.COD_TIPO_PRODUCTO_DEFECTO,
+            _model.COD_TIPO_PEDIDO_COMERCIAL, _model.COD_TIPO_PRECIO, _model.COD_CONDICION_PAGO,
+            _model.COD_CLASE_OPERACION_SINCRONIZADA, _model.COD_TIPO_OPERACION_SINCRONIZADA,
+            _model.COD_TIPO_ESTADO_RELACIONADO, _model.COD_TIPO_ESTADO, _model.COD_ESTADO
+        };
+        var resp = await Http.GuardarAsync(ruta, dto, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TipoOperacionDialog), nameof(Submit));
+    }
+}

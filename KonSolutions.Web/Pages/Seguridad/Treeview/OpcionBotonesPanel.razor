@@ -1,0 +1,310 @@
+@* Botones de una opción de aplicación (SEGURIDAD.APLICACIONES_OPCIONES_BOTONES).
+   Vivía dentro de la pantalla OpcionesAplicaciones, al costado del árbol; se movió acá para
+   poder mostrarlo dentro del diálogo de la opción, que es donde se administra la opción.
+   Solo tiene sentido para Módulos (MDL) y Sub módulos (SMD): el diálogo decide cuándo
+   renderizarlo. Requiere que la opción ya exista (al Crear todavía no hay código).
+
+   Uso: <OpcionBotonesPanel CodAplicacion="@_form.COD_APLICACION"
+                            CodOpcion="@_form.COD_OPCION_APLICACION"
+                            DesAplicacion="@_desAplicacion" ... ReadOnly="_readonly" /> *@
+@using KONSolutions.Shared.Common
+@using KONSolutions.Shared.Models.Seguridad
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject AplicacionesOpcionesBotonesService BotonesService
+
+<div class="mb-2">
+    <div class="d-flex align-center gap-2 mb-2">
+        <MudText Typo="Typo.subtitle2">Botones</MudText>
+        <span class="mono" style="font-size:.68rem;opacity:.5;">@_botones.Count asignado(s)</span>
+        <MudSpacer />
+        @if (!ReadOnly)
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Downloading" Disabled="_cargandoBotones"
+                       OnClick="ImportarBotonesEstandar">Importar estándar</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Add" Style="font-weight:700;" Disabled="_cargandoBotones"
+                       OnClick="@(() => AbrirDialogoBoton(null, CrudModo.Create))">Nuevo botón</MudButton>
+        }
+    </div>
+
+    @if (_cargandoBotones)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+    }
+    else
+    {
+<div style="max-height:300px;overflow-y:auto;">
+    <MudDataGrid T="AplicacionesOpcionesBotones" Items="_botonesVisibles"
+                 Dense="true" Hover="true" Striped="true"
+                 FixedHeader="true"
+                 RowClick="@(e => _filaFocoBoton = e.Item)">
+        <Columns>
+            <TemplateColumn Title="Imagen" Sortable="false"
+                            HeaderStyle="text-align:center;width:52px;"
+                            CellStyle="text-align:center;width:52px;">
+                <CellTemplate>
+                    @if (context.Item.IMG_ICONO is { Length: > 0 })
+                    {
+                        <img src="data:image/png;base64,@Convert.ToBase64String(context.Item.IMG_ICONO)"
+                             style="width:20px;height:20px;object-fit:contain;" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.SmartButton" Style="font-size:1rem;opacity:.4;" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Botón">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_BOTON_OPCION" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="AplicacionesOpcionesBotones" ItemsBase="@BaseBoton(0)" ValorDe="@(x=>x.DES_BOTON_OPCION ?? "")"
+                                            ValoresActivos="_filtrosBoton.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroBoton(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <strong style="font-size:.8rem;">@context.Item.DES_BOTON_OPCION</strong>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Alias">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ALIAS" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="AplicacionesOpcionesBotones" ItemsBase="@BaseBoton(1)" ValorDe="@(x=>x.DES_ALIAS ?? "")"
+                                            ValoresActivos="_filtrosBoton.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroBoton(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <span class="mono" style="font-size:.76rem;opacity:.7;">@context.Item.DES_ALIAS</span>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tooltip">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TOOLTIPTEXT" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="AplicacionesOpcionesBotones" ItemsBase="@BaseBoton(2)" ValorDe="@(x=>x.DES_TOOLTIPTEXT ?? "")"
+                                            ValoresActivos="_filtrosBoton.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>FiltroBoton(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <span style="font-size:.76rem;opacity:.6;">@context.Item.DES_TOOLTIPTEXT</span>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Zona" Sortable="false"
+                            HeaderStyle="text-align:center;width:90px;"
+                            CellStyle="text-align:center;">
+                <CellTemplate>
+                    @{ var fg = context.Item.FLG_GRILLA; var fh = context.Item.FLG_HEADER; }
+                    <div class="d-flex align-center justify-center gap-2">
+                        <MudTooltip Text="Grilla">
+                            <MudIcon Icon="@Icons.Material.Filled.GridOn" Color="@(fg ? Color.Success : Color.Error)"
+                                     Style="@(fg ? "" : "opacity:.15;")" Size="Size.Small" />
+                        </MudTooltip>
+                        <MudTooltip Text="Cabecera">
+                            <MudIcon Icon="@Icons.Material.Filled.WebAsset" Color="@(fh ? Color.Success : Color.Error)"
+                                     Style="@(fh ? "" : "opacity:.15;")" Size="Size.Small" />
+                        </MudTooltip>
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Estado">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="AplicacionesOpcionesBotones" ItemsBase="@BaseBoton(3)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtrosBoton.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>FiltroBoton(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <EstadoChip Estado="@context.Item.DES_ESTADO"
+                                BackColor="@context.Item.DES_BACKCOLOR"
+                                ForeColor="@context.Item.DES_FORECOLOR" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false"
+                            HeaderStyle="text-align:right;width:110px;"
+                            CellStyle="text-align:right;white-space:nowrap;">
+                <CellTemplate>
+                    @{ var b = context.Item; }
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                   OnClick="@(() => AbrirDialogoBoton(b, CrudModo.Read))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                   OnClick="@(() => AbrirDialogoBoton(b, CrudModo.Update))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => AbrirDialogoBoton(b, CrudModo.Delete))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-4 mono" Style="opacity:.5;">Sin botones asignados a esta opción.</MudText>
+        </NoRecordsContent>
+    </MudDataGrid>
+</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string CodAplicacion { get; set; } = "";
+    [Parameter, EditorRequired] public string CodOpcion     { get; set; } = "";
+
+    // Datos de contexto que el diálogo de botón muestra como cabecera informativa.
+    [Parameter] public string? DesAplicacion  { get; set; }
+    [Parameter] public string? CodOpcionPadre { get; set; }
+    [Parameter] public string? DesOpcionPadre { get; set; }
+    [Parameter] public string? DesOpcion      { get; set; }
+
+    [Parameter] public bool ReadOnly { get; set; }
+
+    private List<AplicacionesOpcionesBotones> _botones = new();
+    private bool _cargandoBotones;
+    private AplicacionesOpcionesBotones? _filaFocoBoton;
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosBoton = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+
+    protected override async Task OnInitializedAsync() => await CargarAsync();
+
+    private async Task CargarAsync()
+    {
+        if (string.IsNullOrWhiteSpace(CodAplicacion) || string.IsNullOrWhiteSpace(CodOpcion)) return;
+        _cargandoBotones = true; StateHasChanged();
+        try { _botones = await BotonesService.GetByOpcionAsync(CodAplicacion, CodOpcion); }
+        finally { _cargandoBotones = false; StateHasChanged(); }
+    }
+
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+
+    private List<AplicacionesOpcionesBotones> Ordenar(List<AplicacionesOpcionesBotones> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.DES_BOTON_OPCION).ToList() : items.OrderByDescending(x => x.DES_BOTON_OPCION).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_ALIAS).ToList() : items.OrderByDescending(x => x.DES_ALIAS).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_TOOLTIPTEXT).ToList() : items.OrderByDescending(x => x.DES_TOOLTIPTEXT).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+
+    private List<AplicacionesOpcionesBotones> _botonesVisibles => Ordenar(AplicarBoton(_botones, -1));
+    private List<AplicacionesOpcionesBotones> BaseBoton(int col) => AplicarBoton(_botones, col);
+
+    private List<AplicacionesOpcionesBotones> AplicarBoton(List<AplicacionesOpcionesBotones> src, int ex)
+    {
+        IEnumerable<AplicacionesOpcionesBotones> q = src;
+        foreach (var (c, v) in _filtrosBoton)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.DES_BOTON_OPCION ?? "")),
+                1 => q.Where(x => v.Contains(x.DES_ALIAS ?? "")),
+                2 => q.Where(x => v.Contains(x.DES_TOOLTIPTEXT ?? "")),
+                3 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void FiltroBoton(int c, HashSet<string>? v) { _filtrosBoton[c] = v; StateHasChanged(); }
+
+    private async Task AbrirDialogoBoton(AplicacionesOpcionesBotones? item, CrudModo modo)
+    {
+        var parametros = new DialogParameters
+        {
+            ["Item"]                = item,
+            ["Modo"]                = modo,
+            ["CodAplicacion"]       = CodAplicacion,
+            ["CodOpcionAplicacion"] = CodOpcion,
+            ["DesAplicacion"]       = DesAplicacion,
+            ["CodOpcionPadre"]      = CodOpcionPadre,
+            ["DesOpcionPadre"]      = DesOpcionPadre,
+            ["DesOpcion"]           = DesOpcion
+        };
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo botón",
+            CrudModo.Update => "Modificar botón",
+            CrudModo.Delete => "Eliminar botón",
+            _               => "Detalle de botón"
+        };
+        var dialog = await DialogService.ShowAsync<AplicacionesOpcionesBotonesDialog>(titulo, parametros,
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await CargarAsync();
+    }
+
+    private async Task ImportarBotonesEstandar()
+    {
+        try
+        {
+            var rEstandar = await Http.GetFromJsonAsync<ApiResponse<List<BotonEstandar>>>(ApiRoutes.Seguridad.BotonesEstandar);
+            var estandares = rEstandar?.Data ?? new();
+            if (!estandares.Any()) { Snackbar.Add("No hay botones estándar registrados.", Severity.Info); return; }
+
+            var yaAsignados = _botones.Select(b => b.COD_BOTON_OPCION_ESTANDAR).Where(c => !string.IsNullOrWhiteSpace(c)).ToHashSet();
+            var pendientes  = estandares.Where(e => !yaAsignados.Contains(e.COD_BOTON_OPCION_ESTANDAR ?? "")).ToList();
+            if (!pendientes.Any()) { Snackbar.Add("Todos los botones estándar ya están asignados.", Severity.Info); return; }
+
+            var dlg = await DialogService.ShowAsync<ImportarBotonesEstandarDialog>(
+                "Importar botones estándar",
+                new DialogParameters { ["Disponibles"] = pendientes },
+                new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+            var result = await dlg.Result;
+            if (result is null || result.Canceled || result.Data is not List<BotonEstandar> elegidos || !elegidos.Any()) return;
+
+            int? codTipoEstado = null;
+            try
+            {
+                var rEstado = await Http.GetFromJsonAsync<ApiResponse<EstadosPorTablaDto>>(
+                    $"{ApiRoutes.Seguridad.EstadosPorTabla}?desTabla={Uri.EscapeDataString("SEGURIDAD.APLICACIONES_OPCIONES_BOTONES")}");
+                codTipoEstado = rEstado?.Data?.CodTipoEstado;
+            }
+            catch { }
+
+            int creados = 0, errores = 0;
+            foreach (var est in elegidos)
+            {
+                var dto = new AplicacionesOpcionesBotonesInsertDto
+                {
+                    COD_APLICACION        = CodAplicacion,
+                    COD_OPCION_APLICACION = CodOpcion,
+                    COD_BOTON_OPCION      = "",
+                    DES_BOTON_OPCION      = est.DES_BOTON_OPCION_ESTANDAR ?? est.COD_BOTON_OPCION_ESTANDAR ?? "",
+                    COD_BOTON_OPCION_ESTANDAR = est.COD_BOTON_OPCION_ESTANDAR,
+                    IMG_ICONO       = est.IMG_ICONO,
+                    FLG_GRILLA      = est.FLG_GRILLA ?? true,
+                    FLG_HEADER      = est.FLG_HEADER ?? false,
+                    FLG_ACCION_GET  = est.FLG_ACCION_GET,
+                    FLG_ACCION_POST = est.FLG_ACCION_POST,
+                    FLG_ACCION_PUT  = est.FLG_ACCION_PUT,
+                    FLG_ACCION_DELETE = est.FLG_ACCION_DELETE,
+                    DES_METODO      = est.DES_METODO,
+                    COD_TIPO_ESTADO = codTipoEstado,
+                    COD_ESTADO      = 1
+                };
+                var (saveOk, _) = await BotonesService.GuardarAsync(dto);
+                if (saveOk) creados++; else errores++;
+            }
+            Snackbar.Add(errores == 0
+                ? $"{creados} botón(es) importado(s) correctamente."
+                : $"{creados} importado(s), {errores} con error.",
+                errores == 0 ? Severity.Success : Severity.Warning);
+            await CargarAsync();
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(OpcionBotonesPanel)); }
+    }
+
+    // Forma del payload de ApiRoutes.Seguridad.EstadosPorTabla. OpcionesAplicaciones declaraba
+    // su propia copia local (EstadosDiag, tipo privado de esa página); al mover el panel acá se
+    // replica para no acoplar el componente a un tipo que no puede ver.
+    private class EstadosPorTablaDto
+    {
+        public int? CodTipoEstado { get; set; }
+        public List<object> Estados { get; set; } = new();
+    }
+}

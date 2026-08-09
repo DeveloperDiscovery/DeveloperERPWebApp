@@ -1,0 +1,87 @@
+@using IncotermsTiposTransporteModel = KONSolutions.Shared.Models.Comercial.IncotermsTiposTransporte
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_TRANSPORTE" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <AriaCombo Items="_tiposTransporte" TextFunc="@(t => $"{t.Texto} ({t.Id})")" ValueFunc="@(t => t.Id)"
+                         @bind-Value="_model.COD_TIPO_TRANSPORTE" Label="Tipo de transporte"
+                         Disabled="@(Modo != CrudModo.Create)" Class="mb-3" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public IncotermsTiposTransporteModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public string? CodIncotermFijo { get; set; }
+
+    private IncotermsTiposTransporteModel _model = new();
+    private List<KONSolutions.Shared.Common.ComboboxItem> _tiposTransporte = new();
+    private bool _saving;
+
+    private bool _esNuevo => Modo == CrudModo.Create;
+
+    private void MapearDesdeModelo(IncotermsTiposTransporteModel m)
+    {
+        _model.COD_INCOTERM        = m.COD_INCOTERM;
+        _model.COD_TIPO_TRANSPORTE = m.COD_TIPO_TRANSPORTE;
+    }
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<IncotermsTiposTransporteModel>(
+            $"{ApiRoutes.Comercial.IncotermsTiposTransporte}/{Uri.EscapeDataString(_model.COD_INCOTERM)}/{Uri.EscapeDataString(_model.COD_TIPO_TRANSPORTE)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Item is not null) MapearDesdeModelo(Item);
+        else if (!string.IsNullOrEmpty(CodIncotermFijo))
+            _model.COD_INCOTERM = CodIncotermFijo;
+
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        try
+        {
+            var rt = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<KONSolutions.Shared.Common.ComboboxItem>>>(
+                ApiRoutes.Comercial.TiposTransporteCombobox);
+            _tiposTransporte = rt?.Data ?? new();
+        }
+        catch { }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Comercial.IncotermsTiposTransporte;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_INCOTERM)}/{Uri.EscapeDataString(_model.COD_TIPO_TRANSPORTE)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(IncotermsTiposTransporteDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var resp = await Http.PostAsJsonAsync(ruta, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add("Creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(IncotermsTiposTransporteDialog), nameof(Submit));
+    }
+}

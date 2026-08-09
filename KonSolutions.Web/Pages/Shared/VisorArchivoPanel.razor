@@ -1,0 +1,67 @@
+@* Visor de archivo (PDF/imagen) reutilizable, mismo estilo que el panel PDF de
+   NotificacionAprobacionDialog: cabecera oscura con título + botón Descargar, y una X en la
+   misma cabecera para cerrar. Puramente presentacional — no sabe nada de cómo se obtuvo el
+   documento; el padre le pasa el DocumentoCarpetaDto y el blob: URL ya resueltos (típicamente
+   desde DocumentosCarpetaPanel, vía @ref + CerrarPreviewAsync()).
+
+   Uso (BlobUrl es string: SIEMPRE con @, si no Razor pasa el texto literal "_blobUrl"):
+        <VisorArchivoPanel Documento="_docSeleccionado" BlobUrl="@_blobUrl" Cargando="_previewCargando"
+                           OnCerrar="@(() => _docsPanelRef!.CerrarPreviewAsync())" /> *@
+@using KONSolutions.Shared.Models.Entorno
+
+<div style="width:@Ancho;flex-shrink:0;height:100%;border:1px solid var(--line, #e0e0e0);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;background:#2b2622;">
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.1);">
+        <div style="flex:1;min-width:0;color:#fff;font-size:.8rem;font-weight:700;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+             title="@Documento?.RutaCompleta">
+            @NombreSinExtension(Documento?.NombreArchivo)
+            <span class="mono" style="opacity:.6;font-weight:400;"> · @Documento?.Extension</span>
+            @* Aviso defensivo: el src del iframe debe ser una URL "blob:". Si llega otra cosa,
+               el navegador la resuelve contra la propia aplicación y el visor termina mostrando
+               el ERP (o su página "404 — Página no encontrada"). Pasó por escribir
+               BlobUrl="_blobUrl" sin la arroba: Razor lo tomaba como texto literal. Se muestra
+               solo cuando el valor es inválido, para no estorbar en el uso normal. *@
+            @if (!string.IsNullOrEmpty(BlobUrl) && !BlobUrl.StartsWith("blob:"))
+            {
+                <div class="mono" style="opacity:.85;font-weight:400;font-size:.62rem;color:#ffd479;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:all;">
+                    src inválido (no es blob:) = @BlobUrl
+                </div>
+            }
+        </div>
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
+                   Style="color:#fff;border-color:rgba(255,255,255,.25);flex-shrink:0;"
+                   Disabled="@(string.IsNullOrWhiteSpace(BlobUrl))"
+                   Href="@BlobUrl" Target="_blank">Descargar</MudButton>
+        <MudTooltip Text="Cerrar visor">
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Style="color:#fff;" OnClick="OnCerrar" />
+        </MudTooltip>
+    </div>
+    <div style="flex:1;min-height:0;">
+        @if (Cargando)
+        {
+            <div style="height:100%;display:flex;align-items:center;justify-content:center;">
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            </div>
+        }
+        else if (string.IsNullOrWhiteSpace(BlobUrl))
+        {
+            <div style="height:100%;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.4);">
+                No se pudo cargar el archivo.
+            </div>
+        }
+        else
+        {
+            <iframe src="@BlobUrl" style="width:100%;height:100%;border:none;"></iframe>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public DocumentoCarpetaDto? Documento { get; set; }
+    [Parameter] public string? BlobUrl { get; set; }
+    [Parameter] public bool Cargando { get; set; }
+    [Parameter] public EventCallback OnCerrar { get; set; }
+    [Parameter] public string Ancho { get; set; } = "clamp(300px, 42vw, 720px)";
+
+    private static string NombreSinExtension(string? nombreArchivo)
+        => string.IsNullOrEmpty(nombreArchivo) ? "" : Path.GetFileNameWithoutExtension(nombreArchivo);
+}

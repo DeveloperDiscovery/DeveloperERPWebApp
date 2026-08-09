@@ -1,0 +1,62 @@
+@*
+    CrudDialogTitle.razor
+    ─────────────────────────────────────────────────────────────────────
+    Cabecera de diálogo CRUD con el mismo estilo que la cabecera de grilla
+    (variables CSS --grilla-cab-fondo / --grilla-cab-texto).
+
+    Uso — dentro de <TitleContent> en <MudDialog>:
+
+        <MudDialog>
+            <TitleContent>
+                <CrudDialogTitle Modo="Modo" Codigo="@Item?.COD" Descripcion="@Item?.DES" />
+            </TitleContent>
+            <DialogContent>...</DialogContent>
+        </MudDialog>
+
+    Resultado visual:  Editar · HIG - ALTA
+*@
+
+<div style="background:var(--dialog-fore,#2b2622);
+            color:var(--dialog-back,#fff);
+            margin:-16px -24px 0;
+            padding:13px 20px;
+            display:flex;align-items:center;gap:6px;
+            font-size:.97rem;font-weight:600;font-family:inherit;
+            letter-spacing:.01em;">
+    <MudIcon Icon="@AccionIcono" Size="Size.Small" Style="opacity:.85;flex-shrink:0;" />
+    <span>@AccionLabel</span>
+    @if (!string.IsNullOrWhiteSpace(Codigo))
+    {
+        <span style="opacity:.5;font-weight:300;margin:0 1px;">·</span>
+        <span>@Codigo</span>
+    }
+    @if (!string.IsNullOrWhiteSpace(Descripcion))
+    {
+        <span style="opacity:.5;font-weight:300;margin:0 1px;">-</span>
+        <span style="font-weight:400;">@Descripcion</span>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CrudModo Modo { get; set; }
+    [Parameter] public string? Codigo      { get; set; }
+    [Parameter] public string? Descripcion { get; set; }
+
+    private string AccionLabel => Modo switch
+    {
+        CrudModo.Create => "Nuevo",
+        CrudModo.Update => "Editar",
+        CrudModo.Read   => "Ver",
+        CrudModo.Delete => "Eliminar",
+        _               => "Detalle"
+    };
+
+    private string AccionIcono => Modo switch
+    {
+        CrudModo.Create => Icons.Material.Filled.Add,
+        CrudModo.Update => Icons.Material.Filled.Edit,
+        CrudModo.Read   => Icons.Material.Filled.Visibility,
+        CrudModo.Delete => Icons.Material.Filled.Delete,
+        _               => Icons.Material.Filled.Info
+    };
+}

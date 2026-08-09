@@ -1,0 +1,137 @@
+@using KONSolutions.Shared.Models.Entorno
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(620px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_KEY_PATHFILE" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="ENTORNO.PATHFILES" Columna="COD_KEY_PATHFILE"
+                        @bind-Value="_model.COD_KEY_PATHFILE"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="ENTORNO.PATHFILES" Columna="DES_KEY_PATHFILE"
+                        @bind-Value="_model.DES_KEY_PATHFILE"
+                        Disabled="_readonly" Obligatorio="true" IgnorarModoTexto="true" />
+            @if (!string.IsNullOrWhiteSpace(_model.DES_PATH_FILE))
+            {
+                <MudTextField T="string" Value="@_model.DES_PATH_FILE" Label="Ruta completa (servidor + ruta)"
+                              Variant="Variant.Outlined" ReadOnly="true" Class="mb-3" />
+            }
+            <AriaCombo TItem="ComboboxItem" Items="_servidores"
+                       TextFunc="@(s => $"{s.Id} - {s.Texto}")" ValueFunc="@(s => s.Id)"
+                       @bind-Value="_model.COD_KEY_SERVIDOR"
+                       Label="Servidor" Disabled="_readonly" />
+            <div class="d-flex gap-4 mb-3">
+                <div class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.CalendarViewMonth" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_YEAR ?? false)" ValueChanged="@(v => _model.FLG_YEAR = v)"
+                                 Label="Año" Disabled="_readonly" />
+                </div>
+                <div class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_MONTH ?? false)" ValueChanged="@(v => _model.FLG_MONTH = v)"
+                                 Label="Mes" Disabled="_readonly" />
+                </div>
+                <div class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.ViewWeek" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_WEEK ?? false)" ValueChanged="@(v => _model.FLG_WEEK = v)"
+                                 Label="Semana" Disabled="_readonly" />
+                </div>
+                <div class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.Today" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_DAY ?? false)" ValueChanged="@(v => _model.FLG_DAY = v)"
+                                 Label="Día" Disabled="_readonly" />
+                </div>
+            </div>
+            <EstadoCombo DesTabla="ENTORNO.PATHFILES"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public PathFile? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private PathFile _model = new();
+    private List<ComboboxItem> _servidores = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private void MapearDesdeModelo(PathFile m)
+    {
+        _model.COD_KEY_PATHFILE = m.COD_KEY_PATHFILE;
+        _model.DES_KEY_PATHFILE = m.DES_KEY_PATHFILE;
+        _model.COD_KEY_SERVIDOR = m.COD_KEY_SERVIDOR;
+        _model.DES_PATH_FILE    = m.DES_PATH_FILE;
+        _model.FLG_YEAR         = m.FLG_YEAR;
+        _model.FLG_MONTH        = m.FLG_MONTH;
+        _model.FLG_WEEK         = m.FLG_WEEK;
+        _model.FLG_DAY          = m.FLG_DAY;
+        _model.COD_TIPO_ESTADO  = m.COD_TIPO_ESTADO;
+        _model.COD_ESTADO       = m.COD_ESTADO;
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<PathFile>>(
+                $"{ApiRoutes.Entorno.PathFiles}/{Uri.EscapeDataString(_model.COD_KEY_PATHFILE)}");
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>($"{ApiRoutes.Entorno.Servidores}/combobox");
+            _servidores = r?.Data ?? new();
+        }
+        catch { }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Entorno.PathFiles}/{Uri.EscapeDataString(_model.COD_KEY_PATHFILE)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(PathFilesDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new { _model.COD_KEY_PATHFILE, _model.DES_KEY_PATHFILE, _model.COD_KEY_SERVIDOR, _model.FLG_YEAR, _model.FLG_MONTH, _model.FLG_WEEK, _model.FLG_DAY,
+                        _model.COD_TIPO_ESTADO, _model.COD_ESTADO };
+        var resp = await Http.PostAsJsonAsync(ApiRoutes.Entorno.PathFiles, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(PathFilesDialog), nameof(Submit));
+    }
+}

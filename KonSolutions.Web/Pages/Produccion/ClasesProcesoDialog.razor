@@ -1,0 +1,98 @@
+@using ClasesProcesoModel = KONSolutions.Shared.Models.Produccion.ClasesProceso
+@using ClasesProcesoRoute = KONSolutions.Web.Services.ApiRoutes.Produccion
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_CLASE_PROCESO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <div class="d-flex" style="gap:16px;">
+                <div style="flex:1;min-width:0;">
+                    <CampoTexto Tabla="PRODUCCION.CLASES_PROCESO" Columna="COD_CLASE_PROCESO"
+                                @bind-Value="_model.COD_CLASE_PROCESO"
+                                Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+                    <CampoTexto Tabla="PRODUCCION.CLASES_PROCESO" Columna="DES_CLASE_PROCESO"
+                                @bind-Value="_model.DES_CLASE_PROCESO"
+                                Disabled="_readonly" Obligatorio="true" />
+                    <MudNumericField T="int?" @bind-Value="_model.NUM_ORDEN_PRESENTACION" Label="Orden de Presentación"
+                                      Variant="Variant.Outlined" Disabled="_readonly" Class="mb-3"
+                                      Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                    <div class="d-flex align-center justify-space-between py-1">
+                        <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Genera Grupo de Requerimiento</MudText></div>
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_GENERA_GRUPO_REQUERIMIENTO" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                </div>
+                <div style="flex-shrink:0;padding-left:8px;border-left:1px solid rgba(0,0,0,.1);">
+                    <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)" Label="Icono" ReadOnly="_readonly" />
+                </div>
+            </div>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ClasesProcesoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private ClasesProcesoModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de SHOWBYID) hacia _model.</summary>
+    private void MapearDesdeModelo(ClasesProcesoModel m)
+    {
+        _model.COD_CLASE_PROCESO = m.COD_CLASE_PROCESO;
+        _model.DES_CLASE_PROCESO = m.DES_CLASE_PROCESO;
+        _model.IMG_ICONO = m.IMG_ICONO;
+        _model.NUM_ORDEN_PRESENTACION = m.NUM_ORDEN_PRESENTACION;
+        _model.FLG_GENERA_GRUPO_REQUERIMIENTO = m.FLG_GENERA_GRUPO_REQUERIMIENTO;
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<ClasesProcesoModel>($"{ClasesProcesoRoute.ClasesProceso}/{Uri.EscapeDataString(_model.COD_CLASE_PROCESO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ClasesProcesoRoute.ClasesProceso;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_CLASE_PROCESO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(ClasesProcesoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new { _model.COD_CLASE_PROCESO, _model.DES_CLASE_PROCESO, _model.IMG_ICONO,
+                        _model.NUM_ORDEN_PRESENTACION, _model.FLG_GENERA_GRUPO_REQUERIMIENTO };
+        var resp = await Http.GuardarAsync(ruta, dto, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ClasesProcesoDialog), nameof(Submit));
+    }
+}

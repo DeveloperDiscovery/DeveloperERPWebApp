@@ -1,0 +1,79 @@
+@inject CatalogoService<TipoMenuOpciones, TipoMenuOpcionesDto> Service
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(560px,95vw);">
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <div style="display:flex;gap:16px;align-items:flex-start;">
+                <div style="flex:1;min-width:0;">
+                    <CampoTexto Tabla="ESTANDAR.TIPOS_MENU_OPCIONES" Columna="COD_TIPO_MENU_OPCIONES"
+                                @bind-Value="_model.COD_TIPO_MENU_OPCIONES" Disabled="@(_isEdit || _readonly)" />
+                    <CampoTexto Tabla="ESTANDAR.TIPOS_MENU_OPCIONES" Columna="DES_TIPO_MENU_OPCIONES"
+                                @bind-Value="_model.DES_TIPO_MENU_OPCIONES" Disabled="_readonly" />
+                </div>
+                <div style="flex-shrink:0;padding-left:8px;border-left:1px solid rgba(0,0,0,.1);">
+                    <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)" Label="Icono" />
+                </div>
+            </div>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TipoMenuOpciones? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TipoMenuOpcionesDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private bool _esNuevo;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(TipoMenuOpciones m) =>
+        _model = new TipoMenuOpcionesDto
+        {
+            COD_TIPO_MENU_OPCIONES = m.COD_TIPO_MENU_OPCIONES,
+            DES_TIPO_MENU_OPCIONES = m.DES_TIPO_MENU_OPCIONES,
+            IMG_ICONO = m.IMG_ICONO
+        };
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_TIPO_MENU_OPCIONES);
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.COD_TIPO_MENU_OPCIONES);
+            _saving = false;
+            if (okd) { Snackbar.Add("Tipo de menú de opciones eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(TipoMenuOpcionesDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Tipo de menú de opciones actualizado." : "Tipo de menú de opciones creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(TipoMenuOpcionesDialog));
+    }
+}

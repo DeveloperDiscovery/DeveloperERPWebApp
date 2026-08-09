@@ -1,0 +1,99 @@
+@using KONSolutions.Shared.Models.Entorno
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(620px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_KEY_IP" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="ENTORNO.SERVIDORES" Columna="COD_KEY_SERVIDOR"
+                        @bind-Value="_model.COD_KEY_SERVIDOR"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="ENTORNO.SERVIDORES" Columna="COD_IP"
+                        @bind-Value="_model.COD_IP"
+                        Disabled="_readonly" Obligatorio="true" />
+            <CampoTexto Tabla="ENTORNO.SERVIDORES" Columna="DES_KEY_IP"
+                        @bind-Value="_model.DES_KEY_IP"
+                        Disabled="_readonly" Obligatorio="true" />
+            <EstadoCombo DesTabla="ENTORNO.SERVIDORES"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Servidor? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private Servidor _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private void MapearDesdeModelo(Servidor m)
+    {
+        _model.COD_KEY_SERVIDOR = m.COD_KEY_SERVIDOR;
+        _model.COD_IP           = m.COD_IP;
+        _model.DES_KEY_IP       = m.DES_KEY_IP;
+        _model.COD_TIPO_ESTADO  = m.COD_TIPO_ESTADO;
+        _model.COD_ESTADO       = m.COD_ESTADO;
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<Servidor>>(
+                $"{ApiRoutes.Entorno.Servidores}/{Uri.EscapeDataString(_model.COD_KEY_SERVIDOR)}");
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Entorno.Servidores}/{Uri.EscapeDataString(_model.COD_KEY_SERVIDOR)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(ServidoresDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new { _model.COD_KEY_SERVIDOR, _model.COD_IP, _model.DES_KEY_IP, _model.COD_TIPO_ESTADO, _model.COD_ESTADO };
+        var resp = await Http.PostAsJsonAsync(ApiRoutes.Entorno.Servidores, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ServidoresDialog), nameof(Submit));
+    }
+}

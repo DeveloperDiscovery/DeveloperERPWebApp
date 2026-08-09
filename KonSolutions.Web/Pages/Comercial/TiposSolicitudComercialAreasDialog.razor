@@ -1,0 +1,89 @@
+@using AreasModel = KONSolutions.Shared.Models.Comercial.TiposSolicitudComercialAreas
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using KONSolutions.Shared.Common
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_AREA" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <MudTextField Value="@DesTipoSolicitudComercial" Label="Tipo de Solicitud Comercial" Variant="Variant.Outlined"
+                          Disabled="true" Class="mb-3" />
+            <AriaCombo TItem="ComboboxItem" Items="_areasDisponibles"
+                       TextFunc="@(a => $"{a.Id} - {a.Texto}")" ValueFunc="@(a => a.Id)"
+                       @bind-Value="_codAreaTexto"
+                       Label="Área" Disabled="_readonly" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public AreasModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter, EditorRequired] public string CodTipoSolicitudComercial { get; set; } = "";
+    [Parameter] public string DesTipoSolicitudComercial { get; set; } = "";
+
+    // Áreas ya asignadas al tipo — se descuentan del combo (no tiene sentido asignar la misma dos veces).
+    [Parameter] public List<AreasModel> AreasYaAsignadas { get; set; } = new();
+
+    private KONSolutions.Shared.Models.Comercial.TiposSolicitudComercialAreasDto _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _todasLasAreas = new();
+    private string _codAreaTexto
+    {
+        get => _model.COD_AREA?.ToString() ?? "";
+        set { _model.COD_AREA = int.TryParse(value, out var n) ? n : null; }
+    }
+    private List<ComboboxItem> _areasDisponibles => _esNuevo
+        ? _todasLasAreas.Where(a => !AreasYaAsignadas.Select(x => x.COD_AREA?.ToString() ?? "").Contains(a.Id)).ToList()
+        : _todasLasAreas;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        _model.COD_TIPO_SOLICITUD_COMERICAL = CodTipoSolicitudComercial;
+        if (Item is not null) _model.COD_AREA = Item.COD_AREA;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var r = await Http.SafeGetAsync<List<ComboboxItem>>($"{ApiRoutes.Administracion.Areas}/combobox");
+        _todasLasAreas = r ?? new();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync(
+                $"{ComercialRoute.TiposSolicitudComercialAreas}/{Uri.EscapeDataString(CodTipoSolicitudComercial)}/{_model.COD_AREA}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Área quitada.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposSolicitudComercialAreasDialog), nameof(Submit), "No se pudo quitar el área");
+            return;
+        }
+        var resp = await Http.PostAsJsonAsync(ComercialRoute.TiposSolicitudComercialAreas, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add("Área agregada.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposSolicitudComercialAreasDialog), nameof(Submit));
+    }
+}

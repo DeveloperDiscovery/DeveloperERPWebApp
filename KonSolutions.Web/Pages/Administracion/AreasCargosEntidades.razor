@@ -1,0 +1,224 @@
+@page "/administracion/areas-cargos-entidades"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Administracion
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject ControlCambiosClientService Cambios
+@inject ConfigService ConfigSvc
+@implements IDisposable
+
+<PageTitle>Áreas · Cargos · Entidades · @ConfigSvc.Current.NombreApp</PageTitle>
+
+@* ── Menú contextual (clic derecho) — hardcodeado por COD_TIPO, independiente de permisos/botones de grilla ── *@
+@if (_ctxVisible)
+{
+    <div style="position:fixed;left:@(_ctxX)px;top:@(_ctxY)px;z-index:9999;
+                background:var(--menu-back,#2b2622);color:var(--menu-fore,#fff);border:1px solid var(--line);border-radius:6px;
+                box-shadow:0 4px 20px rgba(0,0,0,.18);min-width:200px;padding:4px 0;"
+         @onclick:stopPropagation="true">
+        @if (_ctxNodo?.COD_TIPO == "C")
+        {
+            <div class="d-flex align-center gap-2 px-3 py-2" style="cursor:pointer;font-size:.85rem;"
+                 @onclick="@(() => EjecutarContextMenu(_ctxNodo!, esAsignar: true))">
+                <MudIcon Icon="@Icons.Material.Filled.PersonAdd" Style="font-size:1rem;color:#2f855a;" />
+                <span>Asignar</span>
+            </div>
+        }
+        else if (_ctxNodo?.COD_TIPO == "P")
+        {
+            <div class="d-flex align-center gap-2 px-3 py-2" style="cursor:pointer;font-size:.85rem;"
+                 @onclick="@(() => EjecutarContextMenu(_ctxNodo!, esAsignar: false))">
+                <MudIcon Icon="@Icons.Material.Filled.PersonRemove" Style="font-size:1rem;color:#e53e3e;" />
+                <span>Desasignar</span>
+            </div>
+        }
+        else
+        {
+            <div class="px-3 py-2" style="font-size:.8rem;opacity:.6;">Sin acciones para este nodo.</div>
+        }
+    </div>
+}
+
+<div @onclick="CerrarContextMenu">
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Áreas · Cargos · Entidades" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ADMINISTRACION</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="@(() => Task.CompletedTask)" Placeholder="Buscar área, cargo o persona..." DebounceInterval="300" Class="grid-header-search" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <MudButtonGroup Variant="Variant.Text" Size="Size.Small">
+            <MudButton OnClick="ExpandirTodo">Expandir todo</MudButton>
+            <MudButton OnClick="ColapsarTodo">Colapsar todo</MudButton>
+        </MudButtonGroup>
+        <GridRefreshButton OnRefresh="Load" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="areas-cargos-entidades" style="position:relative;padding:8px 4px;background:var(--grilla-fila-par,#1a1714);">
+        <div class="d-flex align-center gap-1 py-1 px-2 tl-toolbar">
+            <MudIcon Icon="@Icons.Material.Filled.AccountTree" Style="font-size:.95rem;flex-shrink:0;color:inherit;" />
+            <span style="font-size:.85rem;font-weight:700;">Áreas / Cargos / Entidades asignadas</span>
+        </div>
+
+        <div class="areas-arbol-scroll">
+        @if (_cargando)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (!_raices.Any())
+        {
+            <MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText>
+        }
+        else
+        {
+            @foreach (var raiz in _raicesVisibles)
+            {
+                <NodoAreaCargoEntidad Nodo="raiz" Nivel="0"
+                                      NodoActual="_seleccionado"
+                                      ForzarExpandido="_forzarExpandido"
+                                      OnSeleccionar="@(n => _seleccionado = n)"
+                                      OnContextMenu="MostrarContextMenu" />
+            }
+        }
+        </div>
+        <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+</div>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private Func<Task>? _onCambio;
+    private List<AreaCargoEntidadNodo> _items = new();
+    private List<AreaCargoEntidadNodo> _raices = new();
+    private AreaCargoEntidadNodo? _seleccionado;
+    private string _search = "";
+    private bool? _forzarExpandido;
+    private bool _cargando;
+
+    private bool _ctxVisible;
+    private double _ctxX, _ctxY;
+    private AreaCargoEntidadNodo? _ctxNodo;
+
+    private Task MostrarContextMenu((AreaCargoEntidadNodo Nodo, double X, double Y) args)
+    {
+        _ctxNodo = args.Nodo; _ctxX = args.X; _ctxY = args.Y; _ctxVisible = true;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void CerrarContextMenu() => _ctxVisible = false;
+
+    // Menú contextual hardcodeado por COD_TIPO, independiente de la configuración de
+    // botones/permisos de la grilla: 'C' (Cargo) -> Asignar, 'P' (Entidad asignada) -> Desasignar.
+    private Task EjecutarContextMenu(AreaCargoEntidadNodo nodo, bool esAsignar)
+    {
+        _ctxVisible = false;
+        return esAsignar ? Asignar(nodo) : Desasignar(nodo);
+    }
+
+    private List<AreaCargoEntidadNodo> _raicesVisibles =>
+        string.IsNullOrWhiteSpace(_search) ? _raices : _raices.Where(FiltroRecursivo).ToList();
+
+    private bool FiltroRecursivo(AreaCargoEntidadNodo n)
+    {
+        var coincide = n.DES_NODO.Contains(_search, StringComparison.OrdinalIgnoreCase);
+        return coincide || n.Hijos.Any(FiltroRecursivo);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ADMINISTRACION", "AreasCargosEntidades");
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("ADMINISTRACION.AREAS_CARGOS_ENTIDADES", _onCambio);
+    }
+
+    private async Task Load()
+    {
+        _cargando = true;
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<AreaCargoEntidadNodo>>>(ApiRoutes.Administracion.AreasCargosEntidadesTreeview);
+            _items = r?.Data ?? new();
+            ConstruirArbol();
+        }
+        catch (Exception ex) { await ErrorLog.LogAsync(ex, nameof(AreasCargosEntidades), nameof(Load)); }
+        finally { _cargando = false; }
+    }
+
+    // Mismo criterio que el árbol de Áreas: se arma en el cliente enlazando cada nodo con su
+    // padre por COD_NODO_PADRE. Los tres niveles (Área/Cargo/Entidad) comparten un único
+    // espacio de COD_NODO gracias a los offsets que ya trae el SP (Cargo +10000, Entidad
+    // +100000), así que no chocan entre sí y un solo diccionario alcanza para los tres.
+    private void ConstruirArbol()
+    {
+        foreach (var it in _items) it.Hijos = new();
+        var porCodigo = _items.ToDictionary(x => x.COD_NODO);
+        _raices = new();
+        foreach (var it in _items)
+        {
+            if (it.COD_NODO_PADRE.HasValue && porCodigo.TryGetValue(it.COD_NODO_PADRE.Value, out var padre) && padre != it)
+                padre.Hijos.Add(it);
+            else
+                _raices.Add(it);
+        }
+
+        // Dentro de cada Área, los Cargos ('C') se listan antes que las sub-Áreas ('A').
+        foreach (var it in _items) OrdenarHijos(it.Hijos);
+        OrdenarHijos(_raices);
+    }
+
+    private static readonly Dictionary<string, int> _ordenTipo = new() { ["C"] = 0, ["A"] = 1, ["P"] = 2 };
+
+    private static void OrdenarHijos(List<AreaCargoEntidadNodo> hijos) =>
+        hijos.Sort((a, b) =>
+        {
+            var cmp = _ordenTipo.GetValueOrDefault(a.COD_TIPO, 9).CompareTo(_ordenTipo.GetValueOrDefault(b.COD_TIPO, 9));
+            return cmp != 0 ? cmp : string.Compare(a.DES_NODO, b.DES_NODO, StringComparison.OrdinalIgnoreCase);
+        });
+
+    private void ExpandirTodo() { _forzarExpandido = true;  StateHasChanged(); }
+    private void ColapsarTodo() { _forzarExpandido = false; StateHasChanged(); }
+
+    private async Task Asignar(AreaCargoEntidadNodo cargoNodo)
+    {
+        if (cargoNodo.COD_AREA is null || cargoNodo.COD_CARGO is null) return;
+        var dlg = await DialogService.ShowAsync<AsignarEntidadDialog>("Asignar entidad",
+            new DialogParameters
+            {
+                ["CodArea"] = cargoNodo.COD_AREA.Value,
+                ["CodCargo"] = cargoNodo.COD_CARGO.Value,
+                ["DesCargo"] = cargoNodo.DES_NODO
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    private async Task Desasignar(AreaCargoEntidadNodo entidadNodo)
+    {
+        if (entidadNodo.COD_AREA is null || entidadNodo.COD_CARGO is null || entidadNodo.COD_ENTIDAD is null) return;
+        var confirmado = await DialogService.ShowMessageBox(
+            "Desasignar", $"¿Quitar a \"{entidadNodo.DES_NODO}\" de este cargo?",
+            yesText: "Desasignar", cancelText: "Cancelar");
+        if (confirmado != true) return;
+
+        var resp = await Http.DeleteAsync(
+            $"{ApiRoutes.Administracion.AreasCargosEntidades}/{entidadNodo.COD_AREA}/{entidadNodo.COD_CARGO}/{entidadNodo.COD_ENTIDAD}");
+        if (resp.IsSuccessStatusCode) { Snackbar.Add("Entidad desasignada.", Severity.Success); await Load(); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(AreasCargosEntidades), nameof(Desasignar));
+    }
+
+    public void Dispose() => Cambios.Desuscribir("ADMINISTRACION.AREAS_CARGOS_ENTIDADES", _onCambio ?? (() => Task.CompletedTask));
+}

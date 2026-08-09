@@ -1,0 +1,101 @@
+@using CubsoSunatModel = KONSolutions.Shared.Models.Sunat.CubsoSunat
+@using CubsoSunatRoute = KONSolutions.Web.Services.ApiRoutes.Sunat
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.COD_CUBSO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="SUNAT.CUBSO_SUNAT" Columna="COD_CUBSO"
+                        @bind-Value="_model.COD_CUBSO"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="SUNAT.CUBSO_SUNAT" Columna="DES_CUBSO"
+                        @bind-Value="_model.DES_CUBSO"
+                        Disabled="_readonly" />
+            @if (!string.IsNullOrWhiteSpace(_model.DES_CUBSO_ES))
+            {
+                <MudTextField T="string" Label="Descripción (español)" Value="@_model.DES_CUBSO_ES"
+                              ValueChanged="@((string _) => { })" Variant="Variant.Outlined" Disabled="true"
+                              ReadOnly="true" Class="mb-3" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Translate" />
+            }
+            <CampoTexto Tabla="SUNAT.CUBSO_SUNAT" Columna="COD_CUBSO_PARENT"
+                        @bind-Value="_model.COD_CUBSO_PARENT"
+                        Disabled="_readonly" />
+            <CampoTexto Tabla="SUNAT.CUBSO_SUNAT" Columna="COD_UNSPS"
+                        @bind-Value="_model.COD_UNSPS"
+                        Disabled="_readonly" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public CubsoSunatModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private CubsoSunatModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(CubsoSunatModel m)
+    {
+        _model = new CubsoSunatModel
+        {
+            COD_CUBSO = m.COD_CUBSO,
+            DES_CUBSO = m.DES_CUBSO,
+            DES_CUBSO_ES = m.DES_CUBSO_ES,
+            COD_CUBSO_PARENT = m.COD_CUBSO_PARENT,
+            COD_UNSPS = m.COD_UNSPS,
+        };
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<CubsoSunatModel>>(
+                $"{CubsoSunatRoute.CubsoSunat}/{Uri.EscapeDataString(_model.COD_CUBSO)}");
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = CubsoSunatRoute.CubsoSunat;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_CUBSO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(CubsoSunatDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new { _model.COD_CUBSO, _model.DES_CUBSO, _model.DES_CUBSO_ES, _model.COD_CUBSO_PARENT, _model.COD_UNSPS };
+        var resp = await Http.GuardarAsync(ruta, dto, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(CubsoSunatDialog), nameof(Submit));
+    }
+}

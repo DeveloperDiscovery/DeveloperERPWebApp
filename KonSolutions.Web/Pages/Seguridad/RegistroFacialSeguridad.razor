@@ -1,0 +1,256 @@
+@page "/seguridad/registro-facial-seguridad"
+@attribute [Authorize]
+@inject BiometriaService BiometriaSvc
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject LimitesService Limites
+@inject ConfigService ConfigSvc
+
+<PageTitle>Registro Facial · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Registro Facial de Seguridad" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+            Enrolamiento biométrico · @_visibles.Count de @_todosEstados.Count usuarios
+        </MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTerm" OnSearch="HandleSearch" Placeholder="Buscar usuario..." DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    @if (_loading)
+    {
+        <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+    }
+    <div class="grid-header-divider"></div>
+    <GridRefreshButton OnRefresh="Load" />
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <MudToolBar>
+        <MudSpacer />
+        <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f => f.Value is not null))" />
+    </MudToolBar>
+    <div data-resizable-grid="registro-facial" data-default-height="500" style="position:relative;">
+    <MudDataGrid T="EstadoRow" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Usuario" Width="@Limites.ColWidth("SEGURIDAD.USUARIOS","COD_USUARIO",60,150)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_USUARIO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="EstadoRow" ItemsBase="@BaseSinCol(0)"
+                                            ValorDe="@(x => x.COD_USUARIO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_USUARIO</CellTemplate>
+            </TemplateColumn>
+
+            <TemplateColumn Sortable="false" Title="Nombre" Width="@Limites.ColWidth("SEGURIDAD.USUARIOS","DES_USUARIO",120,350)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_USUARIO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="EstadoRow" ItemsBase="@BaseSinCol(1)"
+                                            ValorDe="@(x => x.DES_USUARIO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_USUARIO</CellTemplate>
+            </TemplateColumn>
+
+            <TemplateColumn Sortable="false" Title="Estado">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="EstadoRow" ItemsBase="@BaseSinCol(2)"
+                                            ValorDe="@(x => x.DES_ESTADO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(2, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small"
+                             Color="@(context.Item.DES_ESTADO == "ACTIVO" ? Color.Success : Color.Default)">
+                        @context.Item.DES_ESTADO
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+
+            <TemplateColumn Sortable="false" Title="Biometría">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Texto="Biometría" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="EstadoRow" ItemsBase="@BaseSinCol(3)"
+                                            ValorDe="@(x => x.FLG_REGISTRADO ? "Registrado" : "Sin registro")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(3, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (context.Item.FLG_REGISTRADO)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success"
+                                 Icon="@Icons.Material.Filled.CheckCircle">
+                            Registrado (@context.Item.NUM_MUESTRAS m.)
+                        </MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default"
+                                 Icon="@Icons.Material.Filled.RadioButtonUnchecked">
+                            Sin registro
+                        </MudChip>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var row = context.Item; }
+                    <div class="d-flex align-center gap-1">
+                        <MudTooltip Text="Registrar rostro">
+                            <MudIconButton Icon="@Icons.Material.Filled.FaceRetouchingNatural"
+                                           Color="Color.Primary" Size="Size.Small"
+                                           OnClick="@(() => AbrirRegistro(row))" />
+                        </MudTooltip>
+                        @if (row.FLG_REGISTRADO)
+                        {
+                            <MudTooltip Text="Eliminar registro facial">
+                                <MudIconButton Icon="@Icons.Material.Filled.DeleteForever"
+                                               Color="Color.Error" Size="Size.Small"
+                                               OnClick="@(() => EliminarRegistro(row))" />
+                            </MudTooltip>
+                        }
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin usuarios.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="EstadoRow" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private record EstadoRow(
+        string COD_USUARIO, string DES_USUARIO, string DES_ESTADO,
+        bool FLG_REGISTRADO, int NUM_MUESTRAS);
+
+    private List<EstadoRow> _todosEstados = new();
+    private List<EstadoRow> _estados      = new();
+    private bool   _loading    = true;
+    private string _searchTerm = string.Empty;
+
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<EstadoRow> Ordenar(List<EstadoRow> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_USUARIO).ToList() : items.OrderByDescending(x => x.COD_USUARIO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_USUARIO).ToList() : items.OrderByDescending(x => x.DES_USUARIO).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.FLG_REGISTRADO).ToList() : items.OrderByDescending(x => x.FLG_REGISTRADO).ToList(),
+        _ => items
+    };
+    private List<EstadoRow> _visibles => Ordenar(AplicarTodos(_estados, -1));
+    private List<EstadoRow> BaseSinCol(int col) => AplicarTodos(_estados, col);
+
+    private List<EstadoRow> AplicarTodos(List<EstadoRow> src, int excluir)
+    {
+        IEnumerable<EstadoRow> q = src;
+        foreach (var (col, vals) in _filtros)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.COD_USUARIO)),
+                1 => q.Where(x => vals.Contains(x.DES_USUARIO)),
+                2 => q.Where(x => vals.Contains(x.DES_ESTADO)),
+                3 => q.Where(x => vals.Contains(x.FLG_REGISTRADO ? "Registrado" : "Sin registro")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltro(int col, HashSet<string>? v) { _filtros[col] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("SEGURIDAD", "RegistroFacialSeguridad");
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        var lista = await BiometriaSvc.GetEstadosAsync();
+        _todosEstados = lista.Select(e => new EstadoRow(
+            e.COD_USUARIO, e.DES_USUARIO, e.DES_ESTADO ?? "ACTIVO",
+            e.FLG_REGISTRADO, e.NUM_MUESTRAS)).ToList();
+        AplicarBusqueda();
+        _loading = false;
+    }
+
+    private void HandleSearch()
+    {
+        AplicarBusqueda();
+        StateHasChanged();
+    }
+
+    private void AplicarBusqueda()
+    {
+        if (string.IsNullOrWhiteSpace(_searchTerm))
+        {
+            _estados = _todosEstados;
+        }
+        else
+        {
+            var term = _searchTerm.Trim().ToUpperInvariant();
+            _estados = _todosEstados
+                .Where(x => x.COD_USUARIO.ToUpperInvariant().Contains(term)
+                         || x.DES_USUARIO.ToUpperInvariant().Contains(term))
+                .ToList();
+        }
+    }
+
+    private async Task AbrirRegistro(EstadoRow row)
+    {
+        var dlg = await DialogService.ShowAsync<RegistroFacialDialog>(
+            $"Registro facial · {row.DES_USUARIO}",
+            new DialogParameters { ["CodUsuario"] = row.COD_USUARIO, ["NombreUsuario"] = row.DES_USUARIO },
+            new DialogOptions
+            {
+                MaxWidth = MaxWidth.Small,
+                FullWidth = true,
+                CloseOnEscapeKey = true,
+                BackdropClick = false
+            });
+        if ((await dlg.Result) is { Canceled: false })
+            await Load();
+    }
+
+    private async Task EliminarRegistro(EstadoRow row)
+    {
+        var confirm = await DialogService.ShowMessageBox("Confirmar",
+            $"¿Eliminar el registro facial de '{row.DES_USUARIO}'?",
+            yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirm != true) return;
+        var (ok, msg) = await BiometriaSvc.EliminarAsync(row.COD_USUARIO);
+        if (ok) { Snackbar.Add("Registro facial eliminado.", Severity.Success); await Load(); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(RegistroFacialSeguridad));
+    }
+}

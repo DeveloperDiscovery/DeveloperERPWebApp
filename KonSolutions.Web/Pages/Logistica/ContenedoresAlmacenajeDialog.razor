@@ -1,0 +1,268 @@
+@using ContenedorModel = KONSolutions.Shared.Models.Logistica.ContenedoresAlmacenaje
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_CONTENDOR" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+            <MudGrid Spacing="2">
+                @* El código lo genera el SP al crear: la columna se muestra sólo cuando ya existe. *@
+                @if (!_esNuevo)
+                {
+                    <MudItem xs="12" sm="3">
+                        <CampoTexto Tabla="LOGISTICA.CONTENEDORES_ALMACENAJE" Columna="COD_CONTENEDOR"
+                                    @bind-Value="_model.COD_CONTENEDOR" Disabled="true" />
+                    </MudItem>
+                }
+                <MudItem xs="12" sm="@(_esNuevo ? 8 : 5)">
+                    @* DES_CONTENDOR (sic): así se llama la columna en la BD. *@
+                    <CampoTexto Tabla="LOGISTICA.CONTENEDORES_ALMACENAJE" Columna="DES_CONTENDOR"
+                                @bind-Value="_model.DES_CONTENDOR" Label="Contenedor"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposUbicacion"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               @bind-Value="_model.COD_TIPO_UBICACION"
+                               Label="Tipo de ubicación" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+
+                @* ── Dónde está ── *@
+                <MudItem xs="12" sm="4">
+                    @* Al cambiar la Sucursal se limpian Zonificación y Almacén: los combos
+                       de abajo dependen de ella. *@
+                    <AriaCombo TItem="ComboboxItem" Items="_sucursales"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               Value="@_model.COD_SUCURSAL" ValueChanged="OnSucursalChanged"
+                               Label="Sucursal" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <AriaCombo TItem="ComboboxItem" Items="_zonificaciones"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               @bind-Value="_model.COD_ZONIFICACION"
+                               Label="Zonificación (nivel)"
+                               Disabled="@(_readonly || string.IsNullOrWhiteSpace(_model.COD_SUCURSAL))" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <AriaCombo TItem="ComboboxItem" Items="_almacenes"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               @bind-Value="_model.COD_ALMACEN"
+                               Label="Almacén" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+
+                @* ── Grilla de casilleros ── *@
+                <MudItem xs="12">
+                    <div class="pet-grupo-box mb-3">
+                        <MudText Typo="Typo.subtitle2" Class="pet-grupo-titulo">Grilla de casilleros</MudText>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="6" sm="3">
+                                <MudNumericField T="int?" @bind-Value="_model.NUM_FILAS" Label="Filas (niveles)"
+                                                 Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_readonly" />
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudNumericField T="int?" @bind-Value="_model.NUM_COLUMNAS" Label="Columnas"
+                                                 Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_readonly" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <div class="d-flex align-center gap-2" style="height:100%;">
+                                    <MudIcon Icon="@Icons.Material.Filled.GridOn" Color="Color.Primary" />
+                                    <MudText Typo="Typo.body2">
+                                        @* <span> y no <text>: Razor reserva la etiqueta <text>
+                                           para sus bloques de control y no admite atributos. *@
+                                        @if (_model.TotalCasilleros > 0)
+                                        {
+                                            <span>Genera <b>@_model.TotalCasilleros</b> casilleros</span>
+                                        }
+                                        else
+                                        {
+                                            <span style="opacity:.6;">Indique filas y columnas</span>
+                                        }
+                                    </MudText>
+                                </div>
+                            </MudItem>
+                        </MudGrid>
+                    </div>
+                </MudItem>
+
+                @* ── Medidas de cada nivel ── *@
+                <MudItem xs="12">
+                    <div class="pet-grupo-box mb-3">
+                        <MudText Typo="Typo.subtitle2" Class="pet-grupo-titulo">Medidas del nivel (cm)</MudText>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" sm="4">
+                                <MudNumericField T="int?" @bind-Value="_model.VAL_ALTO_NIVEL_CENTIMETROS" Label="Alto"
+                                                 Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_readonly" />
+                            </MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudNumericField T="int?" @bind-Value="_model.VAL_LARGO_NIVEL_CENTIMETROS" Label="Largo"
+                                                 Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_readonly" />
+                            </MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudNumericField T="int?" @bind-Value="_model.VAL_PROFUNDIDAD_NIVEL_CENTIMETROS" Label="Profundidad"
+                                                 Min="0" Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_readonly" />
+                            </MudItem>
+                        </MudGrid>
+                    </div>
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    <EstadoCombo DesTabla="LOGISTICA.CONTENEDORES_ALMACENAJE" @bind-Value="_model.COD_ESTADO"
+                                 CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                                 Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @* El polígono se dibuja en el Plano de Zonificación, no acá: sólo se
+                       informa si ya está definido. *@
+                    <div class="d-flex align-center gap-2" style="height:100%;">
+                        <MudIcon Icon="@Icons.Material.Filled.Polyline"
+                                 Color="@(Poligono.TienePoligono(_model.DES_POLIGONO) ? Color.Success : Color.Default)"
+                                 Style="@(Poligono.TienePoligono(_model.DES_POLIGONO) ? "" : "opacity:.3;")" />
+                        <MudText Typo="Typo.body2" Style="opacity:.7;">
+                            @(Poligono.TienePoligono(_model.DES_POLIGONO)
+                                ? "Ubicado en el plano"
+                                : "Sin ubicar — dibújelo en Plano de Zonificación")
+                        </MudText>
+                    </div>
+                </MudItem>
+            </MudGrid>
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ContenedorModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private ContenedorModel _model = new();
+    private List<ComboboxItem> _tiposUbicacion = new();
+    private List<ComboboxItem> _sucursales     = new();
+    private List<ComboboxItem> _zonificaciones = new();
+    private List<ComboboxItem> _almacenes      = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        await CargarCombosAsync();
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private void MapearDesdeModelo(ContenedorModel m)
+    {
+        _model = new ContenedorModel
+        {
+            COD_CONTENEDOR                    = m.COD_CONTENEDOR,
+            DES_CONTENDOR                     = m.DES_CONTENDOR,
+            COD_TIPO_UBICACION                = m.COD_TIPO_UBICACION,
+            COD_SUCURSAL                      = m.COD_SUCURSAL,
+            COD_ZONIFICACION                  = m.COD_ZONIFICACION,
+            COD_ALMACEN                       = m.COD_ALMACEN,
+            // Se arrastra aunque no se edite acá: si no viajara en el POST, guardar desde
+            // el CRUD borraría el polígono dibujado sobre el plano.
+            DES_POLIGONO                      = m.DES_POLIGONO,
+            NUM_FILAS                         = m.NUM_FILAS,
+            NUM_COLUMNAS                      = m.NUM_COLUMNAS,
+            VAL_ALTO_NIVEL_CENTIMETROS        = m.VAL_ALTO_NIVEL_CENTIMETROS,
+            VAL_LARGO_NIVEL_CENTIMETROS       = m.VAL_LARGO_NIVEL_CENTIMETROS,
+            VAL_PROFUNDIDAD_NIVEL_CENTIMETROS = m.VAL_PROFUNDIDAD_NIVEL_CENTIMETROS,
+            COD_TIPO_ESTADO                   = m.COD_TIPO_ESTADO,
+            COD_ESTADO                        = m.COD_ESTADO
+        };
+    }
+
+    private async Task CargarCombosAsync()
+    {
+        _tiposUbicacion = await CargarCombo(ApiRoutes.Logistica.TiposUbicacionCombobox);
+        _sucursales     = await CargarCombo(ApiRoutes.Estandar.SucursalesCombobox);
+        _almacenes      = await CargarCombo(ApiRoutes.Logistica.AlmacenesCombobox);
+        if (!string.IsNullOrWhiteSpace(_model.COD_SUCURSAL))
+            _zonificaciones = await CargarZonificaciones(_model.COD_SUCURSAL);
+    }
+
+    private async Task OnSucursalChanged(string? val)
+    {
+        _model.COD_SUCURSAL = val;
+        _model.COD_ZONIFICACION = null;
+        _zonificaciones = string.IsNullOrWhiteSpace(_model.COD_SUCURSAL)
+            ? new() : await CargarZonificaciones(_model.COD_SUCURSAL!);
+    }
+
+    // El SHOWCOMBOX de zonificación exige @COD_SUCURSAL: va en la ruta, no en query string.
+    private Task<List<ComboboxItem>> CargarZonificaciones(string codSucursal)
+        => CargarCombo($"{ApiRoutes.Zonificacion.Zonificaciones}/combobox/{Uri.EscapeDataString(codSucursal)}");
+
+    private async Task<List<ComboboxItem>> CargarCombo(string ruta)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>(ruta);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(ContenedoresAlmacenajeDialog), nameof(CargarCombo));
+            return new();
+        }
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID — evita mostrar datos desactualizados
+    /// de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<ContenedorModel>(
+            $"{ApiRoutes.Logistica.ContenedoresAlmacenaje}/{Uri.EscapeDataString(_model.COD_CONTENEDOR)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    private async Task OnInvalidSubmit(EditContext ctx)
+    {
+        var errores = string.Join(" · ", ctx.GetValidationMessages());
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"]  = "Faltan datos obligatorios",
+                ["Mensaje"] = string.IsNullOrWhiteSpace(errores) ? "Hay campos obligatorios sin completar." : errores
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Logistica.ContenedoresAlmacenaje;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_CONTENEDOR)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(ContenedoresAlmacenajeDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        // El SP INSERT hace upsert: Crear y Modificar usan el mismo POST.
+        var resp = await Http.PostAsJsonAsync(ruta, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ContenedoresAlmacenajeDialog), nameof(Submit));
+    }
+}

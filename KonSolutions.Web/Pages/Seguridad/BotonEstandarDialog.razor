@@ -1,0 +1,155 @@
+@inject CatalogoService<BotonEstandar, BotonEstandarDto> Service
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(820px,95vw);">
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <div style="display:flex;gap:16px;align-items:flex-start;">
+                <div style="flex:1;min-width:0;">
+                    @* El código es correlativo y lo calcula la pantalla: nunca se tipea, ni al
+                       dar de alta. Se muestra igual porque es el dato por el que después se
+                       busca el botón. *@
+                    <CampoTexto Tabla="SEGURIDAD.BOTONES_ESTANDAR" Columna="COD_BOTON_OPCION_ESTANDAR"
+                                @bind-Value="_model.COD_BOTON_OPCION_ESTANDAR" Disabled="true" />
+                    <CampoTexto Tabla="SEGURIDAD.BOTONES_ESTANDAR" Columna="DES_BOTON_OPCION_ESTANDAR"
+                                @bind-Value="_model.DES_BOTON_OPCION_ESTANDAR" Disabled="_readonly" />
+
+                    <div class="d-flex gap-4 mb-3">
+                        <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.TableRows" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool" Value="@(_model.FLG_GRILLA ?? false)" ValueChanged="@(v => _model.FLG_GRILLA = v)"
+                                     Disabled="_readonly" Label="Mostrar en grilla" Color="Color.Primary" /></div>
+                        <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.ViewHeadline" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool" Value="@(_model.FLG_HEADER ?? false)" ValueChanged="@(v => _model.FLG_HEADER = v)"
+                                     Disabled="_readonly" Label="Mostrar en cabecera" Color="Color.Primary" /></div>
+                    </div>
+
+                    <MudText Typo="Typo.caption" Class="mono mb-1" Style="opacity:.55;">
+                        VERBOS HTTP HABILITADOS (autorización por rol)
+                    </MudText>
+                    <div class="d-flex gap-4 mb-3">
+                        <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Visibility" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool" Value="@(_model.FLG_ACCION_GET ?? false)" ValueChanged="@(v => _model.FLG_ACCION_GET = v)"
+                                     Disabled="_readonly" Label="GET" Color="Color.Info" /></div>
+                        <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool" Value="@(_model.FLG_ACCION_POST ?? false)" ValueChanged="@(v => _model.FLG_ACCION_POST = v)"
+                                     Disabled="_readonly" Label="POST" Color="Color.Success" /></div>
+                        <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Edit" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool" Value="@(_model.FLG_ACCION_PUT ?? false)" ValueChanged="@(v => _model.FLG_ACCION_PUT = v)"
+                                     Disabled="_readonly" Label="PUT" Color="Color.Warning" /></div>
+                        <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Delete" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool" Value="@(_model.FLG_ACCION_DELETE ?? false)" ValueChanged="@(v => _model.FLG_ACCION_DELETE = v)"
+                                     Disabled="_readonly" Label="DELETE" Color="Color.Error" /></div>
+                    </div>
+
+                    <CampoTextoEstable Label="Método de la API (DES_METODO)" @bind-Value="_model.DES_METODO"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" Disabled="_readonly"
+                                  HelperText="Nombre exacto del método del Controller a invocar (ej. Insert, Delete, GetById) — sin schema ni tabla por delante." />
+                </div>
+                <div style="flex-shrink:0;padding-left:8px;border-left:1px solid rgba(0,0,0,.1);">
+                    <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)" Label="Icono del botón" />
+                </div>
+            </div>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public BotonEstandar? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private BotonEstandarDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de GetByIdAsync) hacia _model.</summary>
+    private void MapearDesdeModelo(BotonEstandar m)
+    {
+        _model = new BotonEstandarDto
+        {
+            COD_BOTON_OPCION_ESTANDAR = m.COD_BOTON_OPCION_ESTANDAR ?? "",
+            DES_BOTON_OPCION_ESTANDAR = m.DES_BOTON_OPCION_ESTANDAR ?? "",
+            FLG_GRILLA = m.FLG_GRILLA,
+            FLG_HEADER = m.FLG_HEADER,
+            FLG_ACCION_GET = m.FLG_ACCION_GET,
+            FLG_ACCION_POST = m.FLG_ACCION_POST,
+            FLG_ACCION_PUT = m.FLG_ACCION_PUT,
+            FLG_ACCION_DELETE = m.FLG_ACCION_DELETE,
+            DES_METODO = m.DES_METODO,
+            IMG_ICONO = m.IMG_ICONO
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde GetByIdAsync — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_BOTON_OPCION_ESTANDAR);
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Modo != CrudModo.Create && Item is not null) { await RecargarDesdeShowbyidAsync(); return; }
+        if (Modo == CrudModo.Create) await AsignarCodigoAsync();
+    }
+
+    /// <summary>El siguiente correlativo, sacado de los códigos que ya existen.
+    ///
+    /// Se calcula sobre el máximo y no sobre la cantidad de registros: si alguna vez se borró
+    /// un botón del medio, contar filas devolvería un código que ya está en uso. El ancho
+    /// tampoco se fija acá — se copia del código más largo que haya (hoy "00", dos dígitos),
+    /// así el día que la tabla pase a tres el formato acompaña solo.</summary>
+    private async Task AsignarCodigoAsync()
+    {
+        var existentes = await Service.GetAllAsync();
+        var codigos = existentes.Select(x => x.COD_BOTON_OPCION_ESTANDAR ?? "")
+                                .Where(c => c.Length > 0)
+                                .ToList();
+
+        var ancho = codigos.Count == 0 ? 2 : codigos.Max(c => c.Length);
+        var maximo = codigos.Select(c => int.TryParse(c, out var n) ? n : 0)
+                            .DefaultIfEmpty(-1)
+                            .Max();
+
+        _model.COD_BOTON_OPCION_ESTANDAR = (maximo + 1).ToString(new string('0', ancho));
+        StateHasChanged();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.COD_BOTON_OPCION_ESTANDAR);
+            _saving = false;
+            if (okd) { Snackbar.Add("Botón estándar eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(BotonEstandarDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model, Modo == CrudModo.Create);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Botón estándar actualizado." : "Botón estándar creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(BotonEstandarDialog));
+    }
+}

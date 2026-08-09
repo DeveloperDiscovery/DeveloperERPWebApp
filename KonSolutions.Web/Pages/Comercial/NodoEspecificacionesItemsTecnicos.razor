@@ -1,0 +1,127 @@
+@using TreeListModel = KONSolutions.Shared.Models.Comercial.EspecificacionesItemsTecnicosTreeList
+
+@* Nodo recursivo del árbol de Especificaciones/Ítems Técnicos de una Entidad. *@
+
+<div>
+    <div class="tl-row-items @(EsActual ? "tl-row-seleccionada" : "")"
+         style="cursor:pointer;user-select:none;"
+         @onclick="ToggleYSeleccionar"
+         @oncontextmenu="OnRightClick"
+         @oncontextmenu:preventDefault="@_tieneMenu"
+         @oncontextmenu:stopPropagation="@_tieneMenu">
+
+        <div class="d-flex align-center gap-1" style="@($"padding-left:{8 + Nivel * 18}px;")">
+            @if (Nodo.Hijos.Any())
+            {
+                <MudIcon Icon="@(_expandido ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                         Style="font-size:1rem;opacity:.6;flex-shrink:0;" />
+            }
+            else
+            {
+                <span style="width:20px;flex-shrink:0;"></span>
+            }
+
+            <MudIcon Icon="@IconoNivel" Style="font-size:.95rem;opacity:.7;flex-shrink:0;" />
+
+            <span style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                @Nodo.DES_KEY
+            </span>
+        </div>
+
+        <div>
+            @if (!string.IsNullOrWhiteSpace(Nodo.DES_COLOR))
+            {
+                <MudTooltip Text="@Nodo.DES_COLOR">
+                    <div style="@($"width:72px;height:20px;border-radius:4px;border:1px solid var(--line);background:{Nodo.DES_COLOR};")"></div>
+                </MudTooltip>
+            }
+        </div>
+
+        <div class="mono" style="font-size:.74rem;opacity:.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            @Nodo.DES_KEY_TYPE
+        </div>
+
+        <div class="mono" style="font-size:.8rem;text-align:right;">
+            @(Nodo.VAL_NUMERICO?.ToString("N2"))
+        </div>
+
+        <div class="mono" style="font-size:.74rem;opacity:.65;">
+            @Nodo.DES_UNIDAD_MEDIDA
+        </div>
+
+        <div class="d-flex align-center gap-1">
+            @foreach (var (icono, texto) in Flags(Nodo))
+            {
+                <MudTooltip Text="@texto"><MudIcon Icon="@icono" Size="Size.Small" Style="opacity:.75;" /></MudTooltip>
+            }
+        </div>
+
+        <div class="mono" style="font-size:.78rem;text-align:right;opacity:.7;">
+            @Nodo.NUM_ORDEN_PRESENTACION
+        </div>
+    </div>
+
+    @if (_expandido && Nodo.Hijos.Any())
+    {
+        @foreach (var hijo in Nodo.Hijos)
+        {
+            <NodoEspecificacionesItemsTecnicos Nodo="hijo" Nivel="@(Nivel + 1)" NodoActual="NodoActual"
+                       OnSeleccionar="OnSeleccionar" OnContextMenu="OnContextMenu"
+                       ForzarExpandido="ForzarExpandido" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public TreeListModel Nodo { get; set; } = null!;
+    [Parameter] public int Nivel { get; set; } = 0;
+    [Parameter] public TreeListModel? NodoActual { get; set; }
+    [Parameter] public EventCallback<TreeListModel> OnSeleccionar { get; set; }
+    [Parameter] public EventCallback<(TreeListModel Nodo, double X, double Y)> OnContextMenu { get; set; }
+    [Parameter] public bool? ForzarExpandido { get; set; }
+
+    private bool _expandido = true;
+    private bool? _ultimoForzado;
+
+    private bool _tieneMenu => Nodo.COD_KEY_TYPE is "1" or "2";
+
+    private Task OnRightClick(MouseEventArgs e)
+    {
+        if (!_tieneMenu) return Task.CompletedTask;
+        return OnContextMenu.InvokeAsync((Nodo, e.ClientX, e.ClientY));
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (ForzarExpandido.HasValue && ForzarExpandido != _ultimoForzado)
+        {
+            _expandido = ForzarExpandido.Value;
+            _ultimoForzado = ForzarExpandido;
+        }
+    }
+
+    private bool EsActual => NodoActual?.COD_KEY == Nodo.COD_KEY;
+
+    private string IconoNivel => Nodo.COD_KEY_TYPE switch
+    {
+        "0" => Icons.Material.Filled.Business,
+        "1" => Icons.Material.Filled.Rule,
+        "2" => Icons.Material.Filled.Numbers,
+        _   => Icons.Material.Filled.Circle
+    };
+
+    private void ToggleYSeleccionar()
+    {
+        if (Nodo.Hijos.Any()) _expandido = !_expandido;
+        OnSeleccionar.InvokeAsync(Nodo);
+    }
+
+    private static IEnumerable<(string Icono, string Texto)> Flags(TreeListModel n)
+    {
+        if (n.FLG_HABILITADO == true)  yield return (Icons.Material.Filled.CheckCircle, "Habilitado");
+        if (n.FLG_DEFAULT == true)     yield return (Icons.Material.Filled.Star, "Default");
+        if (n.FLG_COLOR == true)       yield return (Icons.Material.Filled.Palette, "Es un Color");
+        if (n.FLG_VALOR == true)       yield return (Icons.Material.Filled.AttachMoney, "Es Ítem con Valor");
+        if (n.FLG_IS_CHILDREN == true) yield return (Icons.Material.Filled.SubdirectoryArrowRight, "Especificación Técnica Hija");
+    }
+}

@@ -1,0 +1,209 @@
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ErrorLogService ErrorLog
+
+@* SEGURIDAD.ROLES_USUARIO_TIPOS_OPERACION — qué operaciones puede ejecutar el rol.
+
+   La clase de operación es obligatoria y no un filtro opcional: el SP de asignados la exige,
+   igual que en Almacenes › Tipos de Movimiento. Los disponibles, en cambio, vienen de todas
+   las clases juntas (su SP no la recibe), así que el recorte por clase se hace en memoria. *@
+
+@if (Rol is null)
+{
+    <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione un rol para ver sus tipos de operación.</MudText>
+}
+else
+{
+    <div class="d-flex align-center justify-space-between pa-3 flex-wrap" style="border-bottom:1px solid var(--line);gap:12px;">
+        <div style="min-width:300px;">
+            <AriaCombo TItem="ComboboxItem" Items="_clases"
+                       TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                       Value="@_codClase" ValueChanged="OnClaseChanged"
+                       Label="Clase de operación" />
+        </div>
+        <div class="d-flex align-center gap-2">
+            <GridRefreshButton OnRefresh="Cargar" />
+            <MudText Class="mono" Style="opacity:.5;font-size:.75rem;">
+                @_asignados.Count asignados · @_disponibles.Count disponibles
+            </MudText>
+        </div>
+    </div>
+
+    @if (string.IsNullOrWhiteSpace(_codClase))
+    {
+        <MudText Class="pa-6 mono" Style="opacity:.4;">Elija una clase de operación.</MudText>
+    }
+    else
+    {
+        <PanelAsignacionDoble TItem="RolTipoOperacion" @ref="_panel"
+                              Asignados="_asignados" Disponibles="_disponibles"
+                              Clave="ClaveDe"
+                              Codigo="@(t => t.COD_TIPO_OPERACION)"
+                              Descripcion="@(t => t.DES_TIPO_OPERACION ?? t.COD_TIPO_OPERACION)"
+                              TituloColumna="Tipo de operación"
+                              EtiquetaPadre="rol" EtiquetaPlural="tipos de operación"
+                              VacioAsignados="El rol no tiene tipos de operación de esta clase."
+                              VacioDisponibles="Todos los tipos de esta clase ya están asignados."
+                              NombreGrilla="rol-tipos-operacion"
+                              SoloLectura="SoloLectura" Cargando="_cargando" Procesando="_procesando"
+                              OnAsignar="AsignarAsync" OnDesasignar="DesasignarAsync" />
+    }
+}
+
+@code {
+    [Parameter] public Rol? Rol { get; set; }
+    [Parameter] public bool SoloLectura { get; set; }
+
+    private PanelAsignacionDoble<RolTipoOperacion>? _panel;
+    private List<ComboboxItem> _clases = new();
+    private string _codClase = "";
+    private List<RolTipoOperacion> _asignados = new();
+    private List<RolTipoOperacion> _disponibles = new();
+
+    private bool _cargando, _procesando;
+    private string? _rolCargado;
+
+    private static string ClaveDe(RolTipoOperacion t)
+        => $"{t.COD_CLASE_OPERACION}|{t.COD_TIPO_OPERACION}";
+
+    protected override async Task OnInitializedAsync()
+        => _clases = await CargarCombo(ApiRoutes.Estandar.ClasesOperacionCombobox);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var cod = Rol?.COD_ROL_USUARIO;
+        if (cod == _rolCargado) return;
+        _rolCargado = cod;
+        await Cargar();
+    }
+
+    private async Task OnClaseChanged(string? val)
+    {
+        _codClase = val ?? "";
+        await Cargar();
+    }
+
+    /// <summary>Asignados por rol+clase (así lo pide el SP) y disponibles por rol solamente:
+    /// esos vienen de todas las clases y se filtran acá. Es una sola llamada aunque el usuario
+    /// pasee por las clases, en vez de una por clase.</summary>
+    private async Task Cargar()
+    {
+        if (Rol is null || string.IsNullOrWhiteSpace(_codClase))
+        {
+            _asignados = new();
+            _disponibles = new();
+            return;
+        }
+
+        _cargando = true;
+        try
+        {
+            var rol = Uri.EscapeDataString(Rol.COD_ROL_USUARIO);
+            var clase = Uri.EscapeDataString(_codClase);
+
+            var ra = await Http.GetFromJsonAsync<ApiResponse<List<RolTipoOperacion>>>(
+                $"{ApiRoutes.Seguridad.RolesTiposOperacion}/{rol}/{clase}");
+            _asignados = (ra?.Data ?? new())
+                .OrderBy(t => t.DES_TIPO_OPERACION ?? t.COD_TIPO_OPERACION).ToList();
+
+            var rd = await Http.GetFromJsonAsync<ApiResponse<List<RolTipoOperacion>>>(
+                $"{ApiRoutes.Seguridad.RolesTiposOperacionDisponibles}/{rol}");
+            _disponibles = (rd?.Data ?? new())
+                .Where(t => t.COD_CLASE_OPERACION == _codClase)
+                .OrderBy(t => t.DES_TIPO_OPERACION ?? t.COD_TIPO_OPERACION).ToList();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(RolTiposOperacionTab), nameof(Cargar));
+            await MostrarErrorAsync("No se pudieron cargar los tipos de operación.");
+            _asignados = new();
+            _disponibles = new();
+        }
+        _cargando = false;
+    }
+
+    private Task AsignarAsync(List<RolTipoOperacion> items)
+        => EnviarLoteAsync(ApiRoutes.Seguridad.RolesTiposOperacionAsignar, items, "asignar");
+
+    private Task DesasignarAsync(List<RolTipoOperacion> items)
+        => EnviarLoteAsync(ApiRoutes.Seguridad.RolesTiposOperacionDesasignar, items, "quitar");
+
+    private async Task EnviarLoteAsync(string ruta, List<RolTipoOperacion> items, string verbo)
+    {
+        if (SoloLectura)
+        {
+            await MostrarAvisoAsync("Sólo lectura", "No tiene permiso para modificar los tipos de operación de este rol.");
+            return;
+        }
+        if (Rol is null || items.Count == 0 || _procesando) return;
+
+        _procesando = true;
+        try
+        {
+            var dto = new RolTiposOperacionLote
+            {
+                COD_ROL_USUARIO = Rol.COD_ROL_USUARIO,
+                Tipos = items.Select(i => new ClaseTipoOperacion
+                {
+                    COD_CLASE_OPERACION = i.COD_CLASE_OPERACION,
+                    COD_TIPO_OPERACION = i.COD_TIPO_OPERACION
+                }).ToList()
+            };
+            var resp = await Http.PostAsJsonAsync(ruta, dto);
+            if (!resp.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService,
+                    nameof(RolTiposOperacionTab), nameof(EnviarLoteAsync), $"No se pudo {verbo}");
+                return;
+            }
+
+            var r = await resp.Content.ReadFromJsonAsync<ApiResponse<RolAsignacionLoteResult>>();
+            var res = r?.Data;
+            await Cargar();
+            _panel?.LimpiarMarcas();
+
+            if (res is null) { Snackbar.Add("Operación completada.", Severity.Success); return; }
+
+            if (res.Fallidos.Any())
+            {
+                await MostrarAvisoAsync($"No se pudo {verbo} todo",
+                    $"Se procesaron {res.Procesados}. Quedaron afuera: {string.Join(", ", res.Fallidos)}." +
+                    (string.IsNullOrWhiteSpace(res.DesError) ? "" : $" Motivo: {res.DesError}"));
+            }
+            else
+            {
+                Snackbar.Add($"{res.Procesados} tipo(s) de operación actualizados.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(RolTiposOperacionTab), nameof(EnviarLoteAsync));
+            await MostrarErrorAsync($"No se pudo {verbo} los tipos de operación.");
+        }
+        finally { _procesando = false; }
+    }
+
+    private async Task<List<ComboboxItem>> CargarCombo(string ruta)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>(ruta);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(RolTiposOperacionTab), nameof(CargarCombo));
+            return new();
+        }
+    }
+
+    private Task MostrarErrorAsync(string mensaje)
+        => MostrarAvisoAsync("No se pudo completar la operación", $"{mensaje} Ver detalle en el log de errores.");
+
+    private async Task MostrarAvisoAsync(string titulo, string mensaje)
+        => await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters { ["Titulo"] = titulo, ["Mensaje"] = mensaje },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+}

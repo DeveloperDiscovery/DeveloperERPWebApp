@@ -1,0 +1,2705 @@
+@page "/zonificacion/plano"
+@attribute [Authorize]
+@using ZonificacionModel = KONSolutions.Shared.Models.Zonificacion.Zonificacion
+@using TipoZonificacionModel = KONSolutions.Shared.Models.Zonificacion.TiposZonificacion
+@using AlmacenesModel = KONSolutions.Shared.Models.Logistica.Almacenes
+@using ContenedorModel = KONSolutions.Shared.Models.Logistica.ContenedoresAlmacenaje
+@using KONSolutions.Shared.Common
+@using Microsoft.JSInterop
+@using System.Globalization
+@implements IAsyncDisposable
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject AccessLogService AccessLog
+@inject IDialogService DialogService
+@inject ErrorLogService ErrorLog
+@inject MenuService MenuService
+
+<PageTitle>Mapa de Piso · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Mapa de Piso" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+            Almacenes y contenedores sobre el plano del piso · las ubicaciones se derivan
+        </MudText>
+    </div>
+    <div style="min-width:345px;">
+        <AriaCombo TItem="ComboboxItem" Items="_sucursales"
+                   TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                   Value="@_codSucursal" ValueChanged="OnSucursalChanged" Label="Sucursal" />
+    </div>
+    <div style="min-width:345px;">
+        @* Sólo los pisos: un pasillo o una cámara son subdivisiones del piso, no lienzos
+           propios. Dibujarlos por separado duplicaría coordenadas que después se contradicen. *@
+        <AriaCombo TItem="ComboboxItem" Items="_pisosCombo"
+                   TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                   Value="@_codZonificacion" ValueChanged="OnZonificacionChanged" Label="Piso"
+                   Disabled="@string.IsNullOrWhiteSpace(_codSucursal)" />
+    </div>
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   Disabled="@(!_hayCambios || _guardando || !PuedeModificar)" OnClick="GuardarCambios" Size="Size.Small">
+            Guardar@(_hayCambios ? $" ({_pendientesAlmacen.Count + _pendientesContenedor.Count})" : "")
+        </MudButton>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_codSucursal) && !_pisosCombo.Any())
+{
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="pa-6 mb-3">
+        <div class="d-flex align-center gap-3">
+            <MudIcon Icon="@Icons.Material.Filled.MapsHomeWork" Size="Size.Large" Style="opacity:.3;" />
+            <div>
+                <MudText Typo="Typo.subtitle1">Esta sucursal no tiene pisos mapeables</MudText>
+                <MudText Class="mono" Style="opacity:.55;font-size:.8rem;">
+                    Marque «Se dibuja en el Mapa de Piso» en el tipo de zonificación que corresponda
+                    (Zonificación → Tipos de Zonificación) y asígneselo a la zona del piso.
+                </MudText>
+            </div>
+        </div>
+    </MudPaper>
+}
+
+@* Sin botones configurados la pantalla queda de sólo lectura y, sin decirlo, parecería
+   rota: no habría ni «+», ni lápices, ni Guardar, y nada explicaría por qué. *@
+@if (SinBotonesConfigurados)
+{
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="pa-4 mb-3">
+        <div class="d-flex align-center gap-3">
+            <MudIcon Icon="@Icons.Material.Filled.Lock" Style="opacity:.4;" />
+            <div>
+                <MudText Typo="Typo.subtitle2">Vista de sólo lectura</MudText>
+                <MudText Class="mono" Style="opacity:.55;font-size:.78rem;">
+                    Su rol no tiene botones habilitados para esta opción, así que puede ver el
+                    plano pero no dibujar ni guardar. Se configuran en Seguridad → botones por
+                    opción, sobre la opción del Mapa de Piso.
+                </MudText>
+            </div>
+        </div>
+    </MudPaper>
+}
+
+@if (_zonaSel is null)
+{
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="pa-8">
+        <MudText Class="mono" Style="opacity:.4;">Seleccione una sucursal y un piso para ver su plano.</MudText>
+    </MudPaper>
+}
+else if (_zonaSel.IMG_PLANO is not { Length: > 0 })
+{
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="pa-8">
+        <div class="d-flex align-center gap-3">
+            <MudIcon Icon="@Icons.Material.Filled.HideImage" Size="Size.Large" Style="opacity:.3;" />
+            <div>
+                <MudText Typo="Typo.subtitle1">Este piso no tiene plano cargado</MudText>
+                <MudText Class="mono" Style="opacity:.5;font-size:.8rem;">
+                    Cárguelo desde Sucursales → pestaña Zonificación → editar «@_zonaSel.DES_ZONIFICACION».
+                </MudText>
+            </div>
+        </div>
+    </MudPaper>
+}
+else
+{
+<MudGrid Spacing="2">
+    @* ── Panel izquierdo: qué se está dibujando ── *@
+    <MudItem xs="12" md="3">
+        <MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="pa-0">
+            <div class="d-flex align-center justify-space-between pa-3" style="border-bottom:1px solid var(--line);">
+                <div style="min-width:0;">
+                    <MudText Typo="Typo.subtitle2">Almacenes del piso</MudText>
+                    <MudText Class="mono" Style="opacity:.5;font-size:.75rem;">
+                        @_almacenes.Count almacenes · @_almacenes.Count(a => TienePoligono(a.COD_ALMACEN)) dibujados
+                    </MudText>
+                </div>
+                @* El alta se hace acá mismo: obligar a ir a Logística → Almacenes y volver
+                   haría perder lo que se esté dibujando. La sucursal y el piso ya vienen
+                   puestos, que es lo único que el mapa sabe y el formulario no. *@
+                <div class="d-flex align-center">
+                    @* Volver a ver el piso completo. Aparece sólo cuando hay un almacén
+                       elegido, que es cuando la vista está acotada a él. *@
+                    @if (!EsDistribucion)
+                    {
+                        <MudTooltip Text="Ver la distribución de todo el piso">
+                            <MudIconButton Icon="@Icons.Material.Filled.GridView" Size="Size.Small"
+                                           Color="Color.Info" OnClick="@(() => SeleccionarAlmacen(null))" />
+                        </MudTooltip>
+                    }
+                    @if (PuedeCrear)
+                    {
+                        <MudTooltip Text="Nuevo almacén en este piso">
+                            <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" Color="Color.Primary"
+                                           OnClick="@(() => AbrirAlmacenCrud(null, CrudModo.Create))" />
+                        </MudTooltip>
+                    }
+                </div>
+            </div>
+
+            @if (!_almacenes.Any())
+            {
+                <MudText Class="pa-4 mono" Style="opacity:.45;font-size:.8rem;">
+                    Ningún almacén está asignado a este piso. Asígnelos desde Logística → Almacenes.
+                </MudText>
+            }
+
+            <div style="max-height:30vh;overflow:auto;">
+                @foreach (var a in _almacenes)
+                {
+                    var sel = _almacenSel?.COD_ALMACEN == a.COD_ALMACEN;
+                    <div class="d-flex align-center gap-2 px-3 py-2" style="@($"cursor:pointer;border-bottom:1px solid var(--line);{(sel ? "background:var(--mud-palette-action-default-hover);" : "")}")"
+                         @onclick="@(() => SeleccionarAlmacen(a))">
+                        <span style="@($"width:12px;height:12px;border-radius:3px;flex:none;background:{ColorAlmacen};")"></span>
+                        <div style="min-width:0;flex:1;">
+                            <MudText Typo="Typo.body2" Style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@a.DES_ALMACEN</MudText>
+                            <MudText Class="mono" Style="opacity:.5;font-size:.7rem;">
+                                @a.COD_ALMACEN · @(TienePoligono(a.COD_ALMACEN) ? AreaTextoAlmacen(a.COD_ALMACEN) : "sin dibujar")
+                            </MudText>
+                        </div>
+                        @* El div envuelve al botón porque @onclick:stopPropagation sobre un
+                           componente genera un segundo parámetro OnClick y no compila. *@
+                        @* El lápiz dibuja el contorno; los datos del almacén viven en el menú
+                           de al lado. Son dos cosas distintas y compartir un solo botón
+                           obligaría a adivinar cuál de las dos abre. *@
+                        <div @onclick:stopPropagation="true">
+                            <MudTooltip Text="Dibujar / editar el contorno del almacén">
+                                <MudIconButton Icon="@Icons.Material.Filled.Draw" Size="Size.Small"
+                                               Disabled="@(_vista == Vista.Volumen || !PuedeModificar)"
+                                               Color="@(EsObjetivoAlmacen(a.COD_ALMACEN) ? Color.Primary : Color.Default)"
+                                               OnClick="@(() => DibujarAlmacen(a))" />
+                            </MudTooltip>
+                        </div>
+                        <div @onclick:stopPropagation="true">
+                            @* El menú entero desaparece si el rol no tiene ninguna de las
+                               tres acciones: un ⋮ que se abre vacío hace pensar que falla. *@
+                            @if (PuedeConsultar || PuedeModificar || PuedeEliminar)
+                            {
+                                <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true"
+                                         AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                                    @if (PuedeConsultar)
+                                    {
+                                        <MudMenuItem Icon="@Icons.Material.Filled.Visibility"
+                                                     OnClick="@(() => AbrirAlmacenCrud(a, CrudModo.Read))">Consultar</MudMenuItem>
+                                    }
+                                    @if (PuedeModificar)
+                                    {
+                                        <MudMenuItem Icon="@Icons.Material.Filled.Edit"
+                                                     OnClick="@(() => AbrirAlmacenCrud(a, CrudModo.Update))">Modificar</MudMenuItem>
+                                    }
+                                    @if (PuedeEliminar)
+                                    {
+                                        <MudMenuItem Icon="@Icons.Material.Filled.Delete" IconColor="Color.Error"
+                                                     OnClick="@(() => AbrirAlmacenCrud(a, CrudModo.Delete))">Eliminar</MudMenuItem>
+                                    }
+                                </MudMenu>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="d-flex align-center justify-space-between pa-3" style="border-top:1px solid var(--line);border-bottom:1px solid var(--line);">
+                <div style="min-width:0;">
+                    <MudText Typo="Typo.subtitle2">
+                        @(EsDistribucion ? "Contenedores del piso" : $"Contenedores de {_almacenSel!.DES_ALMACEN}")
+                    </MudText>
+                    <MudText Class="mono" Style="opacity:.5;font-size:.75rem;">
+                        @_contenedoresVisibles.Count contenedores · @_contenedoresVisibles.Count(c => TieneRect(c.COD_CONTENEDOR)) ubicados
+                        · @_contenedoresVisibles.Sum(c => c.TotalCasilleros) casilleros
+                    </MudText>
+                </div>
+                @* Sin almacén seleccionado no se puede crear: el contenedor tiene que
+                   pertenecer a uno, y elegirlo en el mapa es más claro que buscarlo en un
+                   combo del formulario. *@
+                @if (PuedeCrear)
+                {
+                    <MudTooltip Text="@(_almacenSel is null ? "Seleccione un almacén para crear un contenedor" : $"Nuevo contenedor en {_almacenSel.DES_ALMACEN}")">
+                        <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small" Color="Color.Primary"
+                                       Disabled="@(_almacenSel is null)"
+                                       OnClick="@(() => AbrirContenedorCrud(null, CrudModo.Create))" />
+                    </MudTooltip>
+                }
+            </div>
+
+            @if (!_contenedoresVisibles.Any())
+            {
+                <MudText Class="pa-4 mono" Style="opacity:.45;font-size:.8rem;">
+                    No hay contenedores en este piso. Créelos desde Logística → Contenedores de Almacenaje.
+                </MudText>
+            }
+
+            <div style="max-height:32vh;overflow:auto;">
+                @foreach (var c in _contenedoresVisibles)
+                {
+                    var edi = EsObjetivoContenedor(c.COD_CONTENEDOR);
+                    var enf = _vista == Vista.Volumen && _enfocado == c.COD_CONTENEDOR;
+                    @* En volumen la fila enfoca: así la lista y el dibujo hablan del mismo
+                       rack en lugar de ser dos cosas separadas. *@
+                    <div class="d-flex align-center gap-2 px-3 py-2"
+                         style="@($"border-bottom:1px solid var(--line);{(edi || enf ? "background:var(--mud-palette-action-default-hover);" : "")}{(_vista == Vista.Volumen ? "cursor:pointer;" : "")}")"
+                         @onclick="@(() => { if (_vista == Vista.Volumen) _enfocado = _enfocado == c.COD_CONTENEDOR ? null : c.COD_CONTENEDOR; })">
+                        <span style="@($"width:12px;height:12px;border-radius:3px;flex:none;background:{ColorContenedor};")"></span>
+                        <div style="min-width:0;flex:1;">
+                            <MudText Typo="Typo.body2" Style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@c.DES_CONTENDOR</MudText>
+                            <MudText Class="mono" Style="opacity:.5;font-size:.7rem;">
+                                @c.COD_CONTENEDOR · @c.NUM_FILAS×@c.NUM_COLUMNAS · @(TieneRect(c.COD_CONTENEDOR) ? MedidaTexto(c.COD_CONTENEDOR) : "sin ubicar")
+                            </MudText>
+                        </div>
+                        <div @onclick:stopPropagation="true">
+                            <MudTooltip Text="Ubicar / editar el contenedor en el plano">
+                                <MudIconButton Icon="@Icons.Material.Filled.Draw" Size="Size.Small"
+                                               Disabled="@(_vista == Vista.Volumen || !PuedeModificar)"
+                                               Color="@(edi ? Color.Primary : Color.Default)"
+                                               OnClick="@(() => DibujarContenedor(c))" />
+                            </MudTooltip>
+                        </div>
+                        <div @onclick:stopPropagation="true">
+                            @if (PuedeConsultar || PuedeModificar || PuedeEliminar)
+                            {
+                                <MudMenu Icon="@Icons.Material.Filled.MoreVert" Size="Size.Small" Dense="true"
+                                         AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                                    @if (PuedeConsultar)
+                                    {
+                                        <MudMenuItem Icon="@Icons.Material.Filled.Visibility"
+                                                     OnClick="@(() => AbrirContenedorCrud(c, CrudModo.Read))">Consultar</MudMenuItem>
+                                    }
+                                    @if (PuedeModificar)
+                                    {
+                                        <MudMenuItem Icon="@Icons.Material.Filled.Edit"
+                                                     OnClick="@(() => AbrirContenedorCrud(c, CrudModo.Update))">Modificar</MudMenuItem>
+                                        @* Cambiar de almacén reescribe el registro: es modificar. *@
+                                        <MudMenuItem Icon="@Icons.Material.Filled.MoveDown"
+                                                     OnClick="@(() => MoverContenedorDeAlmacen(c))">Mover a otro almacén</MudMenuItem>
+                                    }
+                                    @if (PuedeEliminar)
+                                    {
+                                        <MudMenuItem Icon="@Icons.Material.Filled.Delete" IconColor="Color.Error"
+                                                     OnClick="@(() => AbrirContenedorCrud(c, CrudModo.Delete))">Eliminar</MudMenuItem>
+                                    }
+                                </MudMenu>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
+            @* Vista de distribución: qué ocupa cada almacén del piso. El color es el mismo
+               con el que se pintan sus contenedores en el plano, así la lista sirve de
+               leyenda además de resumen. *@
+            @if (EsDistribucion && _almacenes.Any())
+            {
+                <div class="pa-3" style="border-top:1px solid var(--line);border-bottom:1px solid var(--line);">
+                    <MudText Typo="Typo.subtitle2">Distribución del piso</MudText>
+                    <MudText Class="mono" Style="opacity:.5;font-size:.75rem;">
+                        @($"{AreaOcupadaPiso:N1}") m² ocupados por contenedores
+                    </MudText>
+                </div>
+                <div style="max-height:26vh;overflow:auto;">
+                    @foreach (var a in _almacenes)
+                    {
+                        var res = ResumenDe(a.COD_ALMACEN);
+                        <div class="d-flex align-center gap-2 px-3 py-2" style="border-bottom:1px solid var(--line);cursor:pointer;"
+                             @onclick="@(() => SeleccionarAlmacen(a))">
+                            <span style="@($"width:12px;height:12px;border-radius:3px;flex:none;background:{ColoresDe(a.COD_ALMACEN).Cara};")"></span>
+                            <div style="min-width:0;flex:1;">
+                                <MudText Typo="Typo.body2" Style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@a.DES_ALMACEN</MudText>
+                                <MudText Class="mono" Style="opacity:.5;font-size:.7rem;">
+                                    @res.Contenedores cont. · @res.Casilleros casilleros
+                                    @if (res.Area > 0)
+                                    {
+                                        <text> · @($"{res.Ocupacion:P0}") ocupado</text>
+                                    }
+                                </MudText>
+                            </div>
+                            @* Barra de ocupación: dos almacenes con el mismo número de racks
+                               pueden estar uno holgado y el otro al límite, y eso sólo se ve
+                               como proporción, no como cuenta. *@
+                            @if (res.Area > 0)
+                            {
+                                <div style="width:46px;flex:none;">
+                                    <MudProgressLinear Value="@(res.Ocupacion * 100)" Max="100" Rounded="true"
+                                                       Color="@(res.Ocupacion > 0.85 ? Color.Error : res.Ocupacion > 0.6 ? Color.Warning : Color.Success)"
+                                                       Style="height:6px;" />
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            @* Las ubicaciones ya no se dibujan: cada casillero tiene la suya y su posición
+               sale del rectángulo del contenedor. Se explica acá para que nadie las busque. *@
+            <div class="pa-3" style="border-top:1px solid var(--line);">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Outlined.Info" Size="Size.Small" Style="opacity:.5;" />
+                    <MudText Class="mono" Style="opacity:.5;font-size:.72rem;">
+                        Las ubicaciones no se dibujan: se derivan de la grilla del contenedor.
+                    </MudText>
+                </div>
+            </div>
+        </MudPaper>
+    </MudItem>
+
+    @* ── Panel derecho: el plano ── *@
+    <MudItem xs="12" md="9">
+        <MudPaper Elevation="0" Style="border:1px solid var(--line);">
+            <div class="d-flex align-center justify-space-between pa-2 flex-wrap" style="border-bottom:1px solid var(--line);gap:8px;">
+                <div class="d-flex align-center gap-2 flex-wrap">
+                    @* En volumen no se dibuja: en perspectiva un clic no cae donde uno cree
+                       que cae. Se mira; se edita en planta. *@
+                    <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+                        <MudButton StartIcon="@Icons.Material.Filled.Map"
+                                   Variant="@(_vista == Vista.Planta ? Variant.Filled : Variant.Outlined)"
+                                   Color="@(_vista == Vista.Planta ? Color.Primary : Color.Default)"
+                                   OnClick="@(() => CambiarVista(Vista.Planta))">Planta</MudButton>
+                        <MudButton StartIcon="@Icons.Material.Filled.ViewInAr"
+                                   Variant="@(_vista == Vista.Volumen ? Variant.Filled : Variant.Outlined)"
+                                   Color="@(_vista == Vista.Volumen ? Color.Primary : Color.Default)"
+                                   OnClick="@(() => CambiarVista(Vista.Volumen))">Volumen</MudButton>
+                    </MudButtonGroup>
+
+                    @if (_vista == Vista.Planta && _objetivo is not null)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">@_objetivo.Nombre</MudChip>
+
+                        @if (_objetivo.EsContenedor)
+                        {
+                            <MudTooltip Text="Haga clic en el plano para colocarlo de nuevo con su medida">
+                                <MudButton Size="Size.Small" Variant="@(_redibujar ? Variant.Filled : Variant.Outlined)"
+                                           StartIcon="@Icons.Material.Filled.PinDrop"
+                                           OnClick="@(() => _redibujar = !_redibujar)">Recolocar</MudButton>
+                            </MudTooltip>
+                                @if (_topeAlmacen)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled"
+                                         Icon="@Icons.Material.Filled.Block">Límite del almacén</MudChip>
+                            }
+                            else if (_topeContenedor is not null)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled"
+                                         Icon="@Icons.Material.Filled.Block">Choca con @_topeContenedor</MudChip>
+                            }
+                            else
+                            {
+                                <MudText Class="mono" Style="opacity:.45;font-size:.72rem;">
+                                    medida automática · arrastre = mover · manija = giro · Shift = 15°
+                                </MudText>
+                            }
+                        }
+                        else
+                        {
+                            <MudTooltip Text="Agregar vértices haciendo clic sobre el plano">
+                                <MudButton Size="Size.Small" Variant="@(_modo == Modo.Dibujar ? Variant.Filled : Variant.Outlined)"
+                                           StartIcon="@Icons.Material.Filled.Timeline" OnClick="@(() => _modo = Modo.Dibujar)">Dibujar</MudButton>
+                            </MudTooltip>
+                            <MudTooltip Text="Arrastrar los vértices existentes · Shift para movimiento fino">
+                                <MudButton Size="Size.Small" Variant="@(_modo == Modo.Editar ? Variant.Filled : Variant.Outlined)"
+                                           StartIcon="@Icons.Material.Filled.OpenWith" OnClick="@(() => _modo = Modo.Editar)">Mover</MudButton>
+                            </MudTooltip>
+                            <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Undo"
+                                       Disabled="@(_trazo.Count == 0)" OnClick="DeshacerVertice">Deshacer</MudButton>
+                        }
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep"
+                                   OnClick="BorrarTrazo">Borrar</MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Check"
+                                   OnClick="TerminarTrazo">Listo</MudButton>
+                    }
+                    else if (_vista == Vista.Planta)
+                    {
+                        <MudText Class="mono" Style="opacity:.5;font-size:.8rem;">
+                            Elija el lápiz de un almacén o de un contenedor para dibujarlo.
+                        </MudText>
+                    }
+                    else
+                    {
+                        @* Recorrido en profundidad: toca un rack para enfocarlo, o avanza
+                           hacia el fondo con las flechas. Lo que queda entre el enfocado y
+                           la cámara se vuelve silueta. *@
+                        <div class="d-flex align-center gap-1">
+                            <MudTooltip Text="Enfocar el rack de atrás">
+                                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small"
+                                               OnClick="@(() => RecorrerProfundidad(1))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Enfocar el rack de adelante">
+                                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small"
+                                               OnClick="@(() => RecorrerProfundidad(-1))" />
+                            </MudTooltip>
+                            @if (_enfocado is not null)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled"
+                                         OnClose="@(() => _enfocado = null)">@NombreEnfocado</MudChip>
+                            }
+                            else
+                            {
+                                <MudText Class="mono" Style="opacity:.5;font-size:.8rem;">
+                                    Sólo lectura · toque un rack para enfocarlo
+                                </MudText>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div class="d-flex align-center gap-2 flex-wrap">
+                    <MudSwitch T="bool" @bind-Value="_mostrarAlmacenes" Color="Color.Primary" Size="Size.Small" Label="Almacenes" />
+                    <MudSwitch T="bool" @bind-Value="_mostrarContenedores" Color="Color.Warning" Size="Size.Small" Label="Contenedores" />
+                    <MudSwitch T="bool" @bind-Value="_mostrarCasilleros" Color="Color.Success" Size="Size.Small" Label="Casilleros" />
+                    <MudSwitch T="bool" @bind-Value="_mostrarEtiquetas" Color="Color.Secondary" Size="Size.Small" Label="Etiquetas" />
+                    <MudTooltip Text="Largo × Ancho × Alto de cada contenedor y del piso">
+                        <MudSwitch T="bool" @bind-Value="_mostrarMedidas" Color="Color.Info" Size="Size.Small" Label="Medidas" />
+                    </MudTooltip>
+                    @if (_vista == Vista.Planta)
+                    {
+                        <MudTooltip Text="Impide que un contenedor quede fuera del contorno de su almacén. Apáguelo si el mueble efectivamente sobresale.">
+                            <MudSwitch T="bool" @bind-Value="_limitarAlAlmacen" Color="Color.Error" Size="Size.Small" Label="Limitar al almacén" />
+                        </MudTooltip>
+                    }
+                    @if (_vista == Vista.Volumen)
+                    {
+                        @* Giro de cámara: el encuadre se recalcula en cada ángulo, así que el
+                           modelo entra completo dando toda la vuelta. *@
+                        <div class="d-flex align-center" style="border-left:1px solid var(--line);padding-left:8px;">
+                            <MudTooltip Text="Girar 15° a la izquierda">
+                                <MudIconButton Icon="@Icons.Material.Filled.RotateLeft" Size="Size.Small"
+                                               OnClick="@(() => Girar(-15))" />
+                            </MudTooltip>
+                            <MudSlider T="double" Value="_giro" ValueChanged="@(v => _giro = v)"
+                                       Min="0" Max="360" Step="1" Class="mx-1" Style="width:130px;" />
+                            <MudTooltip Text="Girar 15° a la derecha">
+                                <MudIconButton Icon="@Icons.Material.Filled.RotateRight" Size="Size.Small"
+                                               OnClick="@(() => Girar(15))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Volver a la vista original">
+                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="RestablecerCamara"
+                                           Style="min-width:56px;font-family:monospace;">@($"{_giro:0}°")</MudButton>
+                            </MudTooltip>
+                        </div>
+                        @* Elevación: sube y baja la cámara sobre la cúpula. Con el giro, se
+                           puede mirar el piso desde cualquier punto de la media esfera. *@
+                        <div class="d-flex align-center" style="border-left:1px solid var(--line);padding-left:8px;">
+                            <MudTooltip Text="Bajar la cámara hacia el horizonte">
+                                <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown" Size="Size.Small"
+                                               Disabled="@(_elevacion <= ElevacionMin)" OnClick="@(() => Elevar(-10))" />
+                            </MudTooltip>
+                            <MudSlider T="double" Value="_elevacion" ValueChanged="@(v => _elevacion = v)"
+                                       Min="ElevacionMin" Max="90" Step="1" Class="mx-1" Style="width:110px;" />
+                            <MudTooltip Text="Subir la cámara hacia la vertical">
+                                <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp" Size="Size.Small"
+                                               Disabled="@(_elevacion >= 90)" OnClick="@(() => Elevar(10))" />
+                            </MudTooltip>
+                            <MudTooltip Text="@($"Elevación {_elevacion:0}° · 90° = desde arriba")">
+                                <MudText Class="mono" Style="opacity:.55;font-size:.72rem;min-width:34px;">@($"{_elevacion:0}°")</MudText>
+                            </MudTooltip>
+                        </div>
+                    }
+                    @if (_vista == Vista.Planta)
+                    {
+                        <MudTooltip Text="@(HayEscala
+                                            ? $"Cuadrícula cada {PasoMetros:0.##} m · los vértices se ajustan a la rejilla"
+                                            : "Cuadrícula sin escala: el piso no tiene ancho/largo en metros")">
+                            <MudSwitch T="bool" @bind-Value="_cuadricula" Color="Color.Secondary" Size="Size.Small" Label="Cuadrícula" />
+                        </MudTooltip>
+                        <div class="d-flex align-center" style="border-left:1px solid var(--line);padding-left:8px;">
+                            <MudTooltip Text="Alejar">
+                                <MudIconButton Icon="@Icons.Material.Filled.ZoomOut" Size="Size.Small"
+                                               Disabled="@(_zoom <= ZoomMin)" OnClick="@(() => Zoom(1 / 1.25))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Restablecer zoom">
+                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ZoomReset"
+                                           Style="min-width:56px;font-family:monospace;">@($"{_zoom * 100:0}%")</MudButton>
+                            </MudTooltip>
+                            <MudTooltip Text="Acercar">
+                                <MudIconButton Icon="@Icons.Material.Filled.ZoomIn" Size="Size.Small"
+                                               Disabled="@(_zoom >= ZoomMax)" OnClick="@(() => Zoom(1.25))" />
+                            </MudTooltip>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div style="overflow:auto;max-height:72vh;background:var(--mud-palette-background-grey);padding:8px;">
+            @if (_vista == Vista.Volumen)
+            {
+                <svg viewBox="0 0 1400 900" style="width:100%;height:auto;display:block;">
+                    @VolumenSvg()
+
+                    @* Capa de clics: siluetas invisibles sobre cada mueble. Va aparte del
+                       dibujo porque éste se genera como marcado plano y ahí no se pueden
+                       enganchar eventos de Blazor. *@
+                    @foreach (var sil in SiluetasVolumen())
+                    {
+                        var cod = sil.Cod;
+                        <polygon points="@sil.Puntos" fill="transparent" style="cursor:pointer;"
+                                 @onclick="@(() => _enfocado = _enfocado == cod ? null : cod)">
+                            <title>@sil.Nombre</title>
+                        </polygon>
+                    }
+                </svg>
+            }
+            else
+            {
+                @* preserveAspectRatio por defecto (xMidYMid meet) mantiene la proporción del
+                   plano; el viewBox usa el alto real del piso para que una nave larga no se
+                   vea cuadrada. *@
+                <svg @ref="_svg" viewBox="@($"0 0 {AnchoVb} {Inv(AltoVb)}")"
+                     style="@($"width:{Inv(_zoom * 100)}%;max-width:none;display:block;touch-action:none;cursor:{CursorPlano};")"
+                     @onclick="OnClickPlano"
+                     @onpointerdown="OnPointerDownPlano" @onpointermove="OnPointerMove"
+                     @onpointerup="OnPointerUp" @onpointercancel="OnPointerUp">
+
+                    <image href="@PlanoSrc" x="0" y="0" width="@AnchoVb" height="@Inv(AltoVb)"
+                           preserveAspectRatio="none" style="pointer-events:none;" />
+
+                    @if (_cuadricula)
+                    {
+                        @CuadriculaSvg()
+                    }
+
+                    @* Almacenes ya dibujados (los que no se están editando) *@
+                    @foreach (var a in _mostrarAlmacenes ? _almacenes : Enumerable.Empty<AlmacenesModel>())
+                    {
+                        if (EsObjetivoAlmacen(a.COD_ALMACEN)) continue;
+                        var pts = PuntosDe(a.COD_ALMACEN);
+                        if (pts.Count < 3) continue;
+                        @* Con un almacén elegido, los demás quedan bloqueados: se apagan en
+                           gris y con borde punteado. No es sólo estética — es la señal de que
+                           ahí no se puede soltar un contenedor mientras se trabaja en éste. *@
+                        var bloqueado = AlmacenBloqueado(a.COD_ALMACEN);
+                        var trazo = bloqueado ? ColorBloqueado : ColorAlmacen;
+                        <polygon points="@Poligono.ASvgPoints(pts, AnchoVb, AltoVb)"
+                                 fill="@trazo" fill-opacity="@(bloqueado ? "0.07" : _objetivo is null ? "0.18" : "0.10")"
+                                 stroke="@trazo" stroke-width="@(bloqueado ? 2 : 3)"
+                                 stroke-dasharray="@(bloqueado ? "8 5" : "")" vector-effect="non-scaling-stroke"
+                                 style="@(_objetivo is null ? "cursor:pointer;" : "pointer-events:none;")"
+                                 @onclick="@(() => SeleccionarAlmacen(a))" @onclick:stopPropagation="true" />
+                        @if (_mostrarEtiquetas)
+                        {
+                            @EtiquetaSvg(Poligono.Centro(pts), a.DES_ALMACEN, 16, "600",
+                                         bloqueado ? ColorBloqueado : ColorAlmacenTexto)
+                        }
+                    }
+
+                    @* Contenedores ubicados (los que no se están editando) *@
+                    @if (_mostrarContenedores)
+                    {
+                        foreach (var c in _contenedoresVisibles)
+                        {
+                            if (EsObjetivoContenedor(c.COD_CONTENEDOR)) continue;
+                            if (RectDe(c.COD_CONTENEDOR) is not RectanguloContenedor r) continue;
+                            @DibujoContenedorSvg(r, c, false)
+                        }
+                    }
+
+                    @* Figura en edición ── almacén: polígono libre *@
+                    @if (_objetivo is { EsContenedor: false } && _trazo.Count > 0)
+                    {
+                        @if (_trazo.Count >= 3)
+                        {
+                            <polygon points="@Poligono.ASvgPoints(_trazo, AnchoVb, AltoVb)"
+                                     fill="#0ea5e9" fill-opacity="0.25" stroke="#0284c7" stroke-width="3"
+                                     vector-effect="non-scaling-stroke" style="pointer-events:none;" />
+                        }
+                        else
+                        {
+                            <polyline points="@Poligono.ASvgPoints(_trazo, AnchoVb, AltoVb)"
+                                      fill="none" stroke="#0284c7" stroke-width="3"
+                                      vector-effect="non-scaling-stroke" style="pointer-events:none;" />
+                        }
+
+                        @* Los vértices son sólo visuales: el arrastre lo maneja el <svg>, que
+                           busca el vértice más cercano al puntero. Exigir el clic exacto sobre
+                           un círculo de 7px hacía que "Mover" casi nunca enganchara. *@
+                        @foreach (var (p, idx) in _trazo.Select((p, idx) => (p, idx)))
+                        {
+                            var activo = _verticeArrastrado == idx;
+                            <circle cx="@Inv(p.X * AnchoVb)" cy="@Inv(p.Y * AltoVb)"
+                                    r="@Inv(Fijo(activo ? 11 : 8))" fill="@(activo ? "#0284c7" : "#fff")"
+                                    stroke="#0284c7" stroke-width="3" vector-effect="non-scaling-stroke"
+                                    style="pointer-events:none;" />
+                        }
+
+                        @* El nombre también mientras se dibuja: con varios almacenes a medio
+                           definir, el rótulo del chip de arriba no alcanza para saber cuál es
+                           cuál sobre el plano. *@
+                        @if (_mostrarEtiquetas && _trazo.Count >= 3)
+                        {
+                            @EtiquetaSvg(Poligono.Centro(_trazo), NombreObjetivo, 16, "600", "#0369a1")
+                        }
+                    }
+
+                    @* Figura en edición ── contenedor: rectángulo con manijas *@
+                    @if (_objetivo is { EsContenedor: true } && _rectTrazo is RectanguloContenedor re)
+                    {
+                        var cEdit = _contenedores.FirstOrDefault(x => x.COD_CONTENEDOR == _objetivo.Codigo);
+                        @DibujoContenedorSvg(re, cEdit, true)
+                        @ManijasSvg(re)
+                    }
+
+                    @MedidasPlanoSvg()
+                    @EscalaSvg()
+                </svg>
+            }
+            </div>
+
+            <div class="d-flex align-center gap-4 pa-2 flex-wrap" style="border-top:1px solid var(--line);">
+                <MudText Class="mono" Style="opacity:.5;font-size:.75rem;">
+                    Piso @_zonaSel.NUM_NIVEL · @_zonaSel.VAL_ANCHO_METROS × @_zonaSel.VAL_LARGO_METROS m
+                    @if (HayEscala && _vista == Vista.Planta)
+                    {
+                        <text> · cuadrícula @($"{PasoMetros:0.##}") m · zoom @($"{_zoom * 100:0}%")</text>
+                    }
+                </MudText>
+                @if (!HayEscala)
+                {
+                    <MudText Class="mono" Color="Color.Warning" Style="font-size:.75rem;">
+                        Sin ancho/largo en metros el giro y las medidas de los contenedores no son reales.
+                    </MudText>
+                }
+            </div>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+}
+
+@code {
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    // ── Permisos del rol ──────────────────────────────────────────────────────
+    // Los botones de esta pantalla salen de la misma configuración que el resto del
+    // sistema (SEGURIDAD: botones por opción y rol), en vez de estar siempre visibles.
+    // Sin esto, quien pudiera abrir el Mapa de Piso podía crear y eliminar almacenes y
+    // contenedores aunque en Logística no tuviera esos botones.
+    private bool PuedeCrear     => MenuService.PuedeAsync(CodAplicacion, CodOpcionAplicacion, "POST");
+    private bool PuedeConsultar => MenuService.PuedeAsync(CodAplicacion, CodOpcionAplicacion, "GET");
+    private bool PuedeEliminar  => MenuService.PuedeAsync(CodAplicacion, CodOpcionAplicacion, "DELETE");
+
+    /// <summary>Dibujar, mover y guardar escriben DES_POLIGONO sobre un registro que ya
+    /// existe: son una modificación, no un alta. Por eso todo el trabajo de plano depende
+    /// del permiso de MODIFICAR y no de uno propio.</summary>
+    private bool PuedeModificar => MenuService.PuedeAsync(CodAplicacion, CodOpcionAplicacion, "PUT");
+
+    /// <summary>La opción no tiene ningún botón configurado para este rol. Se distingue de
+    /// "no tiene permiso" porque casi siempre significa que falta configurarla, y sin avisar
+    /// la pantalla parecería rota.</summary>
+    private bool SinBotonesConfigurados =>
+        !PuedeCrear && !PuedeModificar && !PuedeEliminar && !PuedeConsultar;
+
+    private enum Modo { Dibujar, Editar }
+    private enum Vista { Planta, Volumen }
+    /// <summary>Gesto activo sobre el rectángulo de un contenedor. Se decide en el
+    /// pointerdown según dónde cayó el puntero, no con un botón de modo: sobre un rectángulo
+    /// las tres acciones son inconfundibles por posición.</summary>
+    private enum Gesto { Ninguno, Colocando, Moviendo, Girando }
+
+    /// <summary>Figura en edición. <c>EsContenedor</c> decide todo el comportamiento: el
+    /// almacén es un polígono libre, el contenedor un rectángulo orientado.</summary>
+    private record Objetivo(string Codigo, bool EsContenedor, string Nombre);
+
+    private ElementReference _svg;
+
+    private List<ComboboxItem> _sucursales = new();
+    private List<ComboboxItem> _pisosCombo = new();
+    private string _codSucursal = "";
+    private string _codZonificacion = "";
+
+    private ZonificacionModel? _zonaSel;
+    private List<ZonificacionModel> _zonasSucursal = new();
+    private List<TipoZonificacionModel> _tiposZona = new();
+
+    private List<AlmacenesModel> _almacenes = new();
+    private AlmacenesModel? _almacenSel;
+    private List<ContenedorModel> _contenedores = new();
+
+    /// <summary>Al seleccionar un almacén el listado se acota a sus contenedores; sin
+    /// selección se ven los de todo el piso.</summary>
+    private List<ContenedorModel> _contenedoresVisibles => _almacenSel is null
+        ? _contenedores
+        : _contenedores.Where(c => c.COD_ALMACEN == _almacenSel.COD_ALMACEN).ToList();
+
+    private Objetivo? _objetivo;
+    private Modo _modo = Modo.Dibujar;
+    private Vista _vista = Vista.Planta;
+
+    private List<PuntoPoligono> _trazo = new();
+    private int? _verticeArrastrado;
+
+    private RectanguloContenedor? _rectTrazo;
+    private bool _redibujar;
+    private Gesto _gesto = Gesto.Ninguno;
+    private RectanguloContenedor _rectAlIniciarGesto;
+    private (double X, double Y) _origenPunteroM;
+
+    private bool _mostrarAlmacenes = true;
+    private bool _mostrarContenedores = true;
+    private bool _mostrarCasilleros = true;
+    private bool _mostrarEtiquetas = true;
+    private bool _mostrarMedidas;
+    /// <summary>Impide que un contenedor quede fuera del contorno de su almacén. Se puede
+    /// apagar: hay muebles que legítimamente sobresalen —un rack contra la pared medianera,
+    /// una plataforma que invade el pasillo— y el plano tiene que poder decirlo.</summary>
+    private bool _limitarAlAlmacen = true;
+    /// <summary>El último movimiento quedó frenado contra el límite del almacén. Sólo sirve
+    /// para pintar el aviso mientras se arrastra.</summary>
+    private bool _topeAlmacen;
+    /// <summary>Nombre del contenedor contra el que se frenó el movimiento, si fue por chocar
+    /// con otro mueble. Sólo sirve para el aviso mientras se arrastra.</summary>
+    private string? _topeContenedor;
+    private bool _cuadricula;
+    private bool _guardando;
+
+    // Geometría en memoria. Acá viven tanto lo que llegó de la BD como lo que se acaba de
+    // dibujar; los HashSet marcan qué cambió y todavía no se guardó.
+    private readonly Dictionary<string, List<PuntoPoligono>> _poligonosAlmacen = new();
+    private readonly Dictionary<string, RectanguloContenedor> _rectContenedor = new();
+    private readonly HashSet<string> _pendientesAlmacen = new();
+    private readonly HashSet<string> _pendientesContenedor = new();
+    private bool _hayCambios => _pendientesAlmacen.Count > 0 || _pendientesContenedor.Count > 0;
+
+    // El viewBox usa un ancho fijo y deriva el alto de las medidas reales del piso, así el
+    // plano no se deforma. Sin medidas se asume cuadrado.
+    private const double AnchoVb = 1000;
+    private double AltoVb =>
+        _zonaSel?.VAL_ANCHO_METROS is > 0 && _zonaSel?.VAL_LARGO_METROS is > 0
+            ? AnchoVb * _zonaSel.VAL_LARGO_METROS!.Value / _zonaSel.VAL_ANCHO_METROS!.Value
+            : AnchoVb;
+
+    private string PlanoSrc => _zonaSel?.IMG_PLANO is { Length: > 0 } img
+        ? $"data:image/png;base64,{Convert.ToBase64String(img)}" : "";
+
+    // Un color por tipo de figura. OJO con el nombre: no llamarlos "Color" a secas —
+    // chocaría con el enum Color de MudBlazor que se usa en este mismo archivo.
+    private const string ColorAlmacen        = "#2563eb";
+    private const string ColorAlmacenTexto   = "#1e3a8a";
+    private const string ColorContenedor     = "#c2751a";
+    private const string ColorContenedorAlto = "#e0a45c";
+    private const string ColorContenedorLado = "#8a5211";
+    private const string ColorCasillero      = "#16a34a";
+    /// <summary>Gris de "acá no se trabaja ahora": los almacenes que no son el elegido.</summary>
+    private const string ColorBloqueado      = "#94a3b8";
+
+    /// <summary>En la vista de distribución cada almacén tiña sus contenedores con un color
+    /// propio: con todo el piso a la vista, el ámbar único no dejaría ver de quién es cada
+    /// mueble, que es justamente lo que esa vista viene a responder.
+    /// Cada entrada es (cara frontal, tapa, cara lateral) para que el volumen conserve el
+    /// mismo sombreado que ya tenía.</summary>
+    private static readonly (string Cara, string Alto, string Lado)[] PaletaAlmacen =
+    {
+        ("#c2751a", "#e0a45c", "#8a5211"),   // ámbar
+        ("#2f6f72", "#5aa0a3", "#1d4b4d"),   // verde azulado
+        ("#7c4dad", "#a884cf", "#553277"),   // violeta
+        ("#b03a5b", "#d97a94", "#7a2440"),   // granate
+        ("#4a7a2b", "#7fae5c", "#2f5219"),   // oliva
+        ("#2b5f9e", "#6a97cc", "#1a3d69")    // azul
+    };
+
+    /// <summary>Sin almacén elegido se está mirando el piso entero: ésa es la vista de
+    /// distribución. Elegir un almacén es entrar a trabajar en él.</summary>
+    private bool EsDistribucion => _almacenSel is null;
+
+    private (string Cara, string Alto, string Lado) ColoresDe(string? codAlmacen)
+    {
+        if (!EsDistribucion || string.IsNullOrWhiteSpace(codAlmacen))
+            return (ColorContenedor, ColorContenedorAlto, ColorContenedorLado);
+        var i = _almacenes.FindIndex(a => a.COD_ALMACEN == codAlmacen);
+        return PaletaAlmacen[(i < 0 ? 0 : i) % PaletaAlmacen.Length];
+    }
+
+    private string CursorPlano => _vista == Vista.Volumen ? "default"
+        : _objetivo is null ? "default"
+        : _objetivo.EsContenedor ? (_redibujar ? "crosshair" : _gesto == Gesto.Ninguno ? "grab" : "grabbing")
+        : _modo == Modo.Dibujar ? "crosshair"
+        : _verticeArrastrado is not null ? "grabbing" : "grab";
+
+    // ── Escala real del piso ──────────────────────────────────────────────────
+    private int AnchoMetros => _zonaSel?.VAL_ANCHO_METROS ?? 0;
+    private int LargoMetros => _zonaSel?.VAL_LARGO_METROS ?? 0;
+    private bool HayEscala => AnchoMetros > 0 && LargoMetros > 0;
+
+    /// <summary>Metraje con el que se hacen las cuentas. Sin metraje registrado se asume un
+    /// piso de 100 × 100: la geometría sigue siendo coherente (el rectángulo gira sin
+    /// deformarse) aunque las medidas en metros no signifiquen nada real.</summary>
+    private double AnchoM => HayEscala ? AnchoMetros : 100;
+    private double LargoM => HayEscala ? LargoMetros : 100;
+
+    private (double X, double Y) AMetros(PuntoPoligono p) => (p.X * AnchoM, p.Y * LargoM);
+    private PuntoPoligono ANormal(double xm, double ym) => new(xm / AnchoM, ym / LargoM);
+    private (double X, double Y) AVb(double xm, double ym) => (xm / AnchoM * AnchoVb, ym / LargoM * AltoVb);
+
+    private static string Inv(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    // ── Zoom ──────────────────────────────────────────────────────────────────
+    // El zoom NO toca el viewBox: agranda el ancho renderizado del <svg> dentro de un
+    // contenedor con scroll. Así getScreenCTM() sigue devolviendo la conversión correcta
+    // sin cálculos extra, y las coordenadas normalizadas no cambian de significado.
+    private double _zoom = 1;
+    private const double ZoomMin = 0.5, ZoomMax = 8;
+
+    private void Zoom(double factor) => _zoom = Math.Clamp(Math.Round(_zoom * factor, 2), ZoomMin, ZoomMax);
+    private void ZoomReset() => _zoom = 1;
+
+    /// <summary>Ángulo de cámara en la vista de volumen, 0–360°. Sólo afecta cómo se mira:
+    /// no toca ninguna coordenada guardada.</summary>
+    private double _giro;
+
+    /// <summary>Gira la cámara y la deja siempre dentro de 0–360, para que el rótulo no
+    /// muestre ángulos negativos ni acumule vueltas.</summary>
+    private void Girar(double grados) => _giro = ((_giro + grados) % 360 + 360) % 360;
+
+    private const double ElevacionMin = 10;
+
+    private void Elevar(double grados) => _elevacion = Math.Clamp(_elevacion + grados, ElevacionMin, 90);
+
+    private void RestablecerCamara() { _giro = 0; _elevacion = 30; }
+
+    /// <summary>Altura de la cámara sobre el horizonte, en grados. 30° es la isometría
+    /// clásica; 90° mira desde arriba. No baja de 10°: por debajo el piso se aplasta hasta
+    /// ser una línea y no queda nada que ubicar.</summary>
+    private double _elevacion = 30;
+
+    /// <summary>Medidas del viewBox que deben verse SIEMPRE del mismo tamaño en pantalla
+    /// (radios de manijas, tipografías): se dividen por el zoom para compensar el escalado.</summary>
+    private double Fijo(double v) => v / _zoom;
+
+    private void CambiarVista(Vista v)
+    {
+        // Salir a volumen con una figura a medio dibujar dejaría un trazo colgado que
+        // reaparece al volver, sin que nada en pantalla lo explique.
+        if (v == Vista.Volumen) LimpiarEdicion();
+        // El enfoque es de la vista de volumen: arrastrarlo a planta dejaría una selección
+        // invisible que reaparece sin motivo al volver.
+        if (v == Vista.Planta) _enfocado = null;
+        _vista = v;
+    }
+
+    // ── Consultas de geometría ────────────────────────────────────────────────
+    private bool EsObjetivoAlmacen(string cod)
+        => _objetivo is { EsContenedor: false } o && o.Codigo == cod;
+    private bool EsObjetivoContenedor(string cod)
+        => _objetivo is { EsContenedor: true } o && o.Codigo == cod;
+
+    private List<PuntoPoligono> PuntosDe(string codAlmacen)
+        => _poligonosAlmacen.GetValueOrDefault(codAlmacen) ?? new();
+    private bool TienePoligono(string codAlmacen) => PuntosDe(codAlmacen).Count >= 3;
+
+    /// <summary>Nombre de la figura en edición, sin el código: es lo que se rotula sobre el
+    /// plano, donde el código ya se ve en el panel y en el chip de la barra.</summary>
+    private string NombreObjetivo
+    {
+        get
+        {
+            if (_objetivo is not { } o) return "";
+            return o.EsContenedor
+                ? _contenedores.FirstOrDefault(c => c.COD_CONTENEDOR == o.Codigo)?.DES_CONTENDOR ?? o.Codigo
+                : _almacenes.FirstOrDefault(a => a.COD_ALMACEN == o.Codigo)?.DES_ALMACEN ?? o.Codigo;
+        }
+    }
+
+    /// <summary>Medidas del mueble derivadas de sus propios datos: el largo es
+    /// COLUMNAS × LARGO DE NIVEL y el fondo es la PROFUNDIDAD DE NIVEL. No se dibujan a ojo
+    /// porque son medidas reales del rack, no una decisión del que ubica.
+    /// Devuelve null si falta alguno de los tres datos: en ese caso no hay medida que imponer.</summary>
+    private static (double Largo, double Fondo)? MedidasM(ContenedorModel? c)
+    {
+        if (c is null) return null;
+        var columnas = c.NUM_COLUMNAS ?? 0;
+        var largoCm = c.VAL_LARGO_NIVEL_CENTIMETROS ?? 0;
+        var profCm = c.VAL_PROFUNDIDAD_NIVEL_CENTIMETROS ?? 0;
+        if (columnas <= 0 || largoCm <= 0 || profCm <= 0) return null;
+        return (columnas * largoCm / 100d, profCm / 100d);
+    }
+
+    /// <summary>¿El contenedor entra completo dentro del contorno de su almacén?
+    ///
+    /// Se compara en coordenadas normalizadas, que es donde vive el polígono del almacén.
+    /// Si el almacén todavía no está dibujado no hay límite contra el cual comparar, así que
+    /// se deja pasar: bloquear contra un contorno inexistente impediría trabajar en un piso
+    /// recién empezado.</summary>
+    private bool CabeEnAlmacen(RectanguloContenedor r, string? codAlmacen)
+    {
+        if (!_limitarAlAlmacen || string.IsNullOrWhiteSpace(codAlmacen)) return true;
+
+        // Con un almacén elegido, nada puede salirse de él aunque el contenedor pertenezca a
+        // otro: es el almacén sobre el que se está trabajando y los demás están bloqueados.
+        if (AlmacenBloqueado(codAlmacen)) return false;
+
+        var contorno = PuntosDe(codAlmacen);
+        if (contorno.Count < 3) return true;
+
+        var figura = r.VerticesM().Select(v => ANormal(v.X, v.Y)).ToList();
+        return Poligono.ContieneFigura(contorno, figura);
+    }
+
+    /// <summary>Un almacén está bloqueado cuando hay OTRO elegido. Trabajar en un almacén
+    /// es trabajar dentro de sus límites: mientras dure, el resto del piso no acepta nada.
+    /// Sin almacén elegido no hay ninguno bloqueado.</summary>
+    private bool AlmacenBloqueado(string? codAlmacen)
+        => _almacenSel is not null && codAlmacen != _almacenSel.COD_ALMACEN;
+
+    /// <summary>Margen en metros con el que se encogen los muebles antes de compararlos:
+    /// dos racks pegados espalda con espalda comparten la pared, y sin este margen el
+    /// redondeo de las coordenadas leería ese contacto como una superposición.</summary>
+    private const double MargenContacto = 0.02;   // 2 cm
+
+    /// <summary>El primer contenedor con el que este rectángulo se pisa, o null si está
+    /// libre. Se compara contra TODO el piso y no sólo contra el mismo almacén: dos muebles
+    /// de almacenes distintos tampoco pueden ocupar el mismo metro cuadrado.</summary>
+    private ContenedorModel? ContenedorQueSePisa(RectanguloContenedor r, string codPropio)
+    {
+        var figura = r.Encogido(MargenContacto).VerticesM()
+                      .Select(v => ANormal(v.X, v.Y)).ToList();
+
+        foreach (var otro in _contenedores)
+        {
+            if (otro.COD_CONTENEDOR == codPropio) continue;
+            if (RectDe(otro.COD_CONTENEDOR) is not RectanguloContenedor ro) continue;
+
+            var figuraOtro = ro.Encogido(MargenContacto).VerticesM()
+                               .Select(v => ANormal(v.X, v.Y)).ToList();
+            if (Poligono.SeSuperponen(figura, figuraOtro)) return otro;
+        }
+        return null;
+    }
+
+    private bool EstaLibre(RectanguloContenedor r, string codPropio)
+        => ContenedorQueSePisa(r, codPropio) is null;
+
+    /// <summary>Almacén del contenedor que se está editando.</summary>
+    private string? AlmacenDelObjetivo => _objetivo is { EsContenedor: true } o
+        ? _contenedores.FirstOrDefault(c => c.COD_CONTENEDOR == o.Codigo)?.COD_ALMACEN
+        : null;
+
+    private RectanguloContenedor? RectDe(string codContenedor)
+        => _rectContenedor.TryGetValue(codContenedor, out var r) ? r : null;
+    private bool TieneRect(string codContenedor) => _rectContenedor.ContainsKey(codContenedor);
+
+    private string AreaTextoAlmacen(string codAlmacen)
+    {
+        var area = Poligono.AreaM2(PuntosDe(codAlmacen), _zonaSel?.VAL_ANCHO_METROS, _zonaSel?.VAL_LARGO_METROS);
+        return area > 0 ? $"{area:N1} m²" : "dibujado";
+    }
+
+    private string MedidaTexto(string codContenedor)
+        => RectDe(codContenedor) is RectanguloContenedor r ? $"{r.Ancho:0.##} × {r.Fondo:0.##} m" : "";
+
+    /// <summary>Altura total del mueble: filas × alto de nivel. Sale de datos que ya están
+    /// cargados en el contenedor, no hay ningún campo nuevo.</summary>
+    private static double AlturaM(ContenedorModel? c)
+    {
+        if (c is null) return 0;
+        var filas = Math.Max(c.NUM_FILAS ?? 0, 1);
+        var altoCm = c.VAL_ALTO_NIVEL_CENTIMETROS ?? 0;
+        return altoCm > 0 ? filas * altoCm / 100d : 0;
+    }
+
+    // ── Dibujo de un contenedor en planta ─────────────────────────────────────
+    /// <summary>Rectángulo del contenedor con sus divisiones de columna. Va como MarkupString
+    /// en un solo nodo: son muchos elementos chicos y ninguno necesita eventos propios.</summary>
+    private MarkupString DibujoContenedorSvg(RectanguloContenedor r, ContenedorModel? c, bool editando)
+    {
+        var sb = new System.Text.StringBuilder();
+        var pts = string.Join(" ", r.VerticesM().Select(v => { var q = AVb(v.X, v.Y); return $"{Inv(q.X)},{Inv(q.Y)}"; }));
+        var paleta = ColoresDe(c?.COD_ALMACEN);
+        var enConflicto = c is not null && _conflictivos.Contains(c.COD_CONTENEDOR);
+        var borde = editando
+            ? (_topeAlmacen || _topeContenedor is not null ? "#dc2626" : "#0284c7")
+            : enConflicto ? "#dc2626" : paleta.Lado;
+
+        sb.Append($"<polygon points=\"{pts}\" fill=\"{paleta.Cara}\" fill-opacity=\"{(editando ? "0.45" : "0.3")}\"" +
+                  $" stroke=\"{borde}\" stroke-width=\"{(editando ? 4 : enConflicto ? 4 : 3)}\"" +
+                  $" stroke-dasharray=\"{(enConflicto && !editando ? "7 4" : "")}\"" +
+                  $" vector-effect=\"non-scaling-stroke\" style=\"pointer-events:none;\" />");
+
+        // Las divisiones de columna son lo que hace que un rack se lea como rack. Las filas
+        // no se ven en planta: se apilan en altura sobre la misma huella.
+        var columnas = Math.Max(c?.NUM_COLUMNAS ?? 0, 0);
+        if (_mostrarCasilleros && columnas > 1)
+        {
+            var (ux, uy) = r.EjeColumnas;
+            var (vx, vy) = r.EjeFondo;
+            for (var k = 1; k < columnas; k++)
+            {
+                var d = r.Ancho * k / columnas;
+                var a = AVb(r.X + ux * d, r.Y + uy * d);
+                var b = AVb(r.X + ux * d + vx * r.Fondo, r.Y + uy * d + vy * r.Fondo);
+                sb.Append($"<line x1=\"{Inv(a.X)}\" y1=\"{Inv(a.Y)}\" x2=\"{Inv(b.X)}\" y2=\"{Inv(b.Y)}\"" +
+                          $" stroke=\"{ColorCasillero}\" stroke-width=\"1.5\" stroke-opacity=\".85\"" +
+                          $" vector-effect=\"non-scaling-stroke\" style=\"pointer-events:none;\" />");
+            }
+        }
+
+        // Número de columna sobre cada franja. En planta las filas no se ven —se apilan en
+        // altura sobre la misma huella—, así que rotular la columna es todo lo que se puede
+        // decir sin mentir sobre la posición.
+        if (_mostrarCasilleros && _mostrarEtiquetas && columnas > 0)
+        {
+            var anchoCeldaVb = r.Ancho / columnas / AnchoM * AnchoVb;
+            var tam = Math.Min(Fijo(11), anchoCeldaVb * 0.5);
+            if (tam >= Fijo(4))
+            {
+                var (ux, uy) = r.EjeColumnas;
+                var (vx, vy) = r.EjeFondo;
+                for (var k = 1; k <= columnas; k++)
+                {
+                    var d = r.Ancho * (k - 0.5) / columnas;
+                    var q = AVb(r.X + ux * d + vx * r.Fondo / 2, r.Y + uy * d + vy * r.Fondo / 2);
+                    sb.Append($"<text x=\"{Inv(q.X)}\" y=\"{Inv(q.Y + tam * 0.35)}\" text-anchor=\"middle\"" +
+                              $" font-size=\"{Inv(tam)}\" font-family=\"monospace\" fill=\"#14532d\"" +
+                              $" stroke=\"#fff\" stroke-width=\"{Inv(tam * 0.3)}\" paint-order=\"stroke\"" +
+                              $" style=\"pointer-events:none;\">C{k}</text>");
+                }
+            }
+        }
+
+        // Marca de la esquina fila 1 · columna 1: es la convención de la que dependen la
+        // numeración de los casilleros y el lado de acceso. Verla evita numerar al revés.
+        var o = AVb(r.X, r.Y);
+        sb.Append($"<circle cx=\"{Inv(o.X)}\" cy=\"{Inv(o.Y)}\" r=\"{Inv(Fijo(5))}\" fill=\"{ColorCasillero}\"" +
+                  $" stroke=\"#fff\" stroke-width=\"2\" vector-effect=\"non-scaling-stroke\" style=\"pointer-events:none;\" />");
+
+        if (_mostrarEtiquetas && c is not null)
+        {
+            var ce = r.Centro;
+            var q = AVb(ce.X, ce.Y);
+            var t = System.Net.WebUtility.HtmlEncode(c.DES_CONTENDOR ?? c.COD_CONTENEDOR);
+            sb.Append($"<text x=\"{Inv(q.X)}\" y=\"{Inv(q.Y)}\" text-anchor=\"middle\" font-size=\"{Inv(Fijo(13))}\"" +
+                      $" font-weight=\"600\" fill=\"#5b3407\" stroke=\"#fff\" stroke-width=\"{Inv(Fijo(3))}\"" +
+                      $" paint-order=\"stroke\" style=\"pointer-events:none;\">{t}</text>");
+        }
+
+        // Cotas del mueble. El largo va sobre el lado largo y el ancho sobre el corto, cada
+        // uno junto al lado que mide: una cota lejos del lado que describe se lee mal.
+        // El alto no tiene lado propio en planta, así que va al centro.
+        if (_mostrarMedidas)
+        {
+            var (ux, uy) = r.EjeColumnas;
+            var (vx, vy) = r.EjeFondo;
+            var sep = Math.Max(r.Fondo, 0.6) * 0.55;   // separación de la cota respecto del borde
+            var tam = Fijo(11);
+
+            var mLargo = (X: r.X + ux * r.Ancho / 2 - vx * sep, Y: r.Y + uy * r.Ancho / 2 - vy * sep);
+            sb.Append(CotaSvg(mLargo, $"L {r.Ancho:0.##} m", tam));
+
+            var mAncho = (X: r.X + ux * r.Ancho + vx * r.Fondo / 2 + ux * sep,
+                          Y: r.Y + uy * r.Ancho + vy * r.Fondo / 2 + uy * sep);
+            sb.Append(CotaSvg(mAncho, $"A {r.Fondo:0.##} m", tam));
+
+            var alto = AlturaM(c);
+            if (alto > 0)
+            {
+                var ce2 = r.Centro;
+                var q2 = AVb(ce2.X, ce2.Y);
+                sb.Append($"<text x=\"{Inv(q2.X)}\" y=\"{Inv(q2.Y + Fijo(14))}\" text-anchor=\"middle\"" +
+                          $" font-size=\"{Inv(tam)}\" font-family=\"monospace\" fill=\"#075985\" stroke=\"#fff\"" +
+                          $" stroke-width=\"{Inv(Fijo(3))}\" paint-order=\"stroke\" style=\"pointer-events:none;\">H {alto:0.##} m</text>");
+            }
+        }
+        return new MarkupString(sb.ToString());
+    }
+
+    /// <summary>Una cota suelta en el plano, ubicada por coordenadas en METROS. El halo blanco
+    /// la deja legible tanto sobre el mueble como sobre la imagen del plano.</summary>
+    private string CotaSvg((double X, double Y) posM, string texto, double tam)
+    {
+        var q = AVb(posM.X, posM.Y);
+        return $"<text x=\"{Inv(q.X)}\" y=\"{Inv(q.Y)}\" text-anchor=\"middle\" font-size=\"{Inv(tam)}\"" +
+               $" font-family=\"monospace\" fill=\"#075985\" stroke=\"#fff\" stroke-width=\"{Inv(tam * 0.3)}\"" +
+               $" paint-order=\"stroke\" style=\"pointer-events:none;\">{System.Net.WebUtility.HtmlEncode(texto)}</text>";
+    }
+
+    /// <summary>Medidas del piso en vista de planta: ancho arriba y largo a la izquierda, cada
+    /// uno junto al borde que mide. Sin metraje registrado no se dibuja nada — mostrar los
+    /// 100 × 100 supuestos sería inventar un dato que nadie cargó.</summary>
+    private MarkupString MedidasPlanoSvg()
+    {
+        if (!_mostrarMedidas || !HayEscala) return new MarkupString("");
+        var tam = Fijo(13);
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<text x=\"{Inv(AnchoVb / 2)}\" y=\"{Inv(Fijo(18))}\" text-anchor=\"middle\" font-size=\"{Inv(tam)}\"" +
+                  $" font-family=\"monospace\" font-weight=\"600\" fill=\"#075985\" stroke=\"#fff\"" +
+                  $" stroke-width=\"{Inv(tam * 0.3)}\" paint-order=\"stroke\" style=\"pointer-events:none;\">A {AnchoMetros} m</text>");
+        sb.Append($"<text x=\"{Inv(Fijo(34))}\" y=\"{Inv(AltoVb / 2)}\" text-anchor=\"middle\" font-size=\"{Inv(tam)}\"" +
+                  $" font-family=\"monospace\" font-weight=\"600\" fill=\"#075985\" stroke=\"#fff\"" +
+                  $" stroke-width=\"{Inv(tam * 0.3)}\" paint-order=\"stroke\" style=\"pointer-events:none;\">L {LargoMetros} m</text>");
+        return new MarkupString(sb.ToString());
+    }
+
+    /// <summary>Manija de giro del rectángulo en edición, más las marcas de sus esquinas.
+    /// Las esquinas son sólo referencia visual: la medida del mueble sale de sus datos, no
+    /// se estira sobre el plano, así que no hay nada que agarrar ahí.</summary>
+    private MarkupString ManijasSvg(RectanguloContenedor r)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var v in r.VerticesM())
+        {
+            var q = AVb(v.X, v.Y);
+            sb.Append($"<circle cx=\"{Inv(q.X)}\" cy=\"{Inv(q.Y)}\" r=\"{Inv(Fijo(4))}\" fill=\"#fff\"" +
+                      $" stroke=\"#0284c7\" stroke-width=\"2\" vector-effect=\"non-scaling-stroke\"" +
+                      $" style=\"pointer-events:none;\" />");
+        }
+
+        var (mx, my) = ManijaGiroM(r);
+        var ce = r.Centro;
+        var qc = AVb(ce.X, ce.Y);
+        var qm = AVb(mx, my);
+        sb.Append($"<line x1=\"{Inv(qc.X)}\" y1=\"{Inv(qc.Y)}\" x2=\"{Inv(qm.X)}\" y2=\"{Inv(qm.Y)}\"" +
+                  $" stroke=\"#0284c7\" stroke-width=\"2\" stroke-dasharray=\"4 3\"" +
+                  $" vector-effect=\"non-scaling-stroke\" style=\"pointer-events:none;\" />");
+        sb.Append($"<circle cx=\"{Inv(qm.X)}\" cy=\"{Inv(qm.Y)}\" r=\"{Inv(Fijo(9))}\"" +
+                  $" fill=\"{(_gesto == Gesto.Girando ? "#0284c7" : "#fff")}\" stroke=\"#0284c7\" stroke-width=\"3\"" +
+                  $" vector-effect=\"non-scaling-stroke\" style=\"pointer-events:none;\" />");
+        return new MarkupString(sb.ToString());
+    }
+
+    /// <summary>Posición de la manija de giro, en metros: delante del rectángulo, sobre el
+    /// eje del fondo, a una distancia proporcional para que no se confunda con las esquinas.</summary>
+    private (double X, double Y) ManijaGiroM(RectanguloContenedor r)
+    {
+        var (vx, vy) = r.EjeFondo;
+        var ce = r.Centro;
+        var d = r.Fondo / 2 + Math.Max(r.Fondo, r.Ancho) * 0.25 + 0.4;
+        return (ce.X - vx * d, ce.Y - vy * d);
+    }
+
+    // ── Vista en volumen (proyección isométrica) ──────────────────────────────
+    /// <summary>Vista 2,5D del piso. Se proyecta con isometría clásica y se pinta de atrás
+    /// hacia adelante (algoritmo del pintor), que es todo lo que hace falta para que un rack
+    /// se lea como rack. WebGL quedaría para el día que se quiera girar la cámara: hoy no
+    /// aporta lo suficiente para justificar el peso de una librería 3D.
+    ///
+    /// Es de sólo lectura a propósito: en perspectiva un clic no cae donde uno cree.</summary>
+    /// <summary>Cámara de la vista de volumen: giro alrededor del piso, elevación sobre él y
+    /// el encuadre que hace entrar todo en pantalla en cualquier ángulo.
+    ///
+    /// Se arma una vez y la usan tanto el dibujo como la capa de clics: si cada uno hiciera
+    /// su propia cuenta, bastaría un cambio en una para que el clic dejara de caer donde se
+    /// ve la figura.</summary>
+    private sealed class CamaraVolumen
+    {
+        public double AnchoVista { get; init; }
+        public double AltoVista { get; init; }
+        private double _cosT, _senT, _senFi, _cosFi, _ejeX, _ejeY, _escala, _cx, _cy;
+
+        public static CamaraVolumen Armar(double giroGrados, double elevacionGrados,
+                                          double anchoM, double largoM, double alturaMax)
+        {
+            const double W = 1400, H = 900;
+            var th = giroGrados * Math.PI / 180;
+            var fi = elevacionGrados * Math.PI / 180;
+
+            var c = new CamaraVolumen
+            {
+                AnchoVista = W,
+                AltoVista = H,
+                _cosT = Math.Cos(th),
+                _senT = Math.Sin(th),
+                _senFi = Math.Sin(fi),
+                _cosFi = Math.Cos(fi),
+                _ejeX = anchoM / 2,
+                _ejeY = largoM / 2,
+                _escala = 1,
+                _cx = 0,
+                _cy = 0
+            };
+
+            // Encuadre a partir de las ocho esquinas del volumen que ocupa el piso: así el
+            // modelo entra completo en cualquier ángulo, sin saltos al girar ni al elevar.
+            var caja = new List<(double X, double Y)>();
+            foreach (var (px, py) in new[] { (0d, 0d), (anchoM, 0d), (anchoM, largoM), (0d, largoM) })
+            {
+                caja.Add(c.Iso(px, py, 0));
+                caja.Add(c.Iso(px, py, Math.Max(alturaMax, 0.5)));
+            }
+            var minX = caja.Min(p => p.X); var maxX = caja.Max(p => p.X);
+            var minY = caja.Min(p => p.Y); var maxY = caja.Max(p => p.Y);
+
+            c._escala = Math.Min((W - 120) / Math.Max(maxX - minX, 0.001),
+                                 (H - 140) / Math.Max(maxY - minY, 0.001));
+            c._cx = 60 - minX * c._escala;
+            c._cy = 70 - minY * c._escala;
+            return c;
+        }
+
+        /// <summary>El mundo gira sobre el centro del piso ANTES de proyectarse. Girar el
+        /// mundo y no la cámara mantiene intactos el orden de pintado y el descarte de caras
+        /// ocultas, que trabajan sobre las coordenadas ya giradas.</summary>
+        public (double X, double Y) Girar(double x, double y)
+        {
+            var dx = x - _ejeX;
+            var dy = y - _ejeY;
+            return (_ejeX + dx * _cosT - dy * _senT, _ejeY + dx * _senT + dy * _cosT);
+        }
+
+        /// <summary>Proyección axonométrica sin escalar ni centrar. Con elevación 30° da
+        /// exactamente la isometría de siempre.</summary>
+        private (double X, double Y) Iso(double x, double y, double z)
+        {
+            var (rx, ry) = Girar(x, y);
+            return ((rx - ry) * 0.866, (rx + ry) * _senFi - z * _cosFi);
+        }
+
+        public (double X, double Y) Pr(double x, double y, double z = 0)
+        {
+            var p = Iso(x, y, z);
+            return (p.X * _escala + _cx, p.Y * _escala + _cy);
+        }
+
+        /// <summary>Cercanía a la cámara: el valor CRECE hacia el observador. Es el criterio
+        /// del algoritmo del pintor —se pinta de menor a mayor, o sea de lejos a cerca— y
+        /// también el orden en que se recorren los racks en profundidad.</summary>
+        public double Profundidad(double x, double y)
+        {
+            var (gx, gy) = Girar(x, y);
+            return gx + gy;
+        }
+
+        public double Escala => _escala;
+    }
+
+    /// <summary>Rack enfocado en la vista de volumen. Sólo afecta cómo se mira: no cambia
+    /// ningún dato ni permite editar desde ahí.</summary>
+    private string? _enfocado;
+
+    /// <summary>Contenedores ubicados, ordenados de LEJANO a CERCANO según la cámara actual.
+    /// Es el orden del algoritmo del pintor —lo cercano se pinta último y tapa a lo de
+    /// atrás— y, además, el orden en que se recorren los racks en profundidad.</summary>
+    private List<(ContenedorModel Cont, RectanguloContenedor Rect)> ContenedoresPorProfundidad(CamaraVolumen cam)
+        => _contenedoresVisibles
+            .Select(c => (Cont: c, Rect: RectDe(c.COD_CONTENEDOR)))
+            .Where(t => t.Rect is not null)
+            .Select(t => (t.Cont, Rect: t.Rect!.Value))
+            .OrderBy(t => cam.Profundidad(t.Rect.Centro.X, t.Rect.Centro.Y))
+            .ToList();
+
+    /// <summary>Siluetas clicables, en el mismo orden de pintado: el más cercano queda
+    /// arriba y se lleva el clic, que es lo que uno espera al tocar donde ve el mueble.</summary>
+    private List<(string Cod, string Nombre, string Puntos)> SiluetasVolumen()
+    {
+        var alturaMax = _contenedoresVisibles.Select(AlturaM).DefaultIfEmpty(0).Max();
+        var cam = CamaraVolumen.Armar(_giro, _elevacion, AnchoM, LargoM, alturaMax);
+
+        var lista = new List<(string, string, string)>();
+        foreach (var (c, r) in ContenedoresPorProfundidad(cam))
+        {
+            var h = AlturaM(c);
+            var proyectados = new List<(double X, double Y)>();
+            foreach (var v in r.VerticesM())
+            {
+                proyectados.Add(cam.Pr(v.X, v.Y));
+                proyectados.Add(cam.Pr(v.X, v.Y, h));
+            }
+            // La silueta es la envolvente de las ocho esquinas: el contorno de lo que se ve,
+            // sin tener que rearmar cara por cara sólo para detectar el clic.
+            var contorno = EnvolventeConvexa(proyectados);
+            if (contorno.Count < 3) continue;
+            lista.Add((c.COD_CONTENEDOR, c.DES_CONTENDOR ?? c.COD_CONTENEDOR,
+                       string.Join(" ", contorno.Select(q => $"{Inv(q.X)},{Inv(q.Y)}"))));
+        }
+        return lista;
+    }
+
+    /// <summary>Envolvente convexa (monotone chain). Alcanza y sobra para una caja: sus ocho
+    /// esquinas proyectadas siempre forman una figura convexa.</summary>
+    private static List<(double X, double Y)> EnvolventeConvexa(List<(double X, double Y)> puntos)
+    {
+        if (puntos.Count < 3) return puntos;
+        var orden = puntos.OrderBy(p => p.X).ThenBy(p => p.Y).ToList();
+
+        static double Cruz((double X, double Y) o, (double X, double Y) a, (double X, double Y) b)
+            => (a.X - o.X) * (b.Y - o.Y) - (a.Y - o.Y) * (b.X - o.X);
+
+        var abajo = new List<(double X, double Y)>();
+        foreach (var p in orden)
+        {
+            while (abajo.Count >= 2 && Cruz(abajo[^2], abajo[^1], p) <= 0) abajo.RemoveAt(abajo.Count - 1);
+            abajo.Add(p);
+        }
+        var arriba = new List<(double X, double Y)>();
+        for (var i = orden.Count - 1; i >= 0; i--)
+        {
+            var p = orden[i];
+            while (arriba.Count >= 2 && Cruz(arriba[^2], arriba[^1], p) <= 0) arriba.RemoveAt(arriba.Count - 1);
+            arriba.Add(p);
+        }
+        abajo.RemoveAt(abajo.Count - 1);
+        arriba.RemoveAt(arriba.Count - 1);
+        abajo.AddRange(arriba);
+        return abajo;
+    }
+
+    /// <summary>Pasa al rack de atrás (+1) o al de adelante (-1) siguiendo la profundidad.
+    /// Sin nada enfocado arranca por el más cercano, que es el que tapa a los demás.</summary>
+    private void RecorrerProfundidad(int paso)
+    {
+        var alturaMax = _contenedoresVisibles.Select(AlturaM).DefaultIfEmpty(0).Max();
+        var cam = CamaraVolumen.Armar(_giro, _elevacion, AnchoM, LargoM, alturaMax);
+        var orden = ContenedoresPorProfundidad(cam);
+        if (orden.Count == 0) return;
+
+        var i = orden.FindIndex(t => t.Cont.COD_CONTENEDOR == _enfocado);
+        // El orden va de lejano a cercano, así que "ir hacia atrás" es retroceder en la lista.
+        i = i < 0 ? orden.Count - 1 : Math.Clamp(i - paso, 0, orden.Count - 1);
+        _enfocado = orden[i].Cont.COD_CONTENEDOR;
+    }
+
+    private string NombreEnfocado => _contenedores
+        .FirstOrDefault(c => c.COD_CONTENEDOR == _enfocado)?.DES_CONTENDOR ?? "";
+
+    private MarkupString VolumenSvg()
+    {
+        var alturaMax = _contenedoresVisibles.Select(AlturaM).DefaultIfEmpty(0).Max();
+        var cam = CamaraVolumen.Armar(_giro, _elevacion, AnchoM, LargoM, alturaMax);
+        var W = cam.AnchoVista;
+        var H = cam.AltoVista;
+        var s = cam.Escala;
+
+        (double X, double Y) Pr(double x, double y, double z = 0) => cam.Pr(x, y, z);
+        (double X, double Y) G(double x, double y) => cam.Girar(x, y);
+
+        string Pol(IEnumerable<(double X, double Y)> pts, string fill, string op, string stroke, double sw)
+            => $"<polygon points=\"{string.Join(" ", pts.Select(p => $"{Inv(p.X)},{Inv(p.Y)}"))}\"" +
+               $" fill=\"{fill}\" fill-opacity=\"{op}\" stroke=\"{stroke}\" stroke-width=\"{Inv(sw)}\" />";
+
+        var sb = new System.Text.StringBuilder();
+
+        // Losa del piso: da el suelo sobre el que se apoya todo lo demás.
+        sb.Append(Pol(new[] { Pr(0, 0), Pr(AnchoM, 0), Pr(AnchoM, LargoM), Pr(0, LargoM) },
+                      "#94a3b8", "0.18", "#64748b", 1.5));
+        if (HayEscala)
+        {
+            var paso = Math.Max(PasoMetros * CadaCuantasMayor, 1);
+            for (var x = 0d; x <= AnchoM + 0.001; x += paso)
+            {
+                var a = Pr(x, 0); var b = Pr(x, LargoM);
+                sb.Append($"<line x1=\"{Inv(a.X)}\" y1=\"{Inv(a.Y)}\" x2=\"{Inv(b.X)}\" y2=\"{Inv(b.Y)}\" stroke=\"#64748b\" stroke-opacity=\".3\" stroke-width=\"1\" />");
+            }
+            for (var y = 0d; y <= LargoM + 0.001; y += paso)
+            {
+                var a = Pr(0, y); var b = Pr(AnchoM, y);
+                sb.Append($"<line x1=\"{Inv(a.X)}\" y1=\"{Inv(a.Y)}\" x2=\"{Inv(b.X)}\" y2=\"{Inv(b.Y)}\" stroke=\"#64748b\" stroke-opacity=\".3\" stroke-width=\"1\" />");
+            }
+        }
+
+        // Medidas del piso, apoyadas sobre los dos bordes de la losa que las representan.
+        if (_mostrarMedidas && HayEscala)
+        {
+            string Cota((double X, double Y) q, string txt, double tam = 14)
+                => $"<text x=\"{Inv(q.X)}\" y=\"{Inv(q.Y)}\" text-anchor=\"middle\" font-size=\"{Inv(tam)}\"" +
+                   $" font-family=\"monospace\" font-weight=\"600\" fill=\"#075985\" stroke=\"#fff\"" +
+                   $" stroke-width=\"{Inv(tam * 0.3)}\" paint-order=\"stroke\">{System.Net.WebUtility.HtmlEncode(txt)}</text>";
+
+            var qa = Pr(AnchoM / 2, 0);
+            sb.Append(Cota((qa.X, qa.Y - 12), $"A {AnchoMetros} m"));
+            var ql = Pr(0, LargoM / 2);
+            sb.Append(Cota((ql.X - 28, ql.Y), $"L {LargoMetros} m"));
+        }
+
+        if (_mostrarAlmacenes)
+        {
+            foreach (var a in _almacenes)
+            {
+                var pts = PuntosDe(a.COD_ALMACEN);
+                if (pts.Count < 3) continue;
+                sb.Append(Pol(pts.Select(p => { var m = AMetros(p); return Pr(m.X, m.Y); }),
+                              ColorAlmacen, "0.16", ColorAlmacen, 2));
+                if (_mostrarEtiquetas)
+                {
+                    var ce = Poligono.Centro(pts);
+                    var m = AMetros(ce);
+                    var q = Pr(m.X, m.Y);
+                    var t = System.Net.WebUtility.HtmlEncode(a.DES_ALMACEN ?? a.COD_ALMACEN);
+                    sb.Append($"<text x=\"{Inv(q.X)}\" y=\"{Inv(q.Y)}\" text-anchor=\"middle\" font-size=\"13\" font-weight=\"600\"" +
+                              $" fill=\"{ColorAlmacenTexto}\" stroke=\"#fff\" stroke-width=\"3\" paint-order=\"stroke\">{t}</text>");
+                }
+            }
+        }
+
+        if (_mostrarContenedores)
+        {
+            // Algoritmo del pintor: lo más lejano primero, para que lo cercano lo tape.
+            var conRect = ContenedoresPorProfundidad(cam);
+            var idxEnfocado = conRect.FindIndex(t => t.Cont.COD_CONTENEDOR == _enfocado);
+
+            // ── Pintado por LONJAS (una por columna de casilleros) ──
+            //
+            // Antes se pintaba un mueble entero por vez, ordenados por la profundidad de su
+            // CENTRO. Con dos racks cruzados eso falla: el que tiene el centro más lejos se
+            // pinta primero completo, aunque una de sus puntas esté por delante del otro, y
+            // se ve un rack atravesando al otro.
+            //
+            // Partiéndolos en columnas —que ya son la unidad natural del mueble— cada trozo
+            // se ordena por su propia distancia a la cámara y el cruce se resuelve solo.
+            var lonjas = new List<(ContenedorModel C, RectanguloContenedor R, int K, int Cols,
+                                   int Filas, double H, bool Tapando, double Prof)>();
+
+            foreach (var (c, r) in conRect)
+            {
+                var indice = conRect.FindIndex(t => t.Cont.COD_CONTENEDOR == c.COD_CONTENEDOR);
+                // Enfoque: lo que está ENTRE el rack elegido y la cámara se vuelve silueta.
+                // Es la única forma de ver el de atrás sin sacar de pantalla los de adelante,
+                // que son la referencia de dónde está parado uno.
+                var tapa = idxEnfocado >= 0 && indice > idxEnfocado;
+
+                var alto = AlturaM(c);
+                var cols = Math.Max(c.NUM_COLUMNAS ?? 1, 1);
+                var fils = Math.Max(c.NUM_FILAS ?? 1, 1);
+
+                // Sin altura registrada no hay volumen que mostrar: se deja la huella plana
+                // en vez de inventar una altura por defecto. Va como una sola lonja.
+                var trozos = alto > 0 ? cols : 1;
+                for (var k = 1; k <= trozos; k++)
+                {
+                    var pts = alto > 0 ? r.ColumnaM(k, cols) : r.VerticesM();
+                    var cxs = (pts[0].X + pts[2].X) / 2;
+                    var cys = (pts[0].Y + pts[2].Y) / 2;
+                    lonjas.Add((c, r, k, cols, fils, alto, tapa, cam.Profundidad(cxs, cys)));
+                }
+            }
+
+            foreach (var lo in lonjas.OrderBy(t => t.Prof))
+            {
+                var paleta = ColoresDe(lo.C.COD_ALMACEN);
+                var opacidad = lo.Tapando ? "0.12" : "0.92";
+
+                if (lo.H <= 0)
+                {
+                    sb.Append(Pol(lo.R.VerticesM().Select(v => Pr(v.X, v.Y)),
+                                  paleta.Cara, lo.Tapando ? "0.15" : "0.5", paleta.Lado, 2));
+                    continue;
+                }
+
+                var pts = lo.R.ColumnaM(lo.K, lo.Cols);
+                var basePts = pts.Select(v => Pr(v.X, v.Y)).ToList();
+                var topePts = pts.Select(v => Pr(v.X, v.Y, lo.H)).ToList();
+                var ceG = G((pts[0].X + pts[2].X) / 2, (pts[0].Y + pts[2].Y) / 2);
+
+                for (var i = 0; i < 4; i++)
+                {
+                    var j = (i + 1) % 4;
+
+                    // Los lados 1 y 3 son los cortes ENTRE columnas: sólo existen de verdad
+                    // en los extremos del rack. Dibujarlos siempre pintaría paredes internas
+                    // encima de la columna vecina.
+                    var esCaraRack = i % 2 == 0;
+                    if (!esCaraRack)
+                    {
+                        var esExtremo = (i == 1 && lo.K == lo.Cols) || (i == 3 && lo.K == 1);
+                        if (!esExtremo) continue;
+                    }
+
+                    // El descarte se hace en coordenadas GIRADAS: qué cara mira a la cámara
+                    // depende del ángulo, y con las sin girar el mueble se vería hueco al
+                    // pasar de los 90°.
+                    var gi = G(pts[i].X, pts[i].Y);
+                    var gj = G(pts[j].X, pts[j].Y);
+                    var mx = (gi.X + gj.X) / 2;
+                    var my = (gi.Y + gj.Y) / 2;
+                    if ((mx - ceG.X) + (my - ceG.Y) <= 0) continue;
+
+                    // El borde verde entre columnas es el mismo que separa casilleros: se
+                    // consigue con el trazo de cada lonja, sin líneas aparte.
+                    var trazo = _mostrarCasilleros && esCaraRack && !lo.Tapando ? ColorCasillero : paleta.Lado;
+                    sb.Append(Pol(new[] { basePts[i], basePts[j], topePts[j], topePts[i] },
+                                  esCaraRack ? paleta.Cara : paleta.Lado, opacidad, trazo, lo.Tapando ? 0.8 : 1.5));
+
+                    if (!_mostrarCasilleros || lo.Tapando || !esCaraRack) continue;
+
+                    // Niveles sobre la cara: es el casillero visto de costado.
+                    for (var f = 1; f < lo.Filas; f++)
+                    {
+                        var z = lo.H * f / lo.Filas;
+                        var a = Pr(pts[i].X, pts[i].Y, z);
+                        var b = Pr(pts[j].X, pts[j].Y, z);
+                        sb.Append($"<line x1=\"{Inv(a.X)}\" y1=\"{Inv(a.Y)}\" x2=\"{Inv(b.X)}\" y2=\"{Inv(b.Y)}\" stroke=\"{ColorCasillero}\" stroke-opacity=\".75\" stroke-width=\"1\" />");
+                    }
+
+                    // Se mide el casillero en pantalla antes de escribir: por debajo de ~5px
+                    // el texto es una mancha que ensucia el mueble en lugar de informarlo.
+                    var anchoCelda = lo.R.Ancho / lo.Cols * s * 0.866;
+                    var altoCelda = lo.H / lo.Filas * s;
+                    var tam = Math.Min(11, Math.Min(anchoCelda * 0.42, altoCelda * 0.5));
+                    if (tam < 5) continue;
+
+                    // La columna ya no se deduce de la posición sobre la cara: la lonja ES la
+                    // columna, así que el número es el mismo se mire de frente o por detrás.
+                    var mcx = (pts[i].X + pts[j].X) / 2;
+                    var mcy = (pts[i].Y + pts[j].Y) / 2;
+                    for (var f = 1; f <= lo.Filas; f++)
+                    {
+                        var q = Pr(mcx, mcy, lo.H * (f - 0.5) / lo.Filas);
+                        sb.Append($"<text x=\"{Inv(q.X)}\" y=\"{Inv(q.Y + tam * 0.35)}\" text-anchor=\"middle\"" +
+                                  $" font-size=\"{Inv(tam)}\" font-family=\"monospace\" fill=\"#f8fafc\"" +
+                                  $" stroke=\"#3b2405\" stroke-width=\"{Inv(tam * 0.22)}\" paint-order=\"stroke\"" +
+                                  $" style=\"pointer-events:none;\">F{f}·C{lo.K}</text>");
+                    }
+                }
+
+                sb.Append(Pol(topePts, paleta.Alto, lo.Tapando ? "0.15" : "1", paleta.Lado, lo.Tapando ? 0.8 : 1.5));
+            }
+
+            // ── Rótulos y cotas, después de todo el volumen ──
+            // Van al final para que no queden tapados por un mueble pintado más tarde; en su
+            // propio orden de profundidad para que, entre ellos, mande el más cercano.
+            foreach (var (c, r) in conRect)
+            {
+                var indice = conRect.FindIndex(t => t.Cont.COD_CONTENEDOR == c.COD_CONTENEDOR);
+                if (idxEnfocado >= 0 && indice > idxEnfocado) continue;
+
+                var h = AlturaM(c);
+                var vs = r.VerticesM();
+                var ce = r.Centro;
+
+                // El enfocado se remarca: con varios racks del mismo color hace falta saber
+                // cuál es el que se está mirando.
+                if (_enfocado == c.COD_CONTENEDOR)
+                    sb.Append(Pol(vs.Select(v => Pr(v.X, v.Y, h)), "none", "0", "#0284c7", 3));
+
+                if (_mostrarEtiquetas)
+                {
+                    var q = Pr(ce.X, ce.Y, h);
+                    var t = System.Net.WebUtility.HtmlEncode(c.DES_CONTENDOR ?? c.COD_CONTENEDOR);
+                    sb.Append($"<text x=\"{Inv(q.X)}\" y=\"{Inv(q.Y + 4)}\" text-anchor=\"middle\" font-size=\"12\"" +
+                              $" font-weight=\"700\" fill=\"#3b2405\" stroke=\"#fff\" stroke-width=\"3\"" +
+                              $" paint-order=\"stroke\">{t}</text>");
+                }
+
+                // Cotas del mueble en volumen: largo y ancho apoyados en el piso, junto a los
+                // bordes que miden; el alto contra la arista vertical más cercana a la cámara,
+                // que es la única donde se ve la altura completa sin cruzar el mueble.
+                if (_mostrarMedidas && h > 0)
+                {
+                    string Cota3D((double X, double Y) q, string txt, double tam = 11)
+                        => $"<text x=\"{Inv(q.X)}\" y=\"{Inv(q.Y)}\" text-anchor=\"middle\" font-size=\"{Inv(tam)}\"" +
+                           $" font-family=\"monospace\" fill=\"#075985\" stroke=\"#fff\" stroke-width=\"{Inv(tam * 0.3)}\"" +
+                           $" paint-order=\"stroke\">{System.Net.WebUtility.HtmlEncode(txt)}</text>";
+
+                    var (ux, uy) = r.EjeColumnas;
+                    var (vx, vy) = r.EjeFondo;
+                    var sep = Math.Max(r.Fondo, 0.6) * 0.9;
+
+                    var pl = Pr(r.X + ux * r.Ancho / 2 - vx * sep, r.Y + uy * r.Ancho / 2 - vy * sep);
+                    sb.Append(Cota3D(pl, $"L {r.Ancho:0.##} m"));
+
+                    var pa = Pr(r.X + ux * (r.Ancho + sep) + vx * r.Fondo / 2,
+                                r.Y + uy * (r.Ancho + sep) + vy * r.Fondo / 2);
+                    sb.Append(Cota3D(pa, $"A {r.Fondo:0.##} m"));
+
+                    var vm = vs.OrderByDescending(v => { var g = G(v.X, v.Y); return g.X + g.Y; }).First();
+                    var ph = Pr(vm.X, vm.Y, h / 2);
+                    sb.Append(Cota3D((ph.X + 26, ph.Y), $"H {h:0.##} m"));
+                }
+            }
+        }
+
+        return new MarkupString(sb.ToString());
+    }
+
+    /// <summary>Etiqueta de texto sobre una figura del plano.
+    /// Va como MarkupString porque Razor reserva la etiqueta &lt;text&gt; para sus bloques de
+    /// control y no deja escribirla con atributos; el contenido se escapa a mano.</summary>
+    private MarkupString EtiquetaSvg(PuntoPoligono centro, string? texto, int tam, string peso, string color)
+    {
+        var t = System.Net.WebUtility.HtmlEncode(texto ?? "");
+        return new MarkupString(
+            $"<text x=\"{Inv(centro.X * AnchoVb)}\" y=\"{Inv(centro.Y * AltoVb)}\" text-anchor=\"middle\"" +
+            $" font-size=\"{Inv(Fijo(tam))}\" font-weight=\"{peso}\" fill=\"{color}\" stroke=\"#fff\"" +
+            $" stroke-width=\"{Inv(Fijo(tam > 12 ? 4 : 3))}\" paint-order=\"stroke\"" +
+            $" style=\"pointer-events:none;\">{t}</text>");
+    }
+
+    // ── Cuadrícula ────────────────────────────────────────────────────────────
+    /// <summary>Paso fino en metros. Se busca 1 m —la unidad con la que se piensa un
+    /// almacén— y sólo se agranda si el piso es tan grande que dibujar cada metro daría
+    /// cientos de líneas ilegibles.</summary>
+    private double PasoMetros
+    {
+        get
+        {
+            if (!HayEscala) return 0;
+            var lado = Math.Max(AnchoMetros, LargoMetros);
+            var maxLineas = 120 * _zoom;
+            foreach (var paso in new[] { 0.5, 1d, 2, 5, 10, 20, 25, 50 })
+                if (lado / paso <= maxLineas) return paso;
+            return 100;
+        }
+    }
+
+    private int CadaCuantasMayor => PasoMetros switch { 0.5 => 10, 1 => 5, 2 => 5, 5 => 4, _ => 5 };
+
+    private (double X, double Y) PasoNormalizado => HayEscala && PasoMetros > 0
+        ? (PasoMetros / AnchoMetros, PasoMetros / LargoMetros)
+        : (0.025, 0.025);
+
+    private MarkupString CuadriculaSvg()
+    {
+        var (pasoX, pasoY) = PasoNormalizado;
+        if (pasoX <= 0 || pasoY <= 0) return new MarkupString("");
+
+        var finas = new System.Text.StringBuilder();
+        var gruesas = new System.Text.StringBuilder();
+        var rotulos = new System.Text.StringBuilder();
+        var cada = CadaCuantasMayor;
+        var tamRotulo = Inv(Fijo(11));
+
+        var i = 0;
+        for (var x = 0d; x <= 1.0001; x += pasoX, i++)
+        {
+            var px = Inv(x * AnchoVb);
+            var mayor = i % cada == 0;
+            (mayor ? gruesas : finas).Append($"<line x1=\"{px}\" y1=\"0\" x2=\"{px}\" y2=\"{Inv(AltoVb)}\" />");
+            if (mayor && HayEscala && i > 0)
+                rotulos.Append($"<text x=\"{Inv(x * AnchoVb + Fijo(3))}\" y=\"{Inv(Fijo(13))}\" font-size=\"{tamRotulo}\">{Inv(i * PasoMetros)}</text>");
+        }
+
+        i = 0;
+        for (var y = 0d; y <= 1.0001; y += pasoY, i++)
+        {
+            var py = Inv(y * AltoVb);
+            var mayor = i % cada == 0;
+            (mayor ? gruesas : finas).Append($"<line x1=\"0\" y1=\"{py}\" x2=\"{Inv(AnchoVb)}\" y2=\"{py}\" />");
+            if (mayor && HayEscala && i > 0)
+                rotulos.Append($"<text x=\"{Inv(Fijo(3))}\" y=\"{Inv(y * AltoVb - Fijo(3))}\" font-size=\"{tamRotulo}\">{Inv(i * PasoMetros)}</text>");
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append("<g style=\"pointer-events:none;\">");
+        sb.Append($"<g stroke=\"#0f172a\" stroke-opacity=\".10\" stroke-width=\"1\" vector-effect=\"non-scaling-stroke\">{finas}</g>");
+        sb.Append($"<g stroke=\"#0f172a\" stroke-opacity=\".28\" stroke-width=\"1.5\" vector-effect=\"non-scaling-stroke\">{gruesas}</g>");
+        if (rotulos.Length > 0)
+            sb.Append($"<g fill=\"#0f172a\" fill-opacity=\".55\" font-family=\"monospace\">{rotulos}</g>");
+        sb.Append("</g>");
+        return new MarkupString(sb.ToString());
+    }
+
+    private MarkupString EscalaSvg()
+    {
+        if (!HayEscala) return new MarkupString("");
+        var metros = PasoMetros * CadaCuantasMayor;
+        var largo = metros / AnchoMetros * AnchoVb;
+        var x0 = Fijo(14);
+        var y0 = AltoVb - Fijo(14);
+        var alto = Fijo(5);
+
+        return new MarkupString(
+            $"<g style=\"pointer-events:none;\">" +
+            $"<line x1=\"{Inv(x0)}\" y1=\"{Inv(y0)}\" x2=\"{Inv(x0 + largo)}\" y2=\"{Inv(y0)}\" stroke=\"#0f172a\" stroke-width=\"2\" vector-effect=\"non-scaling-stroke\" />" +
+            $"<line x1=\"{Inv(x0)}\" y1=\"{Inv(y0 - alto)}\" x2=\"{Inv(x0)}\" y2=\"{Inv(y0 + alto)}\" stroke=\"#0f172a\" stroke-width=\"2\" vector-effect=\"non-scaling-stroke\" />" +
+            $"<line x1=\"{Inv(x0 + largo)}\" y1=\"{Inv(y0 - alto)}\" x2=\"{Inv(x0 + largo)}\" y2=\"{Inv(y0 + alto)}\" stroke=\"#0f172a\" stroke-width=\"2\" vector-effect=\"non-scaling-stroke\" />" +
+            $"<text x=\"{Inv(x0 + largo / 2)}\" y=\"{Inv(y0 - Fijo(7))}\" text-anchor=\"middle\" font-size=\"{Inv(Fijo(12))}\" font-family=\"monospace\" fill=\"#0f172a\" stroke=\"#fff\" stroke-width=\"{Inv(Fijo(3))}\" paint-order=\"stroke\">{Inv(metros)} m</text>" +
+            $"</g>");
+    }
+
+    /// <summary>Con la cuadrícula activa, el punto cae en la intersección más cercana: es la
+    /// forma práctica de que racks y pasillos queden alineados entre sí.</summary>
+    private PuntoPoligono Ajustar(PuntoPoligono p)
+    {
+        if (!_cuadricula) return p;
+        var (pasoX, pasoY) = PasoNormalizado;
+        if (pasoX <= 0 || pasoY <= 0) return p;
+        return new PuntoPoligono(Math.Round(p.X / pasoX) * pasoX, Math.Round(p.Y / pasoY) * pasoY);
+    }
+
+    /// <summary>Ajuste en metros, para los contenedores. Redondea al paso de la cuadrícula,
+    /// que es la medida con la que se piensa el mueble.</summary>
+    private (double X, double Y) AjustarM(double xm, double ym)
+    {
+        if (!_cuadricula || !HayEscala || PasoMetros <= 0) return (xm, ym);
+        return (Math.Round(xm / PasoMetros) * PasoMetros, Math.Round(ym / PasoMetros) * PasoMetros);
+    }
+
+    // ── Carga ─────────────────────────────────────────────────────────────────
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ZONIFICACION", "PlanoZonificacion");
+        _sucursales = await CargarCombo(ApiRoutes.Estandar.SucursalesCombobox);
+        await CargarTiposZonaAsync();
+    }
+
+    /// <summary>Catálogo de tipos de zona: de acá sale qué zonas llevan mapa.</summary>
+    private async Task CargarTiposZonaAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<TipoZonificacionModel>>>(
+                ApiRoutes.Zonificacion.TiposZonificacion);
+            _tiposZona = r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(PlanoZonificacion), nameof(CargarTiposZonaAsync));
+            _tiposZona = new();
+        }
+    }
+
+    /// <summary>Una zona se mapea si su tipo está marcado como mapeable.
+    ///
+    /// Mientras FLG_MAPEABLE no esté cargado en el catálogo, la marca llega en null para
+    /// TODOS los tipos y la pantalla quedaría vacía sin explicación. En ese caso —y sólo en
+    /// ese— se cae a reconocer el tipo por su descripción, para que el mapa siga funcionando
+    /// hasta que marquen el catálogo.</summary>
+    private bool EsPiso(ZonificacionModel z)
+    {
+        var tipo = _tiposZona.FirstOrDefault(t => t.COD_TIPO_ZONIFICACION == z.COD_TIPO_ZONIFICACION);
+        if (_tiposZona.Any(t => t.FLG_MAPEABLE == true)) return tipo?.FLG_MAPEABLE == true;
+        var des = (tipo?.DES_TIPO_ZONIFICACION ?? z.DES_TIPO_ZONIFICACION ?? "").Trim();
+        return des.StartsWith("PISO", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task OnSucursalChanged(string? val)
+    {
+        _codSucursal = val ?? "";
+        _codZonificacion = "";
+        _zonaSel = null;
+        LimpiarEdicion();
+        _almacenes = new();
+        _almacenSel = null;
+        _contenedores = new();
+        _poligonosAlmacen.Clear();
+        _rectContenedor.Clear();
+        _pendientesAlmacen.Clear();
+        _pendientesContenedor.Clear();
+        await CargarPisosAsync();
+    }
+
+    private async Task CargarPisosAsync()
+    {
+        _zonasSucursal = new();
+        _pisosCombo = new();
+        if (string.IsNullOrWhiteSpace(_codSucursal)) return;
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ZonificacionModel>>>(
+                $"{ApiRoutes.Zonificacion.Zonificaciones}/{Uri.EscapeDataString(_codSucursal)}");
+            _zonasSucursal = r?.Data ?? new();
+            _pisosCombo = _zonasSucursal
+                .Where(EsPiso)
+                .OrderBy(z => z.NUM_NIVEL_ORDEN ?? z.NUM_NIVEL ?? 0)
+                .ThenBy(z => z.COD_ZONIFICACION, StringComparer.Ordinal)
+                .Select(z => new ComboboxItem { Id = z.COD_ZONIFICACION, Texto = z.DES_ZONIFICACION })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(PlanoZonificacion), nameof(CargarPisosAsync));
+            await MostrarErrorAsync("No se pudieron cargar los pisos de la sucursal.");
+        }
+    }
+
+    private async Task OnZonificacionChanged(string? val)
+    {
+        if (_hayCambios && !await ConfirmarDescartar()) return;
+        _codZonificacion = val ?? "";
+        LimpiarEdicion();
+        _poligonosAlmacen.Clear();
+        _rectContenedor.Clear();
+        _pendientesAlmacen.Clear();
+        _pendientesContenedor.Clear();
+        _almacenSel = null;
+        _enfocado = null;
+        await CargarPiso();
+    }
+
+    private async Task<bool> ConfirmarDescartar()
+    {
+        var ok = await DialogService.ShowMessageBox("Cambios sin guardar",
+            $"Hay {_pendientesAlmacen.Count + _pendientesContenedor.Count} figura(s) sin guardar. ¿Descartarlas?",
+            yesText: "Descartar", cancelText: "Seguir editando");
+        return ok == true;
+    }
+
+    private async Task CargarPiso()
+    {
+        if (string.IsNullOrWhiteSpace(_codZonificacion)) { _zonaSel = null; return; }
+        try
+        {
+            _zonaSel = await Http.SafeGetAsync<ZonificacionModel>(
+                $"{ApiRoutes.Zonificacion.Zonificaciones}/{Uri.EscapeDataString(_codSucursal)}/{Uri.EscapeDataString(_codZonificacion)}");
+
+            // Ni el SHOWALL de almacenes ni el de contenedores filtran por zonificación: se
+            // filtra acá por COD_SUCURSAL + COD_ZONIFICACION, que es lo que define "de este piso".
+            var ra = await Http.GetFromJsonAsync<ApiResponse<List<AlmacenesModel>>>(ApiRoutes.Logistica.Almacenes);
+            _almacenes = (ra?.Data ?? new())
+                .Where(a => a.COD_SUCURSAL == _codSucursal && a.COD_ZONIFICACION == _codZonificacion)
+                .OrderBy(a => a.DES_ALMACEN)
+                .ToList();
+
+            foreach (var a in _almacenes)
+            {
+                // Lo que está pendiente de guardar gana sobre lo que traiga el servidor:
+                // recargar el piso no debe pisar lo que se acaba de dibujar.
+                if (_pendientesAlmacen.Contains(a.COD_ALMACEN)) continue;
+                var pts = Poligono.Parse(a.DES_POLIGONO);
+                if (pts.Count > 0) _poligonosAlmacen[a.COD_ALMACEN] = pts;
+            }
+
+            var rc = await Http.GetFromJsonAsync<ApiResponse<List<ContenedorModel>>>(ApiRoutes.Logistica.ContenedoresAlmacenaje);
+            _contenedores = (rc?.Data ?? new())
+                .Where(c => c.COD_SUCURSAL == _codSucursal && c.COD_ZONIFICACION == _codZonificacion)
+                .OrderBy(c => c.DES_CONTENDOR)
+                .ToList();
+
+            foreach (var c in _contenedores)
+            {
+                if (_pendientesContenedor.Contains(c.COD_CONTENEDOR)) continue;
+                if (string.IsNullOrWhiteSpace(c.DES_POLIGONO)) continue;
+
+                // El polígono llega resuelto por posición desde el repositorio, así que acá
+                // ya es el del CONTENEDOR aunque el SP siga devolviendo dos columnas con el
+                // mismo nombre.
+                //
+                // Cualquier figura que no sea un rectángulo de cuatro vértices sólo
+                // significa que este contenedor todavía no está ubicado. La fila ya lo dice;
+                // no hace falta un error que además culpa al usuario de algo que no hizo.
+                var r = RectanguloContenedor.Desde(c.DES_POLIGONO, AnchoM, LargoM);
+                if (r is null) continue;
+                // La medida guardada es sólo un reflejo: manda COLUMNAS × LARGO DE NIVEL por
+                // PROFUNDIDAD. Si cambiaron la grilla del contenedor, el dibujo se ajusta
+                // solo en vez de seguir mostrando el tamaño viejo.
+                if (MedidasM(c) is (double largo, double fondo))
+                    r = r.Value with { Ancho = largo, Fondo = fondo };
+                _rectContenedor[c.COD_CONTENEDOR] = r.Value;
+            }
+
+            await RevisarConflictosAsync();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(PlanoZonificacion), nameof(CargarPiso));
+            await MostrarErrorAsync("No se pudo cargar el piso.");
+            _almacenes = new();
+            _contenedores = new();
+        }
+    }
+
+    /// <summary>Elegir un almacén entra a trabajar en él; volver a tocarlo —o pasar null—
+    /// devuelve a la vista de distribución de todo el piso.</summary>
+    /// <summary>Contenedores cuya ubicación dejó de ser válida. Se llena al cargar el piso.</summary>
+    private readonly HashSet<string> _conflictivos = new();
+
+    /// <summary>Revalida las ubicaciones después de recalcular las medidas.
+    ///
+    /// El tamaño de un contenedor se deriva de sus datos, así que cambiar columnas, largo de
+    /// nivel o profundidad desde el formulario lo agranda en el plano sin que nadie lo mueva
+    /// — y creciendo puede salirse del almacén o encimarse sobre el vecino. Toda la
+    /// validación de límites actúa al arrastrar; ésta es la que cubre el otro camino.
+    ///
+    /// Sólo informa y marca: no reubica ni recorta nada por su cuenta. Dónde va cada mueble
+    /// es una decisión de quien conoce el almacén, no del editor.</summary>
+    private async Task RevisarConflictosAsync()
+    {
+        _conflictivos.Clear();
+        var fuera = new List<string>();
+        var encimados = new List<string>();
+
+        foreach (var c in _contenedores)
+        {
+            if (RectDe(c.COD_CONTENEDOR) is not RectanguloContenedor r) continue;
+
+            // Contra el contorno propio, sin importar qué almacén esté elegido: acá no se
+            // está trabajando sobre ninguno, se está revisando el piso entero.
+            var contorno = PuntosDe(c.COD_ALMACEN ?? "");
+            if (contorno.Count >= 3)
+            {
+                var figura = r.VerticesM().Select(v => ANormal(v.X, v.Y)).ToList();
+                if (!Poligono.ContieneFigura(contorno, figura))
+                {
+                    _conflictivos.Add(c.COD_CONTENEDOR);
+                    fuera.Add(c.DES_CONTENDOR ?? c.COD_CONTENEDOR);
+                    continue;
+                }
+            }
+
+            if (ContenedorQueSePisa(r, c.COD_CONTENEDOR) is ContenedorModel choque)
+            {
+                _conflictivos.Add(c.COD_CONTENEDOR);
+                // Se nombra el par una sola vez: A sobre B y B sobre A son el mismo problema.
+                if (!encimados.Any(t => t.Contains(choque.DES_CONTENDOR ?? "")))
+                    encimados.Add($"{c.DES_CONTENDOR} con {choque.DES_CONTENDOR}");
+            }
+        }
+
+        if (fuera.Count == 0 && encimados.Count == 0) return;
+
+        var partes = new List<string>();
+        if (fuera.Count > 0)
+            partes.Add($"Quedaron fuera del contorno de su almacén: {string.Join(", ", fuera)}.");
+        if (encimados.Count > 0)
+            partes.Add($"Se encimaron entre sí: {string.Join("; ", encimados)}.");
+
+        await MostrarAvisoAsync("Ubicaciones que dejaron de ser válidas",
+            string.Join(" ", partes) +
+            " El tamaño de un contenedor se calcula desde sus columnas y sus medidas de nivel, " +
+            "así que al cambiarlas creció sobre el plano. Están marcados en rojo: vuelva a " +
+            "ubicarlos donde entren.");
+    }
+
+    private void SeleccionarAlmacen(AlmacenesModel? a)
+    {
+        _almacenSel = a is null || _almacenSel?.COD_ALMACEN == a.COD_ALMACEN ? null : a;
+        // Salir a la vista del piso con una figura a medio ubicar dejaría un trazo colgado
+        // que reaparece al volver, sin nada en pantalla que lo explique.
+        if (_almacenSel is null) LimpiarEdicion();
+    }
+
+    /// <summary>Cuánto ocupa un almacén: sus contenedores, sus casilleros y qué proporción
+    /// de su superficie está tomada por muebles. La ocupación se mide sobre la HUELLA de los
+    /// contenedores ubicados; los que todavía no se ubicaron no ocupan nada porque no se sabe
+    /// dónde van.</summary>
+    private (int Contenedores, int Casilleros, double Area, double Ocupacion) ResumenDe(string codAlmacen)
+    {
+        var propios = _contenedores.Where(c => c.COD_ALMACEN == codAlmacen).ToList();
+        var area = Poligono.AreaM2(PuntosDe(codAlmacen), _zonaSel?.VAL_ANCHO_METROS, _zonaSel?.VAL_LARGO_METROS);
+        var ocupado = propios.Sum(c => RectDe(c.COD_CONTENEDOR)?.AreaM2 ?? 0);
+        return (propios.Count,
+                propios.Sum(c => c.TotalCasilleros),
+                area,
+                area > 0 ? Math.Min(ocupado / area, 1) : 0);
+    }
+
+    private double AreaOcupadaPiso => _contenedores.Sum(c => RectDe(c.COD_CONTENEDOR)?.AreaM2 ?? 0);
+
+    // ── CRUD desde el mapa ────────────────────────────────────────────────────
+    /// <summary>Abre el formulario del almacén sin salir del mapa. Al crear se le pasa un
+    /// registro con la sucursal y el piso ya puestos: es lo único que el mapa sabe y el
+    /// formulario no tendría cómo adivinar.</summary>
+    private async Task AbrirAlmacenCrud(AlmacenesModel? item, CrudModo modo)
+    {
+        var nuevo = modo == CrudModo.Create;
+        var arg = nuevo
+            ? new AlmacenesModel { COD_SUCURSAL = _codSucursal, COD_ZONIFICACION = _codZonificacion }
+            : item;
+
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo almacén",
+            CrudModo.Delete => $"Eliminar · {item?.DES_ALMACEN}",
+            CrudModo.Read   => $"Consultar · {item?.DES_ALMACEN}",
+            _               => $"Editar · {item?.DES_ALMACEN}"
+        };
+
+        var dlg = await DialogService.ShowAsync<KONSolutions.Web.Pages.Logistica.AlmacenesDialog>(titulo,
+            new DialogParameters { ["Item"] = arg, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+
+        if ((await dlg.Result) is { Canceled: false })
+        {
+            // Al eliminar, lo que quedaba dibujado de ese almacén ya no corresponde a nada.
+            if (modo == CrudModo.Delete && item is not null) OlvidarAlmacen(item.COD_ALMACEN);
+            await RecargarPisoAsync();
+        }
+    }
+
+    /// <summary>Abre el formulario del contenedor sin salir del mapa. Al crear hereda
+    /// sucursal, piso y el almacén seleccionado.</summary>
+    private async Task AbrirContenedorCrud(ContenedorModel? item, CrudModo modo)
+    {
+        var nuevo = modo == CrudModo.Create;
+        if (nuevo && _almacenSel is null)
+        {
+            Snackbar.Add("Seleccione primero el almacén al que pertenece el contenedor.", Severity.Warning);
+            return;
+        }
+
+        var arg = nuevo
+            ? new ContenedorModel
+              {
+                  COD_SUCURSAL     = _codSucursal,
+                  COD_ZONIFICACION = _codZonificacion,
+                  COD_ALMACEN      = _almacenSel!.COD_ALMACEN
+              }
+            : item;
+
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo contenedor",
+            CrudModo.Delete => $"Eliminar · {item?.DES_CONTENDOR}",
+            CrudModo.Read   => $"Consultar · {item?.DES_CONTENDOR}",
+            _               => $"Editar · {item?.DES_CONTENDOR}"
+        };
+
+        var dlg = await DialogService.ShowAsync<KONSolutions.Web.Pages.Logistica.ContenedoresAlmacenajeDialog>(titulo,
+            new DialogParameters { ["Item"] = arg, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+
+        if ((await dlg.Result) is { Canceled: false })
+        {
+            if (modo == CrudModo.Delete && item is not null) OlvidarContenedor(item.COD_CONTENEDOR);
+            await RecargarPisoAsync();
+        }
+    }
+
+    private void OlvidarAlmacen(string cod)
+    {
+        _poligonosAlmacen.Remove(cod);
+        _pendientesAlmacen.Remove(cod);
+        if (_almacenSel?.COD_ALMACEN == cod) _almacenSel = null;
+        if (EsObjetivoAlmacen(cod)) LimpiarEdicion();
+    }
+
+    /// <summary>Muda el contenedor a otro almacén conservando su posición RELATIVA.
+    ///
+    /// La equivalencia se calcula sobre el rectángulo que encierra a cada almacén: si el
+    /// mueble estaba al 20 % del ancho y al 70 % del largo del almacén viejo, queda al 20 %
+    /// y al 70 % del nuevo. Es la lectura natural de "el mismo lugar, pero allá": la que
+    /// deja un rack pegado al fondo pegado al fondo también en el destino.
+    ///
+    /// El tamaño y la orientación no se tocan: son datos del mueble, no del lugar.</summary>
+    private async Task MoverContenedorDeAlmacen(ContenedorModel c)
+    {
+        // Sólo almacenes dibujados: sin contorno no hay caja de la cual sacar proporciones.
+        var candidatos = _almacenes.Where(a => TienePoligono(a.COD_ALMACEN)).ToList();
+
+        var dlg = await DialogService.ShowAsync<MoverContenedorAlmacenDialog>("",
+            new DialogParameters { ["Contenedor"] = c, ["Almacenes"] = candidatos },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+
+        var res = await dlg.Result;
+        if (res is not { Canceled: false, Data: string codDestino } || string.IsNullOrWhiteSpace(codDestino)) return;
+
+        var destino = _almacenes.FirstOrDefault(a => a.COD_ALMACEN == codDestino);
+        if (destino is null) return;
+
+        var origenCod = c.COD_ALMACEN;
+        var rect = RectDe(c.COD_CONTENEDOR);
+
+        // El cambio de almacén vale aunque el contenedor no esté ubicado: en ese caso es
+        // sólo un cambio de datos y no hay geometría que trasladar.
+        if (rect is RectanguloContenedor r && !string.IsNullOrWhiteSpace(origenCod))
+        {
+            var nuevo = TrasladarEntreAlmacenes(r, origenCod!, codDestino);
+            if (nuevo is null || !CabeEnAlmacen(nuevo.Value, codDestino))
+            {
+                await MostrarAvisoAsync("No entra en el almacén de destino",
+                    $"«{c.DES_CONTENDOR}» mide {r.Ancho:0.##} × {r.Fondo:0.##} m y en la posición " +
+                    $"equivalente de {destino.DES_ALMACEN} quedaría fuera del contorno. " +
+                    "Amplíe el contorno del destino o ubique el contenedor a mano después de moverlo.");
+                return;
+            }
+            _rectContenedor[c.COD_CONTENEDOR] = nuevo.Value;
+        }
+
+        c.COD_ALMACEN = codDestino;
+        // Queda pendiente de guardar como cualquier otro cambio del plano: el POST manda el
+        // contenedor completo, así que el almacén nuevo y la posición nueva viajan juntos.
+        _pendientesContenedor.Add(c.COD_CONTENEDOR);
+        if (EsObjetivoContenedor(c.COD_CONTENEDOR)) _rectTrazo = RectDe(c.COD_CONTENEDOR);
+
+        Snackbar.Add($"«{c.DES_CONTENDOR}» pasó a {destino.DES_ALMACEN}. Recuerde volver a generar sus casilleros.",
+                     Severity.Success);
+    }
+
+    /// <summary>Lleva el rectángulo a la posición proporcionalmente equivalente del almacén
+    /// destino. Devuelve null si alguno de los dos contornos es degenerado (sin ancho o sin
+    /// largo), donde la proporción sería una división por cero.</summary>
+    private RectanguloContenedor? TrasladarEntreAlmacenes(RectanguloContenedor r, string codOrigen, string codDestino)
+    {
+        var (ox, oy, oAncho, oLargo) = CajaEnMetros(PuntosDe(codOrigen));
+        var (dx, dy, dAncho, dLargo) = CajaEnMetros(PuntosDe(codDestino));
+        if (oAncho <= 0 || oLargo <= 0 || dAncho <= 0 || dLargo <= 0) return null;
+
+        var centro = r.Centro;
+        var u = (centro.X - ox) / oAncho;
+        var v = (centro.Y - oy) / oLargo;
+
+        var nuevoCentroX = dx + u * dAncho;
+        var nuevoCentroY = dy + v * dLargo;
+
+        // Se reposiciona por el centro para no depender de qué esquina es el origen: mover el
+        // vértice de fila 1 haría que el mueble se corriera media medida al cambiar de lado.
+        var (ux, uy) = r.EjeColumnas;
+        var (vx, vy) = r.EjeFondo;
+        return (r with
+        {
+            X = nuevoCentroX - (ux * r.Ancho + vx * r.Fondo) / 2,
+            Y = nuevoCentroY - (uy * r.Ancho + vy * r.Fondo) / 2
+        }).DentroDe(AnchoM, LargoM);
+    }
+
+    /// <summary>Rectángulo que encierra al polígono, en metros: (x, y, ancho, largo).</summary>
+    private (double X, double Y, double Ancho, double Largo) CajaEnMetros(IReadOnlyList<PuntoPoligono> puntos)
+    {
+        if (puntos.Count == 0) return (0, 0, 0, 0);
+        var xs = puntos.Select(p => p.X * AnchoM).ToList();
+        var ys = puntos.Select(p => p.Y * LargoM).ToList();
+        return (xs.Min(), ys.Min(), xs.Max() - xs.Min(), ys.Max() - ys.Min());
+    }
+
+    private void OlvidarContenedor(string cod)
+    {
+        _rectContenedor.Remove(cod);
+        _pendientesContenedor.Remove(cod);
+        if (EsObjetivoContenedor(cod)) LimpiarEdicion();
+    }
+
+    /// <summary>Recarga el piso después de un alta o una edición conservando la selección y
+    /// lo que se esté dibujando. Cambiar los datos de un almacén no debería costar el trabajo
+    /// de dibujo que todavía no se guardó.</summary>
+    private async Task RecargarPisoAsync()
+    {
+        var almacenSel = _almacenSel?.COD_ALMACEN;
+        await CargarPiso();
+        if (almacenSel is not null)
+            _almacenSel = _almacenes.FirstOrDefault(a => a.COD_ALMACEN == almacenSel);
+        // Si la figura en edición desapareció (la eliminaron), no queda nada que editar.
+        if (_objetivo is { } o)
+        {
+            var sigue = o.EsContenedor
+                ? _contenedores.Any(c => c.COD_CONTENEDOR == o.Codigo)
+                : _almacenes.Any(a => a.COD_ALMACEN == o.Codigo);
+            if (!sigue) LimpiarEdicion();
+        }
+    }
+
+    // ── Edición ───────────────────────────────────────────────────────────────
+    private void DibujarAlmacen(AlmacenesModel a)
+    {
+        _objetivo = new Objetivo(a.COD_ALMACEN, false, $"{a.COD_ALMACEN} · {a.DES_ALMACEN}");
+        _trazo = new List<PuntoPoligono>(PuntosDe(a.COD_ALMACEN));
+        _rectTrazo = null;
+        _redibujar = false;
+        // Si ya está dibujado, lo natural es querer retocarlo; si está vacío, dibujarlo.
+        _modo = _trazo.Count >= 3 ? Modo.Editar : Modo.Dibujar;
+    }
+
+    private void DibujarContenedor(ContenedorModel c)
+    {
+        _objetivo = new Objetivo(c.COD_CONTENEDOR, true, $"{c.COD_CONTENEDOR} · {c.DES_CONTENDOR}");
+        _trazo = new();
+        _rectTrazo = RectDe(c.COD_CONTENEDOR);
+        // Sin rectángulo previo no hay nada que arrastrar: se entra directamente a dibujar.
+        _redibujar = _rectTrazo is null;
+        _gesto = Gesto.Ninguno;
+    }
+
+    private void LimpiarEdicion()
+    {
+        _objetivo = null;
+        _trazo = new();
+        _rectTrazo = null;
+        _verticeArrastrado = null;
+        _gesto = Gesto.Ninguno;
+        _redibujar = false;
+    }
+
+    private async Task OnClickPlano(MouseEventArgs e)
+    {
+        // El rectángulo se construye arrastrando, no con clics sueltos.
+        if (_objetivo is not { EsContenedor: false } || _modo != Modo.Dibujar) return;
+        if (await PuntoAsync(e.ClientX, e.ClientY) is not PuntoPoligono p) return;
+
+        // Volver a tocar el primer vértice cierra la figura — el gesto habitual en cualquier
+        // editor de polígonos.
+        if (_trazo.Count >= 3 && Distancia(p, _trazo[0]) <= RadioEnganche)
+        {
+            TerminarTrazo();
+            return;
+        }
+
+        _trazo.Add(Ajustar(p));
+        SincronizarTrazo();
+    }
+
+    private async Task OnPointerDownPlano(PointerEventArgs e)
+    {
+        if (_objetivo is null) return;
+        if (await PuntoAsync(e.ClientX, e.ClientY) is not PuntoPoligono p) return;
+
+        if (_objetivo.EsContenedor) { await IniciarGestoRect(p, e.PointerId); return; }
+
+        // ── Almacén: engancha el vértice más cercano ──
+        // Se busca por proximidad en vez de exigir el clic exacto sobre el círculo: con
+        // hit-testing sobre un radio de 7px, "Mover" fallaba la mayoría de las veces.
+        if (_modo != Modo.Editar || _trazo.Count == 0) return;
+        var idx = -1;
+        var mejor = double.MaxValue;
+        for (var i = 0; i < _trazo.Count; i++)
+        {
+            var d = Distancia(p, _trazo[i]);
+            if (d < mejor) { mejor = d; idx = i; }
+        }
+        if (idx < 0 || mejor > RadioEnganche) return;
+
+        _verticeArrastrado = idx;
+        // Se guarda dónde estaba el puntero y dónde el vértice: el arrastre mueve por
+        // DIFERENCIA, no llevando el vértice a la posición del cursor. Como el enganche toma
+        // el vértice más cercano (no el exacto), moverlo en absoluto lo hacía saltar de golpe.
+        _origenPunteroNorm = p;
+        _origenVertice = _trazo[idx];
+        // Captura en el <svg>: sin esto el arrastre se corta apenas el puntero sale del
+        // lienzo, y el pointerup de afuera nunca llega — el vértice quedaba "pegado".
+        await CapturarAsync(e.PointerId);
+    }
+
+    /// <summary>Decide el gesto sobre el rectángulo según dónde cayó el puntero: manija de
+    /// giro, esquina, o interior.</summary>
+    private async Task IniciarGestoRect(PuntoPoligono p, long pointerId)
+    {
+        var m = AMetros(p);
+        _origenPunteroM = m;
+
+        // ── Colocar ──
+        // El tamaño no se dibuja: sale de COLUMNAS × LARGO DE NIVEL por PROFUNDIDAD. Colocar
+        // es sólo elegir dónde va, así que el rectángulo aparece con su medida real centrado
+        // en el puntero y el mismo gesto sigue arrastrándolo.
+        if (_redibujar || _rectTrazo is null)
+        {
+            var c = _contenedores.FirstOrDefault(x => x.COD_CONTENEDOR == _objetivo!.Codigo);
+            if (MedidasM(c) is not (double largo, double fondo))
+            {
+                // Va como diálogo y no como snackbar: no es un aviso al pasar, es la razón
+                // por la que el clic no hizo nada y dice exactamente qué falta cargar.
+                await MostrarAvisoAsync("Faltan medidas del contenedor",
+                    "Para ubicarlo hay que conocer su tamaño, y el tamaño sale de sus datos: " +
+                    "columnas, largo de nivel y profundidad de nivel. Complete esos tres campos " +
+                    "en el contenedor y vuelva a colocarlo.");
+                _redibujar = false;
+                return;
+            }
+
+            // Se prueba con la orientación actual y, si no entra, girado 90°: un rack que no
+            // cabe a lo largo suele caber a lo ancho, y hacer que el usuario lo gire a mano
+            // para descubrirlo es trabajo que la pantalla puede ahorrarse.
+            var angBase = _rectTrazo?.Angulo ?? 0;
+            RectanguloContenedor? elegido = null;
+            var giro = false;
+
+            ContenedorModel? choque = null;
+            foreach (var (ang, esGiro) in new[] { (angBase, false), (angBase + Math.PI / 2, true) })
+            {
+                var candidato = ArmarCentrado(m, largo, fondo, ang);
+                if (!CabeEnAlmacen(candidato, c!.COD_ALMACEN)) continue;
+
+                // Girarlo también sirve para esquivar a un vecino: puede no caber a lo largo
+                // entre dos racks y sí a lo ancho.
+                var pisa = ContenedorQueSePisa(candidato, c.COD_CONTENEDOR);
+                if (pisa is not null) { choque ??= pisa; continue; }
+
+                elegido = candidato;
+                giro = esGiro;
+                break;
+            }
+
+            if (elegido is null)
+            {
+                // El motivo cambia lo que hay que hacer, así que se distinguen los tres.
+                var motivo = choque is not null
+                    ? $"se encimaría sobre «{choque.DES_CONTENDOR}», ni a lo largo ni a lo ancho. Elija un lugar libre."
+                    : AlmacenBloqueado(c!.COD_ALMACEN)
+                        ? "queda fuera del almacén sobre el que está trabajando. Elija el almacén al que pertenece en el panel de la izquierda."
+                        : "queda fuera del contorno de su almacén, ni a lo largo ni a lo ancho. Colóquelo más adentro, " +
+                          "o apague «Limitar al almacén» si el mueble efectivamente sobresale.";
+
+                await MostrarAvisoAsync("El contenedor no entra ahí",
+                    $"«{c!.DES_CONTENDOR}» mide {largo:0.##} × {fondo:0.##} m y en ese punto {motivo}");
+                _redibujar = true;
+                return;
+            }
+
+            var nuevo = elegido.Value;
+            if (giro) Snackbar.Add("No entraba a lo largo: se colocó girado 90°.", Severity.Info);
+
+            _rectTrazo = nuevo;
+            _rectAlIniciarGesto = nuevo;
+            _redibujar = false;
+            _gesto = Gesto.Moviendo;
+            SincronizarRect();
+            await CapturarAsync(pointerId);
+            return;
+        }
+
+        var r = _rectTrazo.Value;
+        _rectAlIniciarGesto = r;
+        var engancheM = RadioEnganche * Math.Max(AnchoM, LargoM);
+
+        var (gx, gy) = ManijaGiroM(r);
+        if (DistanciaM(m, (gx, gy)) <= engancheM)
+        {
+            _gesto = Gesto.Girando;
+            await CapturarAsync(pointerId);
+            return;
+        }
+
+        // No hay gesto de redimensionar: estirar el rectángulo desmentiría las medidas del
+        // mueble, que son un dato del contenedor y no algo que se decida sobre el plano.
+        // Cualquier punto lo mueve entero.
+        _gesto = Gesto.Moviendo;
+        await CapturarAsync(pointerId);
+    }
+
+    /// <summary>Arma el rectángulo con su medida real centrado en el punto indicado, con la
+    /// orientación dada y ya encajado dentro del piso.</summary>
+    private RectanguloContenedor ArmarCentrado((double X, double Y) centro, double largo, double fondo, double angulo)
+    {
+        var (ux, uy) = (Math.Cos(angulo), Math.Sin(angulo));
+        var (vx, vy) = (-Math.Sin(angulo), Math.Cos(angulo));
+        return new RectanguloContenedor(
+            centro.X - (ux * largo + vx * fondo) / 2,
+            centro.Y - (uy * largo + vy * fondo) / 2,
+            largo, fondo, angulo).ConColumnasALoLargo().DentroDe(AnchoM, LargoM);
+    }
+
+    private async Task OnPointerMove(PointerEventArgs e)
+    {
+        if (_verticeArrastrado is null && _gesto == Gesto.Ninguno) return;
+        // Los pointermove llegan más rápido de lo que se resuelve el interop: sin este guard
+        // se encolan y la figura se mueve a saltos, siempre un paso atrasada.
+        if (_moviendo) return;
+        _moviendo = true;
+        try
+        {
+            if (await PuntoAsync(e.ClientX, e.ClientY) is not PuntoPoligono p) return;
+
+            if (_gesto != Gesto.Ninguno) { MoverRect(AMetros(p), e.ShiftKey); return; }
+
+            if (_verticeArrastrado is not int idx || idx >= _trazo.Count) return;
+            // Shift = movimiento fino: un cuarto del recorrido del puntero, para acomodar un
+            // vértice contra una pared sin pelearse con el mouse.
+            var factor = e.ShiftKey ? 0.25 : 1.0;
+            var destino = new PuntoPoligono(
+                _origenVertice.X + (p.X - _origenPunteroNorm.X) * factor,
+                _origenVertice.Y + (p.Y - _origenPunteroNorm.Y) * factor);
+
+            _trazo[idx] = Ajustar(Recortar(destino));
+            SincronizarTrazo();
+        }
+        finally { _moviendo = false; }
+    }
+
+    /// <summary>Aplica el gesto en curso sobre el rectángulo. Todo se calcula en metros y en
+    /// el sistema local del mueble (eje de columnas × eje de fondo). El tamaño nunca cambia:
+    /// sólo cambian su posición y su orientación.</summary>
+    private void MoverRect((double X, double Y) m, bool shift)
+    {
+        if (_rectTrazo is not RectanguloContenedor r) return;
+
+        switch (_gesto)
+        {
+            case Gesto.Moviendo:
+            {
+                var o = _rectAlIniciarGesto;
+                var dx = m.X - _origenPunteroM.X;
+                var dy = m.Y - _origenPunteroM.Y;
+                if (shift) { dx *= 0.25; dy *= 0.25; }
+                var pos = AjustarM(o.X + dx, o.Y + dy);
+                Proponer((o with { X = pos.X, Y = pos.Y }).DentroDe(AnchoM, LargoM));
+                break;
+            }
+            case Gesto.Girando:
+            {
+                var o = _rectAlIniciarGesto;
+                var ce = o.Centro;
+                // La manija sale por -EjeFondo, que apunta 90° antes que el eje de columnas.
+                var ang = Math.Atan2(m.Y - ce.Y, m.X - ce.X) + Math.PI / 2;
+                if (shift)
+                {
+                    const double paso = Math.PI / 12;   // 15°
+                    ang = Math.Round(ang / paso) * paso;
+                }
+                var (ux, uy) = (Math.Cos(ang), Math.Sin(ang));
+                var (vx, vy) = (-Math.Sin(ang), Math.Cos(ang));
+                // Gira sobre su centro: el mueble no se muda de lugar al orientarlo.
+                Proponer(new RectanguloContenedor(
+                    ce.X - (ux * o.Ancho + vx * o.Fondo) / 2,
+                    ce.Y - (uy * o.Ancho + vy * o.Fondo) / 2,
+                    o.Ancho, o.Fondo, ang).DentroDe(AnchoM, LargoM));
+                break;
+            }
+        }
+        SincronizarRect();
+    }
+
+    /// <summary>Acepta la nueva posición sólo si el contenedor sigue entrando en su almacén.
+    ///
+    /// Cuando no entra, el movimiento simplemente NO se aplica: el mueble se frena contra el
+    /// límite en vez de saltar a una posición corregida. Recortarlo sería peor —cambiaría su
+    /// tamaño, que es un dato real— y dejarlo pasar para avisar después obligaría a deshacer
+    /// a mano lo que el editor ya sabía que estaba mal.</summary>
+    private void Proponer(RectanguloContenedor candidato)
+    {
+        if (!CabeEnAlmacen(candidato, AlmacenDelObjetivo)) { _topeAlmacen = true; _topeContenedor = null; return; }
+
+        // Dos muebles no pueden ocupar el mismo lugar. Como con el límite del almacén, el
+        // movimiento no se aplica: el rack se frena contra el vecino en vez de encimarse y
+        // avisar después.
+        var choque = ContenedorQueSePisa(candidato, _objetivo?.Codigo ?? "");
+        if (choque is not null) { _topeAlmacen = false; _topeContenedor = choque.DES_CONTENDOR; return; }
+
+        _topeAlmacen = false;
+        _topeContenedor = null;
+        _rectTrazo = candidato;
+        // Si estaba marcado en rojo por haber crecido de más, al llevarlo a un lugar válido
+        // la marca se va sola: seguir mostrándola sería mentir sobre el estado actual.
+        if (_objetivo is not null) _conflictivos.Remove(_objetivo.Codigo);
+    }
+
+    private async Task OnPointerUp(PointerEventArgs e)
+    {
+        if (_verticeArrastrado is null && _gesto == Gesto.Ninguno) return;
+        _verticeArrastrado = null;
+
+        _gesto = Gesto.Ninguno;
+        _topeAlmacen = false;
+        _topeContenedor = null;
+        await LiberarAsync(e.PointerId);
+    }
+
+    private bool _moviendo;
+    private PuntoPoligono _origenPunteroNorm;
+    private PuntoPoligono _origenVertice;
+
+    private static PuntoPoligono Recortar(PuntoPoligono p)
+        => new(Math.Clamp(p.X, 0, 1), Math.Clamp(p.Y, 0, 1));
+
+    /// <summary>Radio de enganche en unidades normalizadas: ~2% del plano a zoom 1:1, y se
+    /// achica al acercarse, donde el usuario apunta con más precisión.</summary>
+    private double RadioEnganche => 0.02 / _zoom;
+
+    private static double Distancia(PuntoPoligono a, PuntoPoligono b)
+        => Math.Sqrt(Math.Pow(a.X - b.X, 2) + Math.Pow(a.Y - b.Y, 2));
+
+    private static double DistanciaM((double X, double Y) a, (double X, double Y) b)
+        => Math.Sqrt(Math.Pow(a.X - b.X, 2) + Math.Pow(a.Y - b.Y, 2));
+
+    private void DeshacerVertice()
+    {
+        if (_trazo.Count == 0) return;
+        _trazo.RemoveAt(_trazo.Count - 1);
+        SincronizarTrazo();
+    }
+
+    private void BorrarTrazo()
+    {
+        if (_objetivo is null) return;
+        if (_objetivo.EsContenedor)
+        {
+            _rectTrazo = null;
+            _rectContenedor.Remove(_objetivo.Codigo);
+            _pendientesContenedor.Add(_objetivo.Codigo);
+            _redibujar = true;
+        }
+        else
+        {
+            _trazo = new();
+            SincronizarTrazo();
+        }
+    }
+
+    private void TerminarTrazo()
+    {
+        if (_objetivo is { EsContenedor: false } && _trazo.Count is > 0 and < 3)
+        {
+            Snackbar.Add("Un polígono necesita al menos 3 vértices.", Severity.Warning);
+            return;
+        }
+        LimpiarEdicion();
+    }
+
+    /// <summary>Vuelca el polígono del almacén al mapa en memoria y lo marca como pendiente.</summary>
+    private void SincronizarTrazo()
+    {
+        if (_objetivo is not { EsContenedor: false } o) return;
+        _poligonosAlmacen[o.Codigo] = new List<PuntoPoligono>(_trazo);
+        _pendientesAlmacen.Add(o.Codigo);
+    }
+
+    private void SincronizarRect()
+    {
+        if (_objetivo is not { EsContenedor: true } o || _rectTrazo is not RectanguloContenedor r) return;
+        _rectContenedor[o.Codigo] = r;
+        _pendientesContenedor.Add(o.Codigo);
+    }
+
+    /// <summary>Convierte la posición del puntero a coordenadas normalizadas del plano.
+    /// Devuelve null si el interop falla — por ejemplo si planoEditor.js no llegó a
+    /// desplegarse. Sin este try/catch la excepción sube al ErrorBoundary del workspace y la
+    /// pestaña entera se reemplaza por la pantalla de error, que no dice nada útil.</summary>
+    private async Task<PuntoPoligono?> PuntoAsync(double clientX, double clientY)
+    {
+        try
+        {
+            var modulo = await ModuloAsync();
+            if (modulo is null) return null;
+            var p = await modulo.InvokeAsync<double[]>("puntoNormalizado", _svg, clientX, clientY);
+            if (p is not { Length: >= 2 }) return null;
+            return new PuntoPoligono(p[0], p[1]);
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(PlanoZonificacion), nameof(PuntoAsync));
+            AvisarInterop();
+            return null;
+        }
+    }
+
+    private async Task CapturarAsync(long pointerId)
+    {
+        try
+        {
+            var modulo = await ModuloAsync();
+            if (modulo is not null) await modulo.InvokeVoidAsync("capturarPuntero", _svg, pointerId);
+        }
+        catch (Exception ex) { await ErrorLog.LogAsync(ex, nameof(PlanoZonificacion), nameof(CapturarAsync)); }
+    }
+
+    private async Task LiberarAsync(long pointerId)
+    {
+        try
+        {
+            var modulo = await ModuloAsync();
+            if (modulo is not null) await modulo.InvokeVoidAsync("liberarPuntero", _svg, pointerId);
+        }
+        catch (Exception ex) { await ErrorLog.LogAsync(ex, nameof(PlanoZonificacion), nameof(LiberarAsync)); }
+    }
+
+    // El JS va como módulo ES cargado con import(): así no depende de un <script> en
+    // index.html, que es justo lo que suele quedarse sin actualizar al desplegar.
+    private IJSObjectReference? _modulo;
+    private bool _avisoInteropDado;
+
+    private async Task<IJSObjectReference?> ModuloAsync()
+    {
+        if (_modulo is not null) return _modulo;
+        try
+        {
+            _modulo = await JS.InvokeAsync<IJSObjectReference>("import", "./js/planoEditor.js");
+            return _modulo;
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(PlanoZonificacion), nameof(ModuloAsync));
+            AvisarInterop();
+            return null;
+        }
+    }
+
+    private void AvisarInterop()
+    {
+        if (_avisoInteropDado) return;
+        _avisoInteropDado = true;
+        _ = MostrarErrorAsync("No se pudo cargar el editor del plano. Verifique que exista " +
+                              "wwwroot/js/planoEditor.js en la publicación y recargue con Ctrl+F5.");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_modulo is null) return;
+        // Si el circuito ya se cerró, liberar el módulo lanza: no hay nada que hacer al respecto.
+        try { await _modulo.DisposeAsync(); } catch (JSDisconnectedException) { }
+    }
+
+    // ── Guardado ──────────────────────────────────────────────────────────────
+    private async Task GuardarCambios()
+    {
+        _guardando = true;
+        var okAlm = 0;
+        var okCont = 0;
+        var fallidos = new List<string>();
+        var fueraDeAlmacen = new List<string>();
+        var encimados = new List<string>();
+
+        foreach (var cod in _pendientesAlmacen.ToList())
+        {
+            var a = _almacenes.FirstOrDefault(x => x.COD_ALMACEN == cod);
+            if (a is null) { _pendientesAlmacen.Remove(cod); continue; }
+            try
+            {
+                a.DES_POLIGONO = Poligono.Serializar(_poligonosAlmacen.GetValueOrDefault(cod) ?? new());
+                // El SP hace upsert con TODAS las columnas: se manda el registro completo, no
+                // sólo el polígono, o se borraría el resto.
+                var resp = await Http.PostAsJsonAsync(ApiRoutes.Logistica.Almacenes, a);
+                if (resp.IsSuccessStatusCode) { okAlm++; _pendientesAlmacen.Remove(cod); }
+                else fallidos.Add(a.DES_ALMACEN ?? cod);
+            }
+            catch (Exception ex)
+            {
+                await ErrorLog.LogAsync(ex, nameof(PlanoZonificacion), nameof(GuardarCambios));
+                fallidos.Add(a.DES_ALMACEN ?? cod);
+            }
+        }
+
+        foreach (var cod in _pendientesContenedor.ToList())
+        {
+            var c = _contenedores.FirstOrDefault(x => x.COD_CONTENEDOR == cod);
+            if (c is null) { _pendientesContenedor.Remove(cod); continue; }
+
+            // Última barrera antes de escribir: el contorno del almacén pudo cambiar después
+            // de ubicar el contenedor, y guardar una posición inválida dejaría el dato malo
+            // en la base sin que nadie se entere.
+            if (RectDe(cod) is RectanguloContenedor rc)
+            {
+                if (!CabeEnAlmacen(rc, c.COD_ALMACEN))
+                {
+                    fueraDeAlmacen.Add(c.DES_CONTENDOR ?? cod);
+                    continue;
+                }
+                if (ContenedorQueSePisa(rc, cod) is ContenedorModel choque)
+                {
+                    encimados.Add($"{c.DES_CONTENDOR} sobre {choque.DES_CONTENDOR}");
+                    continue;
+                }
+            }
+
+            try
+            {
+                c.DES_POLIGONO = RectDe(cod)?.Serializar(AnchoM, LargoM);
+                var resp = await Http.PostAsJsonAsync(ApiRoutes.Logistica.ContenedoresAlmacenaje, c);
+                if (resp.IsSuccessStatusCode) { okCont++; _pendientesContenedor.Remove(cod); }
+                else fallidos.Add(c.DES_CONTENDOR ?? cod);
+            }
+            catch (Exception ex)
+            {
+                await ErrorLog.LogAsync(ex, nameof(PlanoZonificacion), nameof(GuardarCambios));
+                fallidos.Add(c.DES_CONTENDOR ?? cod);
+            }
+        }
+
+        _guardando = false;
+
+        if (fueraDeAlmacen.Any())
+            await MostrarAvisoAsync("Contenedores fuera de su almacén",
+                $"No se guardaron porque quedaron fuera del contorno de su almacén: " +
+                $"{string.Join(", ", fueraDeAlmacen)}. Vuelva a ubicarlos, o apague " +
+                "«Limitar al almacén» si efectivamente sobresalen.");
+        if (encimados.Any())
+            await MostrarAvisoAsync("Contenedores encimados",
+                $"No se guardaron porque ocupan el mismo lugar que otro mueble: " +
+                $"{string.Join(", ", encimados)}. Sepárelos antes de guardar.");
+        if (fallidos.Any())
+            await MostrarErrorAsync($"No se pudieron guardar: {string.Join(", ", fallidos)}.");
+        if (okAlm + okCont > 0)
+            Snackbar.Add($"Guardado: {okAlm} almacén(es), {okCont} contenedor(es).", Severity.Success);
+    }
+
+    // ── Avisos ────────────────────────────────────────────────────────────────
+    /// <summary>Errores por el diálogo estándar de la aplicación, no por snackbar: en esta
+    /// pantalla el snackbar aparece sobre el plano, se va solo y compite con el dibujo. Un
+    /// error que el usuario tiene que leer y decidir qué hacer necesita ser modal.
+    /// El snackbar queda para las confirmaciones —guardado, avisos de gesto—, que sí se
+    /// pueden ignorar.</summary>
+    private Task MostrarErrorAsync(string mensaje, string titulo = "No se pudo completar la operación")
+        => MostrarDialogoAsync(titulo, $"{mensaje} Ver detalle en el log de errores.");
+
+    private Task MostrarAvisoAsync(string titulo, string mensaje)
+        => MostrarDialogoAsync(titulo, mensaje);
+
+    private async Task MostrarDialogoAsync(string titulo, string mensaje)
+        => await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters { ["Titulo"] = titulo, ["Mensaje"] = mensaje },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+
+    private async Task<List<ComboboxItem>> CargarCombo(string ruta)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>(ruta);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(PlanoZonificacion), nameof(CargarCombo));
+            return new();
+        }
+    }
+}

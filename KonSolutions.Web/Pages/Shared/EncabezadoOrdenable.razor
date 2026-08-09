@@ -1,0 +1,33 @@
+@*
+    EncabezadoOrdenable.razor
+    --------------------------------------------------------------------------
+    Texto de cabecera de columna clicable, con flecha de orden ascendente/
+    descendente. Se usa dentro de HeaderTemplate junto a FiltroExcelColumna,
+    ya que MudBlazor no genera su propio sort label cuando se reemplaza
+    el HeaderTemplate por completo.
+*@
+
+@inject EtiquetasService EtiquetasSvc
+
+<span style="cursor:pointer;user-select:none;white-space:nowrap;" @onclick="@(() => OnClick.InvokeAsync())">
+    @TextoEfectivo
+    @if (Activo)
+    {
+        <MudIcon Icon="@(Ascendente ? Icons.Material.Filled.ArrowUpward : Icons.Material.Filled.ArrowDownward)"
+                 Style="font-size:.85rem;vertical-align:middle;" />
+    }
+</span>
+
+@code {
+    [Parameter] public string Texto { get; set; } = "";
+    /// <summary>Nombre de columna/campo (ej. "DES_PRODUCTO") para resolver el texto desde el
+    /// Diccionario de Etiquetas cuando no se pasa Texto explícito — Texto siempre gana.</summary>
+    [Parameter] public string? Campo { get; set; }
+    [Parameter] public bool Activo { get; set; }
+    [Parameter] public bool Ascendente { get; set; } = true;
+    [Parameter] public EventCallback OnClick { get; set; }
+
+    private string TextoEfectivo => !string.IsNullOrWhiteSpace(Texto)
+        ? Texto
+        : EtiquetasSvc.Obtener(Campo ?? "", Campo);
+}

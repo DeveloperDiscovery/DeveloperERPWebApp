@@ -1,0 +1,109 @@
+@* Diálogo modal separado para errores — se abre ENCIMA del diálogo de Eliminar/Editar
+   que lo disparó (no se cierra solo, el usuario lo cierra con el botón). Mismo diseño
+   que ErrorSqlBox.razor: cabecera de color según Origen, icono genérico arriba-izquierda,
+   icono de origen arriba-derecha, cuerpo blanco con mensaje + detalle técnico.
+   Uso:
+   await DialogService.ShowAsync<ErrorSqlDialog>("", new DialogParameters
+   {
+       ["Titulo"] = "No se pudo eliminar el registro", ["Origen"] = OrigenError.SQL,
+       ["Mensaje"] = msg, ["ErrorNumber"] = num, ["ErrorProcedure"] = proc, ["ErrorLine"] = line,
+       ["SqlSentence"] = sentencia
+   }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false }); *@
+@using KONSolutions.Web.Services
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<MudDialog>
+    <TitleContent>
+        <div class="error-sql-header" style="margin:-16px -24px 0;background:@Color;">
+            <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Style="font-size:1.3rem;flex-shrink:0;" />
+            <span class="error-sql-titulo">@Titulo</span>
+            <MudIcon Icon="@IconoOrigen" Style="font-size:1.4rem;flex-shrink:0;opacity:.95;" title="@EtiquetaOrigen" />
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="error-sql-mensaje">@Mensaje</div>
+
+        @if (ErrorNumber.HasValue || !string.IsNullOrWhiteSpace(ErrorProcedure) || !string.IsNullOrWhiteSpace(Endpoint) || !string.IsNullOrWhiteSpace(Pagina))
+        {
+            <dl class="error-sql-detalle">
+                @if (ErrorNumber.HasValue)
+                {
+                    <dt>N.º de error</dt><dd>@ErrorNumber</dd>
+                }
+                @if (!string.IsNullOrWhiteSpace(ErrorProcedure))
+                {
+                    <dt>Procedimiento</dt><dd>@ErrorProcedure</dd>
+                }
+                @if (ErrorLine.HasValue)
+                {
+                    <dt>Línea</dt><dd>@ErrorLine</dd>
+                }
+                @if (!string.IsNullOrWhiteSpace(Endpoint))
+                {
+                    <dt>Endpoint</dt><dd>@Endpoint</dd>
+                }
+                @if (!string.IsNullOrWhiteSpace(Pagina))
+                {
+                    <dt>Página</dt><dd>@Pagina</dd>
+                }
+            </dl>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(SqlSentence))
+        {
+            <div class="error-sql-sentencia">@SqlSentence</div>
+        }
+
+        @if (ErrorNumber.HasValue || !string.IsNullOrWhiteSpace(ErrorProcedure) || !string.IsNullOrWhiteSpace(Endpoint) || !string.IsNullOrWhiteSpace(Pagina) || !string.IsNullOrWhiteSpace(SqlSentence))
+        {
+            <button class="error-sql-copiar" style="color:@Color;" @onclick="CopiarDetalle">Copiar detalle técnico</button>
+        }
+    </DialogContent>
+    <DialogActions>
+        <button class="error-sql-cerrar" style="background:@Color;" @onclick="@(() => MudDialog.Close())" title="Cerrar">
+            <MudIcon Icon="@Icons.Material.Filled.Close" Style="font-size:1.1rem;" />
+        </button>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string Titulo { get; set; } = "No se pudo completar la operación";
+    [Parameter] public string Mensaje { get; set; } = "";
+    [Parameter] public OrigenError Origen { get; set; } = OrigenError.SQL;
+    [Parameter] public int? ErrorNumber { get; set; }
+    [Parameter] public string? ErrorProcedure { get; set; }
+    [Parameter] public int? ErrorLine { get; set; }
+    [Parameter] public string? Endpoint { get; set; }
+    [Parameter] public string? Pagina { get; set; }
+    [Parameter] public string? SqlSentence { get; set; }
+
+    private string Color => Origen switch
+    {
+        OrigenError.SQL => "#d0342c",
+        OrigenError.API => "#e6791a",
+        _               => "#1a9ce6"
+    };
+
+    private string IconoOrigen => Origen switch
+    {
+        OrigenError.SQL => Icons.Material.Filled.Storage,
+        OrigenError.API => Icons.Material.Filled.Dns,
+        _               => Icons.Material.Filled.Public
+    };
+
+    private string EtiquetaOrigen => Origen switch
+    {
+        OrigenError.SQL => "Error SQL",
+        OrigenError.API => "Error API",
+        _               => "Error WEB"
+    };
+
+    private async Task CopiarDetalle()
+    {
+        var texto = $"{Titulo}\n{Mensaje}\nN.º de error: {ErrorNumber}\nProcedimiento: {ErrorProcedure}\nLínea: {ErrorLine}\nEndpoint: {Endpoint}\nPágina: {Pagina}\nSentencia: {SqlSentence}";
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", texto); Snackbar.Add("Detalle copiado.", Severity.Success); }
+        catch { Snackbar.Add("No se pudo copiar.", Severity.Warning); }
+    }
+}

@@ -1,0 +1,307 @@
+@page "/sunat/regimenes-tributarios"
+@attribute [Authorize]
+@using RegimenModel = KONSolutions.Shared.Models.Sunat.RegimenesTributarios
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Regímenes Tributarios · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Regímenes Tributarios" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema SUNAT · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar régimen tributario..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="regimenes-tributarios" style="position:relative;">
+    <MudDataGrid T="RegimenModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código"
+                            Width="@Limites.ColWidth("SUNAT.REGIMENES_TRIBUTARIOS","COD_REGIMEN_TRIBUTARIO",60,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_REGIMEN_TRIBUTARIO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="RegimenModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_REGIMEN_TRIBUTARIO?.ToString() ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_REGIMEN_TRIBUTARIO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción"
+                            Width="@Limites.ColWidth("SUNAT.REGIMENES_TRIBUTARIOS","DES_REGIMEN_TRIBUTARIO",150,400)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_REGIMEN_TRIBUTARIO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="RegimenModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_REGIMEN_TRIBUTARIO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_REGIMEN_TRIBUTARIO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo Comprobante" Width="160">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Tipo Comprobante" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="RegimenModel" ItemsBase="@Base(2)" ValorDe="@(x=>x.DES_TIPO_COMPROBANTE_PAGO ?? x.COD_TIPO_COMPROBANTE_PAGO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_TIPO_COMPROBANTE_PAGO ?? context.Item.COD_TIPO_COMPROBANTE_PAGO)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo Operación" Width="180">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Tipo Operación" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="RegimenModel" ItemsBase="@Base(3)" ValorDe="@(x=>x.DES_TIPO_OPERACION ?? x.COD_TIPO_OPERACION)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <span class="mono" style="opacity:.5;font-size:.8rem;margin-right:4px;">@context.Item.COD_CLASE_OPERACION</span>
+                    @(context.Item.DES_TIPO_OPERACION ?? context.Item.COD_TIPO_OPERACION)
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Moneda" Width="110">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Moneda" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="RegimenModel" ItemsBase="@Base(4)" ValorDe="@(x=>x.DES_MONEDA ?? x.COD_MONEDA)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(4)" ValoresActivosChanged="@(v=>Filtro(4,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_MONEDA ?? context.Item.COD_MONEDA)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo Impuesto" Width="150">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Tipo Impuesto" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="RegimenModel" ItemsBase="@Base(5)" ValorDe="@(x=>x.DES_TIPO_IMPUESTO ?? x.COD_TIPO_IMPUESTO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(5)" ValoresActivosChanged="@(v=>Filtro(5,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_TIPO_IMPUESTO ?? context.Item.COD_TIPO_IMPUESTO)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tasa (%)" Width="100" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1 justify-center"><EncabezadoOrdenable Campo="TAS_REGIMEN_TRIBUTARIO" Activo="@(_ordenColumna == 6)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(6))" />
+                        <FiltroExcelColumna T="RegimenModel" ItemsBase="@Base(6)" ValorDe="@(x=>x.TAS_REGIMEN_TRIBUTARIO?.ToString("N3", System.Globalization.CultureInfo.CurrentCulture) ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(6)" ValoresActivosChanged="@(v=>Filtro(6,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate><span class="mono">@(context.Item.TAS_REGIMEN_TRIBUTARIO?.ToString("N3", System.Globalization.CultureInfo.CurrentCulture) ?? "—")</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Características" Sortable="false" Width="220" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <div class="d-flex align-center justify-center gap-1">
+                        <MudTooltip Text="Retención de tributo">
+                            <MudIcon Icon="@Icons.Material.Filled.RequestQuote" Color="@(context.Item.FLG_RETENCION_TRIBUTO == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_RETENCION_TRIBUTO == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                        <MudTooltip Text="Depósito en cuenta">
+                            <MudIcon Icon="@Icons.Material.Filled.AccountBalance" Color="@(context.Item.FLG_DEPOSITO_CUENTA == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_DEPOSITO_CUENTA == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                        <MudTooltip Text="Período">
+                            <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" Color="@(context.Item.FLG_PERIODO == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_PERIODO == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                        <MudTooltip Text="Incrementa">
+                            <MudIcon Icon="@Icons.Material.Filled.TrendingUp" Color="@(context.Item.FLG_INCREMENTA == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_INCREMENTA == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                        <MudTooltip Text="Depende de producto">
+                            <MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="@(context.Item.FLG_DEPENDE_PRODUCTO == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_DEPENDE_PRODUCTO == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                        <MudTooltip Text="Restricción">
+                            <MudIcon Icon="@Icons.Material.Filled.Block" Color="@(context.Item.FLG_RESTRICCION == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_RESTRICCION == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                        <MudTooltip Text="Provisión">
+                            <MudIcon Icon="@Icons.Material.Filled.Schedule" Color="@(context.Item.FLG_PROVISION == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_PROVISION == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Estado" Width="120" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1 justify-center"><EncabezadoOrdenable Texto="Estado" Activo="@(_ordenColumna == 7)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(7))" />
+                        <FiltroExcelColumna T="RegimenModel" ItemsBase="@Base(7)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(7)" ValoresActivosChanged="@(v=>Filtro(7,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrWhiteSpace(context.Item.DES_ESTADO))
+                    {
+                        <MudChip T="string" Style="@($"background-color:{context.Item.DES_BACKCOLOR};color:{context.Item.DES_FORECOLOR};")">@context.Item.DES_ESTADO</MudChip>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="RegimenModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<RegimenModel> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<RegimenModel> Ordenar(List<RegimenModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_REGIMEN_TRIBUTARIO).ToList() : items.OrderByDescending(x => x.COD_REGIMEN_TRIBUTARIO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_REGIMEN_TRIBUTARIO).ToList() : items.OrderByDescending(x => x.DES_REGIMEN_TRIBUTARIO).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_COMPROBANTE_PAGO ?? x.COD_TIPO_COMPROBANTE_PAGO).ToList() : items.OrderByDescending(x => x.DES_TIPO_COMPROBANTE_PAGO ?? x.COD_TIPO_COMPROBANTE_PAGO).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_OPERACION ?? x.COD_TIPO_OPERACION).ToList() : items.OrderByDescending(x => x.DES_TIPO_OPERACION ?? x.COD_TIPO_OPERACION).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_MONEDA ?? x.COD_MONEDA).ToList() : items.OrderByDescending(x => x.DES_MONEDA ?? x.COD_MONEDA).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_IMPUESTO ?? x.COD_TIPO_IMPUESTO).ToList() : items.OrderByDescending(x => x.DES_TIPO_IMPUESTO ?? x.COD_TIPO_IMPUESTO).ToList(),
+        6 => _ordenAscendente ? items.OrderBy(x => x.TAS_REGIMEN_TRIBUTARIO).ToList() : items.OrderByDescending(x => x.TAS_REGIMEN_TRIBUTARIO).ToList(),
+        7 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+    private List<RegimenModel> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<RegimenModel> Base(int col) => Aplicar(_items, col);
+
+    private List<RegimenModel> Aplicar(List<RegimenModel> src, int ex)
+    {
+        IEnumerable<RegimenModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_REGIMEN_TRIBUTARIO?.ToString() ?? "")),
+                1 => q.Where(x => v.Contains(x.DES_REGIMEN_TRIBUTARIO)),
+                2 => q.Where(x => v.Contains(x.DES_TIPO_COMPROBANTE_PAGO ?? x.COD_TIPO_COMPROBANTE_PAGO)),
+                3 => q.Where(x => v.Contains(x.DES_TIPO_OPERACION ?? x.COD_TIPO_OPERACION)),
+                4 => q.Where(x => v.Contains(x.DES_MONEDA ?? x.COD_MONEDA)),
+                5 => q.Where(x => v.Contains(x.DES_TIPO_IMPUESTO ?? x.COD_TIPO_IMPUESTO)),
+                6 => q.Where(x => v.Contains(x.TAS_REGIMEN_TRIBUTARIO?.ToString("N3", System.Globalization.CultureInfo.CurrentCulture) ?? "")),
+                7 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private async Task Buscar()
+        => _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("SUNAT", "RegimenesTributarios");
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("SUNAT.REGIMENES_TRIBUTARIOS", _onCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    // Respeta el término de búsqueda activo al refrescar (ej. tras un CRUD desde el diálogo)
+    // en vez de recargar siempre "todo" sin considerar el input de búsqueda.
+    private async Task Load() => _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+
+    private async Task<List<RegimenModel>> Fetch()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<RegimenModel>>>(
+                ApiRoutes.Sunat.RegimenesTributarios);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(RegimenesTributarios), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<RegimenModel>> FetchSearch(string s)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<RegimenModel>>>(
+                $"{ApiRoutes.Sunat.RegimenesTributariosSearch}?search={Uri.EscapeDataString(s)}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(RegimenesTributarios), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(RegimenModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(RegimenModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo régimen tributario",
+            CrudModo.Delete => $"Eliminar · {item?.DES_REGIMEN_TRIBUTARIO}",
+            _               => $"Editar · {item?.DES_REGIMEN_TRIBUTARIO}"
+        };
+        var dlg = await DialogService.ShowAsync<RegimenesTributariosDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("SUNAT.REGIMENES_TRIBUTARIOS", _onCambio ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

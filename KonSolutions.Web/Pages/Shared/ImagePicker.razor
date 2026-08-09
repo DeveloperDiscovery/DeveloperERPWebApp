@@ -1,0 +1,164 @@
+@* Componente de imagen: seleccionar, ver (ampliar), borrar, copiar y pegar desde el clipboard.
+   Convierte la imagen a byte[]. Uso:
+   <ImagePicker Image="_model.IMG_X" ImageChanged="v => _model.IMG_X = v" Label="Icono" /> *@
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject ConfigService ConfigSvc
+
+<div class="d-flex flex-column align-center pa-2" style="border:1px dashed var(--line);border-radius:8px;width:100%;box-sizing:border-box;">
+    @if (Image is not null && Image.Length > 0)
+    {
+        @* El tamaño va por style y no por Width/Height para poder acotarlo con max-width:100%:
+           así una vista previa grande (un plano, por ejemplo) no desborda el diálogo. *@
+        <MudImage Src="@PreviewSrc" ObjectFit="ObjectFit.Contain"
+                  Style="@($"width:{PreviewSize}px;max-width:100%;height:auto;max-height:{PreviewSize}px;border-radius:6px;margin-bottom:.5rem;cursor:pointer;")"
+                  @onclick="OpenViewer" />
+    }
+    else
+    {
+        <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" Style="opacity:.3;margin-bottom:.5rem;" />
+    }
+
+    <MudText Typo="Typo.caption" Class="mono mb-2" Style="opacity:.6;">@Label</MudText>
+
+    @if (!ReadOnly)
+    {
+    <div class="d-flex gap-1 align-center justify-center flex-wrap" style="row-gap:6px;">
+        <MudFileUpload T="IBrowserFile" Accept="image/*" FilesChanged="OnFileSelected">
+            <ActivatorContent>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Upload">Seleccionar</MudButton>
+            </ActivatorContent>
+        </MudFileUpload>
+
+        @if (Image is not null && Image.Length > 0)
+        {
+            <MudTooltip Text="Ver imagen">
+                <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" Color="Color.Default"
+                               OnClick="OpenViewer" />
+            </MudTooltip>
+            <MudTooltip Text="Copiar imagen">
+                <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Color="Color.Default"
+                               OnClick="CopyImage" />
+            </MudTooltip>
+        }
+        <MudTooltip Text="Pegar desde portapapeles">
+            <MudIconButton Icon="@Icons.Material.Filled.ContentPaste" Size="Size.Small" Color="Color.Default"
+                           OnClick="PasteImage" />
+        </MudTooltip>
+        @if (Image is not null && Image.Length > 0)
+        {
+            <MudTooltip Text="Borrar imagen">
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                               OnClick="Clear" />
+            </MudTooltip>
+        }
+    </div>
+    }
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <MudText Typo="Typo.caption" Color="Color.Error" Class="mt-1">@_error</MudText>
+    }
+</div>
+
+@* Visor ampliado *@
+<MudDialog @bind-Visible="_viewerOpen" Options="_viewerOptions">
+    <TitleContent>@Label</TitleContent>
+    <DialogContent>
+        @if (Image is not null && Image.Length > 0)
+        {
+            <div class="d-flex justify-center pa-2">
+                <MudImage Src="@PreviewSrc" Style="max-width:100%;max-height:60vh;object-fit:contain;" />
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _viewerOpen = false)">Cerrar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter] public byte[]? Image { get; set; }
+    [Parameter] public EventCallback<byte[]?> ImageChanged { get; set; }
+    [Parameter] public string Label { get; set; } = "Imagen";
+    [Parameter] public bool ReadOnly { get; set; }
+    /// <summary>Lado de la vista previa en px. 96 sirve para íconos; para planos u otras
+    /// imágenes que hay que poder leer sin abrir el visor, subir el valor.</summary>
+    [Parameter] public int PreviewSize { get; set; } = 96;
+    [Parameter] public bool RemoveBackground { get; set; } // true = elimina fondo al cargar
+    [Parameter] public int BackgroundThreshold { get; set; } = 30; // tolerancia 0-255
+    // Límite de tamaño: usa el configurado en la app (punto 5), global a todas las imágenes.
+    private long MaxBytes => (long)ConfigSvc.Current.ImagenMaxMB * 1024 * 1024;
+
+    private string _error = string.Empty;
+    private bool _viewerOpen;
+    private readonly DialogOptions _viewerOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+
+    private string PreviewSrc => Image is null ? "" : $"data:image/png;base64,{Convert.ToBase64String(Image)}";
+
+    private void OpenViewer() { if (Image is not null && Image.Length > 0) _viewerOpen = true; }
+
+    private async Task OnFileSelected(IBrowserFile? file)
+    {
+        _error = string.Empty;
+        if (file is null) return;
+        if (file.Size > MaxBytes) { _error = $"La imagen supera el máximo de {MaxBytes / (1024 * 1024)} MB."; return; }
+        try
+        {
+            using var stream = file.OpenReadStream(MaxBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            await ImageChanged.InvokeAsync(await AplicarTransparencia(bytes));
+        }
+        catch (Exception ex) { _error = "No se pudo cargar la imagen: " + ex.Message; }
+    }
+
+    private async Task<byte[]> AplicarTransparencia(byte[] bytes)
+    {
+        if (!RemoveBackground) return bytes;
+        try
+        {
+            var b64 = Convert.ToBase64String(bytes);
+            var result = await JS.InvokeAsync<string>("imageClipboard.removeBackground", b64, BackgroundThreshold);
+            if (!string.IsNullOrEmpty(result)) return Convert.FromBase64String(result);
+        }
+        catch { }
+        return bytes;
+    }
+
+    private async Task Clear() => await ImageChanged.InvokeAsync(null);
+
+    // Copiar la imagen del CRUD al portapapeles (como PNG)
+    private async Task CopyImage()
+    {
+        if (Image is null || Image.Length == 0) return;
+        try
+        {
+            var b64 = Convert.ToBase64String(Image);
+            var ok = await JS.InvokeAsync<bool>("imageClipboard.copy", b64);
+            Snackbar.Add(ok ? "Imagen copiada al portapapeles." : "No se pudo copiar.", ok ? Severity.Success : Severity.Warning);
+        }
+        catch (Exception ex) { _error = "No se pudo copiar: " + ex.Message; }
+    }
+
+    // Pegar una imagen desde el portapapeles
+    private async Task PasteImage()
+    {
+        _error = string.Empty;
+        try
+        {
+            var b64 = await JS.InvokeAsync<string>("imageClipboard.paste");
+            if (string.IsNullOrEmpty(b64))
+            {
+                Snackbar.Add("No hay imagen en el portapapeles.", Severity.Info);
+                return;
+            }
+            var bytes = Convert.FromBase64String(b64);
+            if (bytes.Length > MaxBytes) { _error = $"La imagen pegada supera {MaxBytes / (1024 * 1024)} MB."; return; }
+            await ImageChanged.InvokeAsync(await AplicarTransparencia(bytes));
+            Snackbar.Add("Imagen pegada desde el portapapeles.", Severity.Success);
+        }
+        catch (Exception ex) { _error = "No se pudo pegar: " + ex.Message; }
+    }
+}

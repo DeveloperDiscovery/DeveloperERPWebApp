@@ -1,0 +1,235 @@
+@page "/estandar/tipos-sucursales"
+@attribute [Authorize]
+@using TiposSucursalesModel = KONSolutions.Shared.Models.Estandar.TiposSucursales
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Tipos de Sucursales · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Sucursales" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar tipo de sucursal..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="tipos-sucursales" style="position:relative;">
+    <MudDataGrid T="TiposSucursalesModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código"
+                            Width="@Limites.ColWidth("ESTANDAR.TIPOS_SUCURSALES","COD_TIPO_SUCURSAL",60,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_TIPO_SUCURSAL" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TiposSucursalesModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_TIPO_SUCURSAL)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_SUCURSAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción"
+                            Width="@Limites.ColWidth("ESTANDAR.TIPOS_SUCURSALES","DES_TIPO_SUCURSAL",150,400)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_SUCURSAL" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TiposSucursalesModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_TIPO_SUCURSAL)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_SUCURSAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Tipo de uso" Sortable="false" Width="320">
+                <CellTemplate>
+                    <div class="d-flex align-center justify-center gap-1 flex-wrap">
+                        @foreach (var f in _flags)
+                        {
+                            var activo = f.Get(context.Item) == true;
+                            <MudTooltip Text="@f.Tooltip">
+                                <MudIcon Icon="@f.Icon" Color="@(activo ? Color.Success : Color.Error)"
+                                         Style="@(activo ? "" : "opacity:.15;")" Size="Size.Small" />
+                            </MudTooltip>
+                        }
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TiposSucursalesModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private static readonly (string Icon, string Tooltip, Func<TiposSucursalesModel, bool?> Get)[] _flags = new (string, string, Func<TiposSucursalesModel, bool?>)[]
+    {
+        (Icons.Material.Filled.Handyman,           "Servicio",             x => x.FLG_SERVICIO),
+        (Icons.Material.Filled.Factory,            "Planta",               x => x.FLG_PLANTA),
+        (Icons.Material.Filled.Warehouse,          "Almacén",              x => x.FLG_ALMACEN),
+        (Icons.Material.Filled.Business,           "Administración",       x => x.FLG_ADMINISTRACION),
+        (Icons.Material.Filled.Storefront,         "Tienda",               x => x.FLG_TIENDA),
+        (Icons.Material.Filled.SupportAgent,       "Call center",          x => x.FLG_CALLCENTER),
+        (Icons.Material.Filled.Code,               "Desarrollo",           x => x.FLG_DESARROLLO),
+        (Icons.Material.Filled.Construction,       "Explotación",          x => x.FLG_EXPLOTACION),
+        (Icons.Material.Filled.DirectionsBoat,     "Puerto",               x => x.FLG_PUERTO),
+        (Icons.Material.Filled.Flight,             "Aeropuerto",           x => x.FLG_AEROPUERTO),
+        (Icons.Material.Filled.DirectionsBus,      "Terminal terrestre",   x => x.FLG_TERMINAL_TERRESTRE),
+        (Icons.Material.Filled.LocalShipping,      "Patio de maniobras",   x => x.FLG_PATIO_MANIOBRAS),
+        (Icons.Material.Filled.LocalHospital,      "Centro médico",        x => x.FLG_CENTRO_MEDICO),
+        (Icons.Material.Filled.Hotel,              "Hotel",                x => x.FLG_HOTEL),
+        (Icons.Material.Filled.Dns,                "Centro de datos",      x => x.FLG_CENTRO_DATOS),
+        (Icons.Material.Filled.Inventory,          "Centro de distribución", x => x.FLG_CENTRO_DISTRIBUCION),
+        (Icons.Material.Filled.Visibility,         "Monitoreo",            x => x.FLG_MONITOREO),
+        (Icons.Material.Filled.Agriculture,        "Fundo",                x => x.FLG_FUNDO),
+        (Icons.Material.Filled.Cabin,              "Campamento",           x => x.FLG_CAMPAMENTO),
+        (Icons.Material.Filled.Gavel,              "Aduana",               x => x.FLG_ADUANA),
+    };
+
+    private List<TiposSucursalesModel> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<TiposSucursalesModel> Ordenar(List<TiposSucursalesModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_SUCURSAL).ToList() : items.OrderByDescending(x => x.COD_TIPO_SUCURSAL).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_SUCURSAL).ToList() : items.OrderByDescending(x => x.DES_TIPO_SUCURSAL).ToList(),
+        _ => items
+    };
+    private List<TiposSucursalesModel> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<TiposSucursalesModel> Base(int col) => Aplicar(_items, col);
+
+    private List<TiposSucursalesModel> Aplicar(List<TiposSucursalesModel> src, int ex)
+    {
+        IEnumerable<TiposSucursalesModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_TIPO_SUCURSAL)),
+                1 => q.Where(x => v.Contains(x.DES_TIPO_SUCURSAL)),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private async Task Buscar()
+        => _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ESTANDAR", "TiposSucursales");
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("ESTANDAR.TIPOS_SUCURSALES", _onCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load() => _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+
+    private async Task<List<TiposSucursalesModel>> Fetch()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposSucursalesModel>>>(
+                ApiRoutes.Estandar.TiposSucursales);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(TiposSucursales), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<TiposSucursalesModel>> FetchSearch(string s)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposSucursalesModel>>>(
+                $"{ApiRoutes.Estandar.TiposSucursales}/search?search={Uri.EscapeDataString(s)}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(TiposSucursales), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(TiposSucursalesModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(TiposSucursalesModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de sucursal",
+            CrudModo.Delete => $"Eliminar · {item?.DES_TIPO_SUCURSAL}",
+            _               => $"Editar · {item?.DES_TIPO_SUCURSAL}"
+        };
+        var dlg = await DialogService.ShowAsync<TiposSucursalesDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ESTANDAR.TIPOS_SUCURSALES", _onCambio ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

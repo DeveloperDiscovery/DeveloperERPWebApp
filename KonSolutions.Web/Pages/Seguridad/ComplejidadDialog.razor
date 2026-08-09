@@ -1,0 +1,140 @@
+@inject CatalogoService<ComplejidadPwd, ComplejidadPwdDto> Service
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo"
+                         Codigo="@Item?.COD_PASSWORD_COMPLEJIDAD"
+                         Descripcion="@Item?.DES_PASSWORD_COMPLEJIDAD" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <MudGrid>
+                <MudItem xs="12" sm="4">
+                    <CampoTexto Tabla="SEGURIDAD.COMPLEJIDAD_PASSWORD" Columna="COD_PASSWORD_COMPLEJIDAD"
+                                @bind-Value="_model.COD_PASSWORD_COMPLEJIDAD" Disabled="@(_isEdit || _readonly)" Class="" />
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <CampoTexto Tabla="SEGURIDAD.COMPLEJIDAD_PASSWORD" Columna="DES_PASSWORD_COMPLEJIDAD"
+                                @bind-Value="_model.DES_PASSWORD_COMPLEJIDAD" Disabled="_readonly" Class="" />
+                </MudItem>
+                <MudItem xs="6" sm="3">
+                    <MudNumericField @bind-Value="_model.CAN_CARACTERES_MINIMO" Label="Mín. caracteres"
+                                     Variant="Variant.Outlined" Disabled="_readonly" Min="1" Max="100"
+                                     Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </MudItem>
+                <MudItem xs="6" sm="3">
+                    <MudNumericField @bind-Value="_model.CAN_CARACTERES_MAXIMO" Label="Máx. caracteres"
+                                     Variant="Variant.Outlined" Disabled="_readonly" Min="1" Max="100"
+                                     Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudNumericField @bind-Value="_model.NUM_ORDEN_PRESENTACION" Label="Orden"
+                                     Variant="Variant.Outlined" Disabled="_readonly" Min="0"
+                                     Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudText Typo="Typo.caption" Class="mono" Style="opacity:.6;">
+                        Caracteres exigidos (deja vacío si no se exige ese tipo):
+                    </MudText>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="SEGURIDAD.COMPLEJIDAD_PASSWORD" Columna="DES_CARACTERES_LETRAS_MAYUSCULAS"
+                                @bind-Value="_model.DES_CARACTERES_LETRAS_MAYUSCULAS" Disabled="_readonly" Class="" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="SEGURIDAD.COMPLEJIDAD_PASSWORD" Columna="DES_CARACTERES_LETRAS_MINUSCULAS"
+                                @bind-Value="_model.DES_CARACTERES_LETRAS_MINUSCULAS" Disabled="_readonly" Class="" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="SEGURIDAD.COMPLEJIDAD_PASSWORD" Columna="DES_CARACTERES_NUMERICOS"
+                                @bind-Value="_model.DES_CARACTERES_NUMERICOS" Disabled="_readonly" Class="" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="SEGURIDAD.COMPLEJIDAD_PASSWORD" Columna="DES_CARACTERES_ESPECIALES"
+                                @bind-Value="_model.DES_CARACTERES_ESPECIALES" Disabled="_readonly" Class="" />
+                </MudItem>
+            </MudGrid>
+            <EstadoCombo DesTabla="SEGURIDAD.COMPLEJIDAD_PASSWORD" @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v ?? 0)"
+                         Disabled="_readonly" Class="mt-3 mb-3" />
+            <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                            CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                            FecRegistro="@Item?.FEC_REGISTRO"
+                            CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                            CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                            FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ComplejidadPwd? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private ComplejidadPwdDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de GetByIdAsync) hacia _model.</summary>
+    private void MapearDesdeModelo(ComplejidadPwd m)
+    {
+        _model = new ComplejidadPwdDto
+        {
+            COD_PASSWORD_COMPLEJIDAD = m.COD_PASSWORD_COMPLEJIDAD,
+            DES_PASSWORD_COMPLEJIDAD = m.DES_PASSWORD_COMPLEJIDAD ?? "",
+            DES_CARACTERES_LETRAS_MAYUSCULAS = m.DES_CARACTERES_LETRAS_MAYUSCULAS,
+            DES_CARACTERES_LETRAS_MINUSCULAS = m.DES_CARACTERES_LETRAS_MINUSCULAS,
+            DES_CARACTERES_NUMERICOS = m.DES_CARACTERES_NUMERICOS,
+            DES_CARACTERES_ESPECIALES = m.DES_CARACTERES_ESPECIALES,
+            CAN_CARACTERES_MINIMO = m.CAN_CARACTERES_MINIMO ?? 8,
+            CAN_CARACTERES_MAXIMO = m.CAN_CARACTERES_MAXIMO ?? 20,
+            NUM_ORDEN_PRESENTACION = m.NUM_ORDEN_PRESENTACION ?? 0,
+            COD_TIPO_ESTADO = m.COD_TIPO_ESTADO ?? 0,
+            COD_ESTADO = m.COD_ESTADO ?? 1
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde GetByIdAsync — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_PASSWORD_COMPLEJIDAD);
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Modo != CrudModo.Create && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.COD_PASSWORD_COMPLEJIDAD);
+            _saving = false;
+            if (okd) { Snackbar.Add("Regla eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(ComplejidadDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model, Modo == CrudModo.Create);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Regla actualizada." : "Regla creada.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(ComplejidadDialog));
+    }
+}

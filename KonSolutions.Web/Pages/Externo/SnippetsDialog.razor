@@ -1,0 +1,237 @@
+@using KONSolutions.Shared.Models.Externo
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_SNIPPET" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            <CampoTexto Tabla="EXTERNO.SNIPPETS" Columna="DES_SNIPPET"
+                        @bind-Value="_model.DES_SNIPPET"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            <CampoTextoEstable Label="URL del Snippet" @bind-Value="_model.URL_SNIPPET"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3"
+                          Disabled="_readonly" Required="true" RequiredError="Campo requerido."
+                          Immediate="true"
+                          OnBlur="@(_ => _model.URL_SNIPPET = _model.URL_SNIPPET?.Trim() ?? "")"
+                          Style="font-family:monospace;font-size:.85rem;" />
+
+            <CampoTextoEstable Label="Token de autorización (Bearer)" @bind-Value="_model.DES_TOKEN"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3"
+                          Disabled="_readonly"
+                          Immediate="true"
+                          OnBlur="@(_ => _model.DES_TOKEN = string.IsNullOrWhiteSpace(_model.DES_TOKEN) ? null : _model.DES_TOKEN.Trim())"
+                          Style="font-family:monospace;font-size:.85rem;" />
+
+            <div class="mb-3 d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.AttachMoney" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch T="bool" @bind-Value="_model.FLG_FREE_PAY"
+                           Label="@(_model.FLG_FREE_PAY ? "FREE (gratuito)" : "PAY (de pago)")"
+                           Color="Color.Success" Disabled="_readonly" />
+            </div>
+
+            @* ── App / Opción / Botón ── *@
+            <AriaCombo TItem="ComboItem" Items="_apps"
+                       TextFunc="@(a => a.Texto)" ValueFunc="@(a => a.Id.Trim())"
+                       Value="@(_model.COD_APLICACION?.Trim())" ValueChanged="@(v => OnAppChanged(v ?? ""))"
+                       Label="Aplicación" Disabled="_readonly" />
+
+            <AriaCombo TItem="ComboItem" Items="_opciones"
+                       TextFunc="@(o => o.Texto)" ValueFunc="@(o => o.Id.Trim())"
+                       Value="@(_model.COD_OPCION_APLICACION?.Trim())" ValueChanged="@(v => OnOpcionChanged(v ?? ""))"
+                       Label="Opción" Disabled="@(_readonly || string.IsNullOrEmpty(_model.COD_APLICACION))" />
+
+            <AriaCombo TItem="ComboItem" Items="_botones"
+                       TextFunc="@(b => b.Texto)" ValueFunc="@(b => b.Id.Trim())"
+                       Value="@(_model.COD_BOTON_OPCION?.Trim())" ValueChanged="@(v => _model.COD_BOTON_OPCION = v)"
+                       Label="Botón" Disabled="@(_readonly || string.IsNullOrEmpty(_model.COD_OPCION_APLICACION))" />
+
+            <EstadoCombo DesTabla="EXTERNO.SNIPPETS"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Snippet? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private SnippetDto _model = new();
+    private bool _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private record ComboItem(string Id, string Texto);
+
+    private class OpcionDto
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("coD_OPCION_APLICACION")]
+        public string COD_OPCION_APLICACION { get; set; } = "";
+        [System.Text.Json.Serialization.JsonPropertyName("deS_OPCION_APLICACION")]
+        public string DES_OPCION_APLICACION { get; set; } = "";
+    }
+    private class BotonDto
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("coD_BOTON_OPCION")]
+        public string COD_BOTON_OPCION { get; set; } = "";
+        [System.Text.Json.Serialization.JsonPropertyName("deS_BOTON_OPCION")]
+        public string DES_BOTON_OPCION { get; set; } = "";
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions _jOpts =
+        new() { PropertyNameCaseInsensitive = true };
+
+    private List<ComboItem> _apps     = new();
+    private List<ComboItem> _opciones = new();
+    private List<ComboItem> _botones  = new();
+
+    private void MapearDesdeModelo(Snippet m)
+    {
+        _model.COD_SNIPPET           = m.COD_SNIPPET;
+        _model.DES_SNIPPET           = m.DES_SNIPPET ?? "";
+        _model.URL_SNIPPET           = m.URL_SNIPPET ?? "";
+        _model.DES_TOKEN             = m.DES_TOKEN;
+        _model.FLG_FREE_PAY          = m.FLG_FREE_PAY;
+        _model.COD_APLICACION        = m.COD_APLICACION;
+        _model.COD_OPCION_APLICACION = m.COD_OPCION_APLICACION;
+        _model.COD_BOTON_OPCION      = m.COD_BOTON_OPCION;
+        _model.COD_TIPO_ESTADO       = m.COD_TIPO_ESTADO;
+        _model.COD_ESTADO            = m.COD_ESTADO;
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        if (_model.COD_SNIPPET is null) return;
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<Snippet>>(
+                $"{ApiRoutes.Externo.Snippets}/{_model.COD_SNIPPET}", _jOpts);
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (Modo != CrudModo.Create && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        await CargarApps();
+
+        if (!string.IsNullOrEmpty(_model.COD_APLICACION))
+        {
+            await CargarOpciones(_model.COD_APLICACION);
+            if (!string.IsNullOrEmpty(_model.COD_OPCION_APLICACION))
+                await CargarBotones(_model.COD_APLICACION, _model.COD_OPCION_APLICACION);
+        }
+    }
+
+    private async Task CargarApps()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<KONSolutions.Shared.Common.ComboboxItem>>>(
+                ApiRoutes.Seguridad.AplicacionesCombobox, _jOpts);
+            _apps = (r?.Data ?? new()).Select(x => new ComboItem(x.Id.Trim(), x.Texto)).ToList();
+        }
+        catch { _apps = new(); }
+    }
+
+    private async Task CargarOpciones(string codApp)
+    {
+        _opciones = new();
+        try
+        {
+            var url = $"{ApiRoutes.Seguridad.AplicacionesOpciones}/by-app?codAplicacion={Uri.EscapeDataString(codApp)}&tipoOpciones=MDL,SMD";
+            var body = await Http.GetStringAsync(url);
+            var r = System.Text.Json.JsonSerializer.Deserialize<KONSolutions.Shared.Common.ApiResponse<List<OpcionDto>>>(body, _jOpts);
+            _opciones = (r?.Data ?? new())
+                .Select(x => new ComboItem(x.COD_OPCION_APLICACION.Trim(), x.DES_OPCION_APLICACION))
+                .Where(x => x.Id != "")
+                .ToList();
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(SnippetsDialog)); _opciones = new(); }
+    }
+
+    private async Task CargarBotones(string codApp, string codOpcion)
+    {
+        _botones = new();
+        try
+        {
+            var url = $"{ApiRoutes.Seguridad.AplicacionesOpcionesBotones}?codAplicacion={Uri.EscapeDataString(codApp)}&codOpcionAplicacion={Uri.EscapeDataString(codOpcion)}";
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<BotonDto>>>(url, _jOpts);
+            _botones = (r?.Data ?? new())
+                .Select(x => new ComboItem(x.COD_BOTON_OPCION.Trim(), x.DES_BOTON_OPCION))
+                .Where(x => x.Id != "")
+                .ToList();
+        }
+        catch { _botones = new(); }
+    }
+
+    private async Task OnAppChanged(string val)
+    {
+        _model.COD_APLICACION        = val;
+        _model.COD_OPCION_APLICACION = null;
+        _model.COD_BOTON_OPCION      = null;
+        _botones  = new();
+        _opciones = new();
+        if (!string.IsNullOrEmpty(val)) await CargarOpciones(val);
+        StateHasChanged();
+    }
+
+    private async Task OnOpcionChanged(string val)
+    {
+        _model.COD_OPCION_APLICACION = val;
+        _model.COD_BOTON_OPCION      = null;
+        _botones = new();
+        if (!string.IsNullOrEmpty(val) && !string.IsNullOrEmpty(_model.COD_APLICACION))
+            await CargarBotones(_model.COD_APLICACION, val);
+        StateHasChanged();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete && _model.COD_SNIPPET is not null)
+        {
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Externo.Snippets}/{_model.COD_SNIPPET}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(SnippetsDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        _model.DES_SNIPPET = _model.DES_SNIPPET?.Trim() ?? "";
+        _model.URL_SNIPPET = _model.URL_SNIPPET?.Trim() ?? "";
+        _model.DES_TOKEN   = string.IsNullOrWhiteSpace(_model.DES_TOKEN) ? null : _model.DES_TOKEN.Trim();
+        var resp = await Http.PostAsJsonAsync(ApiRoutes.Externo.Snippets, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode)
+        {
+            Snackbar.Add(Modo == CrudModo.Create ? "Snippet creado." : "Snippet actualizado.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(SnippetsDialog), nameof(Submit));
+    }
+}

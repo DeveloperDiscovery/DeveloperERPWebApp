@@ -1,0 +1,137 @@
+@inject CatalogoService<Perfil, PerfilDto> Service
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(820px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo"
+                         Codigo="@Perfil?.COD_PERFIL_USUARIO"
+                         Descripcion="@Perfil?.DES_PERFIL_USUARIO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <div style="display:flex;gap:16px;align-items:flex-start;">
+                <div style="flex:1;min-width:0;">
+                    <CampoTexto Tabla="SEGURIDAD.PERFILES_USUARIO" Columna="COD_PERFIL_USUARIO"
+                                @bind-Value="_model.COD_PERFIL_USUARIO" Disabled="@(_isEdit || _readonly)" Obligatorio="true" />
+                    <CampoTexto Tabla="SEGURIDAD.PERFILES_USUARIO" Columna="DES_PERFIL_USUARIO"
+                                @bind-Value="_model.DES_PERFIL_USUARIO" Disabled="_readonly" Obligatorio="true" />
+                    <AriaCombo TItem="ComboboxItem"
+                                 Items="_complejidades"
+                                 TextFunc="@(c => c.Texto)"
+                                 ValueFunc="@(c => c.Id)"
+                                 @bind-Value="_model.COD_PASSWORD_COMPLEJIDAD"
+                                 Label="Complejidad de contraseña"
+                                 Disabled="_readonly"
+                                 Class="mb-3" />
+                    <div class="d-flex flex-column gap-1 my-3">
+                        <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Code" Color="Color.Primary" Size="Size.Medium" />
+                            <MudSwitch @bind-Value="_model.FLG_DEVELOPER" Color="Color.Primary" Disabled="_readonly" Label="Developer" /></div>
+                        <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.AdminPanelSettings" Color="Color.Primary" Size="Size.Medium" />
+                            <MudSwitch @bind-Value="_model.FLG_ADMINISTRADOR" Color="Color.Primary" Disabled="_readonly" Label="Administrador" /></div>
+                        <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Security" Color="Color.Primary" Size="Size.Medium" />
+                            <MudSwitch @bind-Value="_model.FLG_SEGURIDAD" Color="Color.Primary" Disabled="_readonly" Label="Seguridad" /></div>
+                        <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.FactCheck" Color="Color.Primary" Size="Size.Medium" />
+                            <MudSwitch @bind-Value="_model.FLG_AUDITORIA" Color="Color.Primary" Disabled="_readonly" Label="Auditoría" /></div>
+                        <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Storefront" Color="Color.Primary" Size="Size.Medium" />
+                            <MudSwitch @bind-Value="_model.FLG_COMERCIAL" Color="Color.Primary" Disabled="_readonly" Label="Comercial" /></div>
+                        <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.AccountTree" Color="Color.Primary" Size="Size.Medium" />
+                            <MudSwitch @bind-Value="_model.FLG_DEPENDENCIA_COMERCIAL" Color="Color.Primary" Disabled="_readonly" Label="Dependencia Comercial" /></div>
+                    </div>
+                    <EstadoCombo DesTabla="SEGURIDAD.PERFILES_USUARIO" @bind-Value="_model.COD_ESTADO"
+                                 CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v ?? 0)"
+                                 Disabled="_readonly" Class="mt-3 mb-3" />
+                </div>
+                <div style="flex-shrink:0;padding-left:8px;border-left:1px solid rgba(0,0,0,.1);">
+                    <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)" Label="Icono del perfil" ReadOnly="_readonly" />
+                </div>
+            </div>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    @if (_isEdit && Perfil is not null)
+                    {
+                        <PanelAuditoria CodUsuarioRegistro="@Perfil.COD_USUARIO_REGISTRO"
+                                        CodEstacionRegistro="@Perfil.COD_ESTACION_REGISTRO"
+                                        FecRegistro="@Perfil.FEC_REGISTRO"
+                                        CodUsuarioActualizacion="@Perfil.COD_USUARIO_ACTUALIZACION"
+                                        CodEstacionActualizacion="@Perfil.COD_ESTACION_ACTUALIZACION"
+                                        FecActualizacion="@Perfil.FEC_ACTUALIZACION" />
+                    }
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Perfil? Perfil { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    private PerfilDto _model = new() { COD_ESTADO = 1 };
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+    private List<ComboboxItem> _complejidades = new();
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Modo == CrudModo.Update || Modo == CrudModo.Read || Modo == CrudModo.Delete;
+        if (Perfil is not null) MapearDesdeModelo(Perfil);
+    }
+
+
+    /// <summary>Copia los campos editables del modelo (Perfil de la grilla, o la respuesta
+    /// fresca de GetByIdAsync) hacia _model.</summary>
+    private void MapearDesdeModelo(Perfil m)
+    {
+        _model = new PerfilDto
+        {
+            COD_PERFIL_USUARIO = m.COD_PERFIL_USUARIO,
+            DES_PERFIL_USUARIO = m.DES_PERFIL_USUARIO ?? "",
+            COD_PASSWORD_COMPLEJIDAD = m.COD_PASSWORD_COMPLEJIDAD,
+            FLG_DEVELOPER = m.FLG_DEVELOPER,
+            FLG_ADMINISTRADOR = m.FLG_ADMINISTRADOR,
+            FLG_SEGURIDAD = m.FLG_SEGURIDAD,
+            FLG_AUDITORIA = m.FLG_AUDITORIA,
+            FLG_COMERCIAL = m.FLG_COMERCIAL,
+            FLG_DEPENDENCIA_COMERCIAL = m.FLG_DEPENDENCIA_COMERCIAL,
+            COD_TIPO_ESTADO = m.COD_TIPO_ESTADO ?? 0,
+            COD_ESTADO = m.COD_ESTADO ?? 1,
+            IMG_ICONO = m.IMG_ICONO
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde GetByIdAsync — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_PERFIL_USUARIO);
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _complejidades = (await Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Seguridad.ComplejidadPasswordCombobox)) ?? new();
+        if (Modo != CrudModo.Create && Perfil is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.COD_PERFIL_USUARIO);
+            _saving = false;
+            if (okd) { Snackbar.Add("Perfil eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(PerfilDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model, Modo == CrudModo.Create);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Perfil actualizado." : "Perfil creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(PerfilDialog));
+    }
+}

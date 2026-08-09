@@ -1,0 +1,128 @@
+@using KONSolutions.Shared.Models.Administracion
+@inject CatalogoService<Cargo, CargoDto> Service
+@inject CatalogoService<TipoCargoAdministrativo, TipoCargoAdministrativoDto> TiposCargoSvc
+@inject CatalogoService<Area, AreaDto> AreasSvc
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(680px,95vw);">
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            @if (_isEdit || _readonly)
+            {
+                <MudTextField Value="@_model.COD_CARGO?.ToString()" Label="Código" Variant="Variant.Outlined"
+                              Disabled="true" Class="mb-3" />
+            }
+            <CampoTexto Tabla="ADMINISTRACION.CARGOS" Columna="DES_CARGO"
+                        @bind-Value="_model.DES_CARGO" Disabled="_readonly" />
+
+            <AriaCombo TItem="Area"
+                       Items="_areas"
+                       TextFunc="@(a => $"{a.COD_AREA} – {a.DES_AREA}")"
+                       ValueFunc="@(a => a.COD_AREA.ToString())"
+                       @bind-Value="_codAreaTexto"
+                       Label="Área" Disabled="_readonly" />
+
+            <AriaCombo TItem="TipoCargoAdministrativo"
+                       Items="_tiposCargo"
+                       TextFunc="@(t => t.DES_TIPO_CARGO ?? t.COD_TIPO_CARGO.ToString())"
+                       ValueFunc="@(t => t.COD_TIPO_CARGO.ToString())"
+                       @bind-Value="_codTipoCargoTexto"
+                       Label="Tipo de cargo" Disabled="_readonly" />
+
+            <MudNumericField @bind-Value="_model.NUM_ORDEN_PRESENTACION" Label="Orden de presentación" Variant="Variant.Outlined"
+                              Disabled="_readonly" Class="mb-3" Min="0" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+
+            <EstadoCombo DesTabla="ADMINISTRACION.CARGOS"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Cargo? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private CargoDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+    private List<TipoCargoAdministrativo> _tiposCargo = new();
+    private List<Area> _areas = new();
+
+    private string? _codTipoCargoTexto
+    {
+        get => _model.COD_TIPO_CARGO?.ToString();
+        set => _model.COD_TIPO_CARGO = int.TryParse(value, out var v) ? v : null;
+    }
+
+    private string? _codAreaTexto
+    {
+        get => _model.COD_AREA?.ToString();
+        set => _model.COD_AREA = int.TryParse(value, out var v) ? v : null;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (Modo != CrudModo.Create && Item is not null) await RecargarDesdeShowbyidAsync();
+        _tiposCargo = await TiposCargoSvc.GetAllAsync();
+        _areas      = await AreasSvc.GetAllAsync();
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de GetByIdAsync) hacia _model.</summary>
+    private void MapearDesdeModelo(Cargo m)
+    {
+        _model = new CargoDto
+        {
+            COD_CARGO              = m.COD_CARGO,
+            DES_CARGO              = m.DES_CARGO,
+            COD_AREA               = m.COD_AREA,
+            COD_TIPO_CARGO         = m.COD_TIPO_CARGO,
+            NUM_ORDEN_PRESENTACION = m.NUM_ORDEN_PRESENTACION,
+            COD_TIPO_ESTADO        = m.COD_TIPO_ESTADO,
+            COD_ESTADO             = m.COD_ESTADO
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde GetByIdAsync — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_CARGO?.ToString() ?? "");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.COD_CARGO?.ToString() ?? "");
+            _saving = false;
+            if (okd) { Snackbar.Add("Cargo eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(CargosDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model, Modo == CrudModo.Create);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Cargo actualizado." : "Cargo creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(CargosDialog));
+    }
+}

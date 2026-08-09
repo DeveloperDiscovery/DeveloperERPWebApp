@@ -1,0 +1,775 @@
+@page "/seguridad/asignacion-opciones-roles"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ConfigService ConfigSvc
+@inject IJSRuntime JS
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+@using KONSolutions.Shared.Models.Seguridad
+@using KONSolutions.Shared.Common
+@using System.Net.Http.Json
+
+<PageTitle>Asignación de Opciones a Roles · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<style>
+    .aor-panel {
+        display:flex; flex-direction:column; overflow:hidden; border-radius:6px;
+        background: var(--paper, #efe9df); color: var(--ink, #16130f);
+    }
+    .aor-header {
+        font-size:.81rem; font-weight:600; letter-spacing:.02em;
+        padding:8px 12px;
+        display:flex; align-items:center; gap:6px; flex-shrink:0;
+        background: var(--grilla-cab-fondo, #2b2622); color: var(--grilla-cab-texto, #fff);
+    }
+    .aor-scroll { flex:1; overflow-y:auto; padding:4px 0; min-height:0; }
+    .rol-row {
+        padding:5px 12px; cursor:pointer;
+        font-size:.83rem; display:flex; align-items:center; gap:8px;
+        transition:background .13s; user-select:none;
+        color: var(--grilla-texto, #efe9df);
+    }
+    .rol-row:nth-of-type(even) { background: var(--grilla-fila-par, #1a1714); }
+    .rol-row:nth-of-type(odd)  { background: var(--grilla-fila-impar, #201b17); }
+    .rol-row:hover:not(.activo) { filter: brightness(1.2); }
+    .rol-row.activo { background: var(--foco-fondo, #b8472d) !important; color: var(--foco-texto, #fff) !important; }
+    .nodo-row {
+        padding:4px 8px; cursor:pointer;
+        font-size:.81rem; display:flex; align-items:center; gap:6px;
+        transition:background .12s; user-select:none;
+        color: var(--grilla-texto, #efe9df);
+    }
+    .nodo-row:nth-of-type(even) { background: var(--grilla-fila-par, #1a1714); }
+    .nodo-row:nth-of-type(odd)  { background: var(--grilla-fila-impar, #201b17); }
+    .nodo-row:hover:not(.activo) { filter: brightness(1.2); }
+    .nodo-row.activo { background: var(--foco-fondo, #b8472d) !important; color: var(--foco-texto, #fff) !important; font-weight:600; }
+    .nodo-header {
+        padding:3px 8px; font-size:.75rem; font-weight:600;
+        opacity:.5; letter-spacing:.04em; text-transform:uppercase;
+        display:flex; align-items:center; gap:5px;
+    }
+    .ctx-item {
+        display:flex; align-items:center; gap:8px;
+        padding:8px 16px; cursor:pointer; font-size:.84rem;
+        transition:background .13s;
+    }
+    .ctx-item:hover { background:rgba(0,0,0,.06); }
+    .ctx-danger:hover { background:rgba(229,62,62,.08); color:#e53e3e; }
+    .empty-hint { padding:28px 12px; text-align:center; opacity:.4; font-size:.8rem; font-style:italic; }
+    /* Switch de Botones: verde cuando está en true, rojo cuando está en false
+       (MudSwitch por defecto solo tiñe el estado encendido, el track apagado
+       queda gris — se fuerza el color del track apagado a rojo). */
+    .sw-off .mud-switch-track { background-color:#d0342c !important; opacity:.7 !important; }
+    .sw-off .mud-switch-thumb { color:#d0342c !important; }
+    .sw-on  .mud-switch-track { background-color:#2f8f5b !important; opacity:.7 !important; }
+</style>
+
+@* ── Menú contextual: opciones asignadas (Quitar) ──────────────────────── *@
+@if (_ctxAsig)
+{
+    <div style="position:fixed;left:@(_ctxX)px;top:@(_ctxY)px;z-index:9999;
+                background:var(--menu-back,#2b2622);color:var(--menu-fore,#fff);border:1px solid var(--line);border-radius:6px;
+                box-shadow:0 4px 20px rgba(0,0,0,.18);min-width:170px;padding:4px 0;"
+         @onclick:stopPropagation="true">
+        <div class="ctx-item ctx-danger" @onclick="EliminarAsignada">
+            <MudIcon Icon="@Icons.Material.Filled.LinkOff" Style="font-size:1rem;color:#e53e3e;" />
+            Quitar del rol
+        </div>
+    </div>
+}
+
+@* ── Menú contextual: opciones disponibles (Asignar) ───────────────────── *@
+@if (_ctxDisp)
+{
+    <div style="position:fixed;left:@(_ctxX)px;top:@(_ctxY)px;z-index:9999;
+                background:var(--menu-back,#2b2622);color:var(--menu-fore,#fff);border:1px solid var(--line);border-radius:6px;
+                box-shadow:0 4px 20px rgba(0,0,0,.18);min-width:170px;padding:4px 0;"
+         @onclick:stopPropagation="true">
+        <div class="ctx-item" @onclick="AsignarDisponible">
+            <MudIcon Icon="@Icons.Material.Filled.AddLink" Style="font-size:1rem;color:#2b6cb0;" />
+            Asignar al rol
+        </div>
+    </div>
+}
+
+<div @onclick="CerrarMenus" style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column;">
+
+<div class="d-flex align-center justify-space-between mb-3" style="flex-shrink:0;">
+    <div>
+        <TituloPagina Fallback="Asignación de Opciones a Roles" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+            Schema SEGURIDAD · asignar opciones de menú a roles de usuario
+        </MudText>
+    </div>
+    <div class="d-flex gap-2 align-center">
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Refresh" OnClick="Recargar">
+            Actualizar
+        </MudButton>
+    </div>
+</div>
+
+@* Franja de botones Quitar/Asignar: centrada sobre las 3 columnas de la derecha
+   (Asignadas + Botones + Disponibles), respetando el ancho de Roles a la izquierda,
+   a la altura de los encabezados de columna. *@
+<div style="display:grid;grid-template-columns:260px 0.72fr 254px 0.72fr;gap:12px;flex-shrink:0;margin-bottom:8px;">
+    <div></div>
+    <div style="grid-column:2 / 5;display:flex;justify-content:center;gap:10px;">
+        <MudTooltip Text="Quitar del rol la opción seleccionada de asignadas">
+            <MudButton Variant="Variant.Filled" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.ChevronLeft"
+                       Disabled="@(_nodoSel is null)" OnClick="MoverAsignadaADisponibles"
+                       Style="background:var(--ink);color:var(--paper);font-weight:700;">
+                Quitar del rol
+            </MudButton>
+        </MudTooltip>
+        <MudTooltip Text="Asignar al rol la opción seleccionada de disponibles">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       EndIcon="@Icons.Material.Filled.ChevronRight"
+                       Disabled="@(_nodoDispSel is null)" OnClick="MoverDisponibleAAsignadas">
+                Asignar al rol
+            </MudButton>
+        </MudTooltip>
+    </div>
+</div>
+
+@* flex:1 en vez de una altura fija en vh: así, sin importar el tamaño del header,
+   el área de columnas siempre ocupa exactamente el espacio restante. *@
+<div style="display:grid;grid-template-columns:260px 0.72fr 254px 0.72fr;gap:12px;flex:1 1 auto;min-height:0;margin-bottom:12px;">
+
+    @* ══ COLUMNA 1: Roles de usuario ══════════════════════════════════════ *@
+    <MudPaper Elevation="1" Class="aor-panel">
+        <div class="aor-header">
+            <MudIcon Icon="@Icons.Material.Filled.GroupWork" Size="Size.Small" />
+            Roles de Usuario
+            @if (_roles.Any())
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Label="true" Style="margin-left:auto;color:var(--ink);border-color:var(--ink);">@_roles.Count</MudChip>
+            }
+        </div>
+
+        @if (_cargandoRoles)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Size="Size.Small" />
+        }
+
+        <div class="aor-scroll">
+            @foreach (var rol in _roles)
+            {
+                <div class="rol-row @(_rolSel?.COD_ROL_USUARIO == rol.COD_ROL_USUARIO ? "activo" : "")"
+                     @onclick="() => SeleccionarRol(rol)">
+                    <MudIcon Icon="@Icons.Material.Filled.Shield" Size="Size.Small"
+                             Style="font-size:.9rem;flex-shrink:0" />
+                    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                        @rol.DES_ROL_USUARIO
+                    </span>
+                </div>
+            }
+            @if (!_cargandoRoles && !_roles.Any())
+            {
+                <div class="empty-hint">Sin roles registrados</div>
+            }
+        </div>
+    </MudPaper>
+
+    @* ══ COLUMNA 2: Opciones asignadas ════════════════════════════════════ *@
+    <MudPaper Elevation="1" Class="aor-panel">
+        <div class="aor-header">
+            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small"
+                     Style="color:#2f855a" />
+            Opciones asignadas
+            @if (_rolSel is not null)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Success"
+                         Variant="Variant.Outlined" Label="true">
+                    @_rolSel.DES_ROL_USUARIO
+                </MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Label="true" Style="margin-left:auto;color:var(--ink);border-color:var(--ink);">
+                    @_asignadasFlat.Count(x => x.esPropio)
+                </MudChip>
+            }
+        </div>
+
+        @if (_cargandoOpciones)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Success" Size="Size.Small" />
+        }
+
+        <div class="aor-scroll">
+            @if (_rolSel is null)
+            {
+                <div class="empty-hint">← Selecciona un rol</div>
+            }
+            else if (!_cargandoOpciones && !_asignadasFlat.Any())
+            {
+                <div class="empty-hint">Sin opciones asignadas</div>
+            }
+            else
+            {
+                @foreach (var item in _asignadasFlat)
+                {
+                    @if (item.esPropio)
+                    {
+                        <div class="nodo-row @(_nodoSel == item.nodo ? "activo" : "")"
+                             style="padding-left:@(10 + item.depth * 16)px"
+                             @onclick="async () => { await SeleccionarNodo(item.nodo); if (item.nodo.Hijos.Any()) ToggleColapsoAsig(item.nodo); }"
+                             @oncontextmenu="e => AbrirCtxAsig(e, item.nodo)"
+                             @oncontextmenu:preventDefault="true">
+                            @if (item.nodo.Hijos.Any())
+                            {
+                                <MudIcon Icon="@(_colapsadasAsig.Contains(item.nodo.COD_CHILDREN) ? Icons.Material.Filled.ChevronRight : Icons.Material.Filled.ExpandMore)"
+                                         Size="Size.Small" Style="font-size:.9rem;flex-shrink:0;opacity:.6" />
+                            }
+                            <MudIcon Icon="@IconoPorTipo(item.nodo.COD_TIPO)"
+                                     Size="Size.Small" Style="font-size:.85rem;color:#2f855a;flex-shrink:0" />
+                            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">
+                                @item.nodo.DES_OPCION
+                            </span>
+                            <span class="tl-badge" style="flex-shrink:0;color:#2f855a;background:#2f855a1a;">@DescTipo(item.nodo.COD_TIPO)</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="nodo-header" style="padding-left:@(8 + item.depth * 16)px;cursor:pointer;"
+                             @onclick="() => ToggleColapsoAsig(item.nodo)">
+                            <MudIcon Icon="@(_colapsadasAsig.Contains(item.nodo.COD_CHILDREN) ? Icons.Material.Filled.ChevronRight : Icons.Material.Filled.ExpandMore)"
+                                     Size="Size.Small" Style="font-size:.9rem;flex-shrink:0;opacity:.6" />
+                            <MudIcon Icon="@IconoPorTipo(item.nodo.COD_TIPO)"
+                                     Size="Size.Small" Style="font-size:.8rem;flex-shrink:0" />
+                            @item.nodo.DES_OPCION
+                        </div>
+                    }
+                }
+            }
+        </div>
+    </MudPaper>
+
+    @* ══ COLUMNA 3: Botones de la opción asignada seleccionada ═══════════════
+       zoom:.65 reduce todo el contenido (texto, grilla, switches) al 65% para
+       que quepa cómodo en la columna angosta. *@
+    <MudPaper Elevation="1" Class="aor-panel" Style="zoom:.65;">
+        <div class="aor-header">
+            <MudIcon Icon="@Icons.Material.Filled.SmartButton" Size="Size.Small" Style="color:var(--gold-accent,#e2b93c)" />
+            Botones
+            @if (_nodoSel is not null)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Label="true" Style="margin-left:auto;color:var(--ink);border-color:var(--ink);">@_botonesNodo.Count</MudChip>
+            }
+            @if (_cargandoBotones)
+            {
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+            }
+        </div>
+        <div class="aor-scroll" style="padding:0;">
+            @if (_nodoSel is null)
+            {
+                <div class="empty-hint">← Selecciona una opción asignada</div>
+            }
+            else
+            {
+                <MudDataGrid T="RolBotonOpcion" Items="_botonesNodoVisibles" Dense="true" Hover="true" Striped="true" FixedHeader="true">
+                    <Columns>
+                        <TemplateColumn Sortable="false" Title="Botón">
+                            <HeaderTemplate>
+                                <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_BOTON_OPCION" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                                    <FiltroExcelColumna T="RolBotonOpcion" ItemsBase="@BaseBotonNodo(0)" ValorDe="@(x=>x.DES_BOTON_OPCION ?? "")"
+                                                        ValoresActivos="_filtrosBotonNodo.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroBotonNodo(0,v))" />
+                                </div>
+                            </HeaderTemplate>
+                            <CellTemplate>@context.Item.DES_BOTON_OPCION</CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Title="Habilitado" Sortable="false" HeaderStyle="text-align:center;width:90px;" CellStyle="text-align:center;">
+                            <CellTemplate>
+                                <span class="@((context.Item.FLG_HABILITADO ?? false) ? "sw-on" : "sw-off")">
+                                    <MudSwitch T="bool" Value="@(context.Item.FLG_HABILITADO ?? false)"
+                                                 ValueChanged="@(v => ToggleHabilitado(context.Item, v))"
+                                                 Color="@((context.Item.FLG_HABILITADO ?? false) ? Color.Success : Color.Error)"
+                                                 Dense="true" />
+                                </span>
+                            </CellTemplate>
+                        </TemplateColumn>
+                    </Columns>
+                    <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;font-size:.78rem;">Sin botones configurados.</MudText></NoRecordsContent>
+                </MudDataGrid>
+            }
+        </div>
+    </MudPaper>
+
+    @* ══ COLUMNA 4: Opciones disponibles ══════════════════════════════════ *@
+    <MudPaper Elevation="1" Class="aor-panel">
+        <div class="aor-header">
+            <MudIcon Icon="@Icons.Material.Filled.AddCircleOutline" Size="Size.Small"
+                     Style="color:#2b6cb0" />
+            Opciones disponibles
+            @if (_rolSel is not null)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Label="true" Style="margin-left:auto;color:var(--ink);border-color:var(--ink);">
+                    @_disponiblesFlat.Count(x => x.esPropio)
+                </MudChip>
+            }
+        </div>
+
+        @if (_cargandoOpciones)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Info" Size="Size.Small" />
+        }
+
+        <div class="aor-scroll">
+            @if (_rolSel is null)
+            {
+                <div class="empty-hint">← Selecciona un rol</div>
+            }
+            else if (!_cargandoOpciones && !_disponiblesFlat.Any(x => x.esPropio))
+            {
+                <div class="empty-hint">Todas las opciones ya están asignadas</div>
+            }
+            else
+            {
+                @foreach (var item in _disponiblesFlat)
+                {
+                    @if (item.esPropio)
+                    {
+                        <div class="nodo-row @(_nodoDispSel == item.nodo ? "activo" : "")"
+                             style="padding-left:@(10 + item.depth * 16)px"
+                             @onclick="() => { _nodoDispSel = item.nodo; if (item.nodo.Hijos.Any()) ToggleColapsoDisp(item.nodo); }"
+                             @oncontextmenu="e => AbrirCtxDisp(e, item.nodo)"
+                             @oncontextmenu:preventDefault="true">
+                            @if (item.nodo.Hijos.Any())
+                            {
+                                <MudIcon Icon="@(_colapsadasDisp.Contains(item.nodo.COD_CHILDREN) ? Icons.Material.Filled.ChevronRight : Icons.Material.Filled.ExpandMore)"
+                                         Size="Size.Small" Style="font-size:.9rem;flex-shrink:0;opacity:.6" />
+                            }
+                            <MudIcon Icon="@IconoPorTipo(item.nodo.COD_TIPO)"
+                                     Size="Size.Small" Style="font-size:.85rem;color:#2b6cb0;flex-shrink:0" />
+                            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">
+                                @item.nodo.DES_OPCION
+                            </span>
+                            <span class="tl-badge" style="flex-shrink:0;color:#2b6cb0;background:#2b6cb01a;">@DescTipo(item.nodo.COD_TIPO)</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="nodo-header" style="padding-left:@(8 + item.depth * 16)px;cursor:pointer;"
+                             @onclick="() => ToggleColapsoDisp(item.nodo)">
+                            <MudIcon Icon="@(_colapsadasDisp.Contains(item.nodo.COD_CHILDREN) ? Icons.Material.Filled.ChevronRight : Icons.Material.Filled.ExpandMore)"
+                                     Size="Size.Small" Style="font-size:.9rem;flex-shrink:0;opacity:.6" />
+                            <MudIcon Icon="@IconoPorTipo(item.nodo.COD_TIPO)"
+                                     Size="Size.Small" Style="font-size:.8rem;flex-shrink:0" />
+                            @item.nodo.DES_OPCION
+                        </div>
+                    }
+                }
+            }
+        </div>
+    </MudPaper>
+
+</div>
+
+</div>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    // ── Tipos locales ─────────────────────────────────────────────────────
+    private class ApiResp<T>
+    {
+        public bool    Success { get; set; }
+        public T?      Data    { get; set; }
+        public string  Message { get; set; } = "";
+    }
+
+    private class RolItem
+    {
+        public string  COD_ROL_USUARIO { get; set; } = "";
+        public string  DES_ROL_USUARIO { get; set; } = "";
+        public string? DES_ESTADO      { get; set; }
+    }
+
+    private record NodoFila(NodoOpcion nodo, int depth, bool esPropio);
+
+    // ── Estado ────────────────────────────────────────────────────────────
+    private List<RolItem>    _roles       = new();
+    private RolItem?         _rolSel;
+
+    // Árbol crudo de cada lado (antes de aplanar), para poder recalcular el
+    // aplanado al expandir/contraer una carpeta sin volver a pedirlo a la API.
+    private List<NodoOpcion> _asignadasArbol   = new();
+    private List<NodoOpcion> _disponiblesArbol = new();
+
+    // Carpetas colapsadas por lado, identificadas por COD_CHILDREN.
+    private readonly HashSet<string> _colapsadasAsig = new();
+    private readonly HashSet<string> _colapsadasDisp = new();
+
+    private List<NodoFila> _asignadasFlat   = new();
+    private List<NodoFila> _disponiblesFlat = new();
+
+    private bool _cargandoRoles    = true;
+    private bool _cargandoOpciones = false;
+
+    // Menús contextuales
+    private bool        _ctxAsig, _ctxDisp;
+    private double      _ctxX,    _ctxY;
+    private NodoOpcion? _ctxNodoAsig, _ctxNodoDisp;
+
+    // Selección por clic (no solo clic derecho) en "Opciones disponibles" — usada por
+    // los botones de transferencia entre columnas.
+    private NodoOpcion? _nodoDispSel;
+
+    // Panel inferior: botones de la opción seleccionada (habilitar/deshabilitar por rol)
+    private NodoOpcion?          _nodoSel;
+    private List<RolBotonOpcion> _botonesNodo = new();
+    private bool                 _cargandoBotones;
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosBotonNodo = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<RolBotonOpcion> Ordenar(List<RolBotonOpcion> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.DES_BOTON_OPCION).ToList() : items.OrderByDescending(x => x.DES_BOTON_OPCION).ToList(),
+        _ => items
+    };
+    private List<RolBotonOpcion> _botonesNodoVisibles => Ordenar(AplicarBotonNodo(_botonesNodo, -1));
+    private List<RolBotonOpcion> BaseBotonNodo(int col) => AplicarBotonNodo(_botonesNodo, col);
+    private List<RolBotonOpcion> AplicarBotonNodo(List<RolBotonOpcion> src, int ex)
+    {
+        IEnumerable<RolBotonOpcion> q = src;
+        foreach (var (c, v) in _filtrosBotonNodo)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.DES_BOTON_OPCION ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroBotonNodo(int c, HashSet<string>? v) { _filtrosBotonNodo[c] = v; StateHasChanged(); }
+
+    // ── Ciclo de vida ─────────────────────────────────────────────────────
+    protected override async Task OnInitializedAsync() => await CargarRoles();
+
+    private async Task Recargar()
+    {
+        var rolActual = _rolSel;
+        _rolSel = null;
+        _asignadasFlat.Clear();
+        _disponiblesFlat.Clear();
+        await CargarRoles();
+        if (rolActual is not null)
+        {
+            var match = _roles.FirstOrDefault(r => r.COD_ROL_USUARIO == rolActual.COD_ROL_USUARIO);
+            if (match is not null) await SeleccionarRol(match);
+        }
+    }
+
+    // ── Carga de datos ────────────────────────────────────────────────────
+    private async Task CargarRoles()
+    {
+        _cargandoRoles = true;
+        StateHasChanged();
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResp<List<RolItem>>>(ApiRoutes.Seguridad.Roles);
+            _roles = r?.Data ?? new();
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(AsignacionOpcionesRoles)); }
+        finally { _cargandoRoles = false; StateHasChanged(); }
+
+        // Al entrar a la pantalla (o tras Actualizar sin un rol previo), se posiciona
+        // de una vez en el primer rol de la lista, sin esperar que el usuario haga clic.
+        if (_rolSel is null && _roles.Any())
+            await SeleccionarRol(_roles.First());
+    }
+
+    private async Task SeleccionarRol(RolItem rol)
+    {
+        _rolSel  = rol;
+        _ctxAsig = _ctxDisp = false;
+        _nodoSel = null;
+        _botonesNodo.Clear();
+        await CargarOpcionesRol();
+    }
+
+    // ── Panel inferior: botones de la opción seleccionada ────────────────
+    private async Task SeleccionarNodo(NodoOpcion nodo)
+    {
+        if (_rolSel is null) return;
+        _nodoSel = nodo;
+        _cargandoBotones = true;
+        _botonesNodo = new();
+        StateHasChanged();
+        try
+        {
+            var url = $"{ApiRoutes.Seguridad.RolesUsuariosAplicacionesOpcionesBotones}/por-opcion" +
+                      $"?codRolUsuario={Uri.EscapeDataString(_rolSel.COD_ROL_USUARIO)}" +
+                      $"&codAplicacion={Uri.EscapeDataString(nodo.COD_APLICACION_ORIGINAL)}" +
+                      $"&codOpcion={Uri.EscapeDataString(nodo.COD_OPCION_ORIGINAL)}";
+            var r = await Http.GetFromJsonAsync<ApiResp<List<RolBotonOpcion>>>(url);
+            _botonesNodo = (r?.Data ?? new())
+                .Where(b => !string.IsNullOrWhiteSpace(b.COD_BOTON_OPCION))
+                .OrderBy(b => b.COD_BOTON_OPCION)
+                .ToList();
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(AsignacionOpcionesRoles)); }
+        finally { _cargandoBotones = false; StateHasChanged(); }
+    }
+
+    private async Task ToggleHabilitado(RolBotonOpcion boton, bool valor)
+    {
+        if (_rolSel is null) return;
+        var anterior = boton.FLG_HABILITADO;
+        boton.FLG_HABILITADO = valor;
+        var dto = new
+        {
+            COD_ROL_USUARIO = _rolSel.COD_ROL_USUARIO,
+            COD_APLICACION = boton.COD_APLICACION,
+            COD_OPCION_APLICACION = boton.COD_OPCION_APLICACION,
+            COD_BOTON_OPCION = boton.COD_BOTON_OPCION,
+            FLG_HABILITADO = valor
+        };
+        try
+        {
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Seguridad.RolesUsuariosAplicacionesOpcionesBotones, dto);
+            if (resp.IsSuccessStatusCode)
+                Snackbar.Add($"'{boton.DES_BOTON_OPCION}' {(valor ? "habilitado" : "deshabilitado")}.", Severity.Success);
+            else
+            {
+                boton.FLG_HABILITADO = anterior;
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(AsignacionOpcionesRoles), nameof(ToggleHabilitado));
+            }
+        }
+        catch (Exception ex)
+        {
+            boton.FLG_HABILITADO = anterior;
+            await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(AsignacionOpcionesRoles));
+            await ErrorLog.LogAsync(ex, "AsignacionOpcionesRoles", nameof(ToggleHabilitado));
+        }
+    }
+
+    private async Task CargarOpcionesRol()
+    {
+        if (_rolSel is null) return;
+        _cargandoOpciones = true;
+        _asignadasFlat.Clear();
+        _disponiblesFlat.Clear();
+        StateHasChanged();
+
+        try
+        {
+            var cod = Uri.EscapeDataString(_rolSel.COD_ROL_USUARIO);
+            var urlAsig = $"{ApiRoutes.Seguridad.OpcionesTreeviewAsignadas}?codRolUsuario={cod}";
+            var urlDisp = $"{ApiRoutes.Seguridad.OpcionesTreeviewDisponibles}?codRolUsuario={cod}";
+
+            var taskAsig = Http.GetFromJsonAsync<ApiResp<List<NodoOpcion>>>(urlAsig);
+            var taskDisp = Http.GetFromJsonAsync<ApiResp<List<NodoOpcion>>>(urlDisp);
+            await Task.WhenAll(taskAsig, taskDisp);
+            var rAsig = taskAsig.Result;
+            var rDisp = taskDisp.Result;
+
+            _colapsadasAsig.Clear();
+            _colapsadasDisp.Clear();
+            _asignadasArbol   = ArmarArbol(rAsig?.Data ?? new());
+            _disponiblesArbol = ArmarArbol(rDisp?.Data ?? new());
+            _asignadasFlat    = BuildFlat(_asignadasArbol,   _colapsadasAsig);
+            _disponiblesFlat  = BuildFlat(_disponiblesArbol, _colapsadasDisp);
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(AsignacionOpcionesRoles)); }
+        finally { _cargandoOpciones = false; StateHasChanged(); }
+    }
+
+    // ── Árbol ─────────────────────────────────────────────────────────────
+    private static List<NodoOpcion> ArmarArbol(List<NodoOpcion> flat)
+    {
+        var sinDup = flat.GroupBy(n => n.COD_CHILDREN).Select(g => g.First()).ToList();
+        sinDup.ForEach(n => n.Hijos = new());
+        var mapa   = sinDup.ToDictionary(n => n.COD_CHILDREN);
+        var raices = new List<NodoOpcion>();
+        foreach (var nodo in sinDup)
+        {
+            if (!string.IsNullOrWhiteSpace(nodo.COD_PARENT) && mapa.TryGetValue(nodo.COD_PARENT, out var padre))
+                padre.Hijos.Add(nodo);
+            else
+                raices.Add(nodo);
+        }
+        return raices;
+    }
+
+    private static List<NodoFila> BuildFlat(List<NodoOpcion> raices, HashSet<string> colapsadas)
+    {
+        var result = new List<NodoFila>();
+        void Walk(NodoOpcion n, int d)
+        {
+            // Nodes with a real option code are selectable leaves; parents are section headers
+            bool esHoja = !string.IsNullOrWhiteSpace(n.COD_OPCION_ORIGINAL);
+            result.Add(new NodoFila(n, d, esHoja));
+            if (colapsadas.Contains(n.COD_CHILDREN)) return;
+            foreach (var h in n.Hijos) Walk(h, d + 1);
+        }
+        foreach (var r in raices) Walk(r, 0);
+        return result;
+    }
+
+    private void ToggleColapsoAsig(NodoOpcion nodo)
+    {
+        if (!_colapsadasAsig.Add(nodo.COD_CHILDREN)) _colapsadasAsig.Remove(nodo.COD_CHILDREN);
+        _asignadasFlat = BuildFlat(_asignadasArbol, _colapsadasAsig);
+    }
+
+    private void ToggleColapsoDisp(NodoOpcion nodo)
+    {
+        if (!_colapsadasDisp.Add(nodo.COD_CHILDREN)) _colapsadasDisp.Remove(nodo.COD_CHILDREN);
+        _disponiblesFlat = BuildFlat(_disponiblesArbol, _colapsadasDisp);
+    }
+
+    // ── Menús contextuales ────────────────────────────────────────────────
+    // El zoom propio de la app (transform:scale en #app, ver appZoom.js) hace que
+    // e.ClientX/Y no coincidan con la posición visual del cursor salvo al 100% —
+    // hay que dividir entre el factor de escala para que el menú aparezca junto al nodo.
+    private async Task<(double x, double y)> CoordenadasReales(MouseEventArgs e)
+    {
+        double scale = 1;
+        try { scale = await JS.InvokeAsync<double>("appZoom.getScale"); } catch { }
+        if (scale <= 0) scale = 1;
+        return (e.ClientX / scale, e.ClientY / scale);
+    }
+
+    private async Task AbrirCtxAsig(MouseEventArgs e, NodoOpcion nodo)
+    {
+        _ctxNodoAsig = nodo; _ctxAsig = true; _ctxDisp = false;
+        (_ctxX, _ctxY) = await CoordenadasReales(e);
+    }
+
+    private async Task AbrirCtxDisp(MouseEventArgs e, NodoOpcion nodo)
+    {
+        if (string.IsNullOrWhiteSpace(nodo.COD_OPCION_ORIGINAL)) return;
+        _ctxNodoDisp = nodo; _ctxDisp = true; _ctxAsig = false;
+        (_ctxX, _ctxY) = await CoordenadasReales(e);
+    }
+
+    private void CerrarMenus() { _ctxAsig = _ctxDisp = false; }
+
+    // ── Botones de transferencia entre columnas (reutilizan la misma lógica que el
+    // menú contextual, aplicada al nodo seleccionado por clic en vez del clic derecho) ──
+    private Task MoverDisponibleAAsignadas()
+    {
+        if (_nodoDispSel is null) return Task.CompletedTask;
+        _ctxNodoDisp = _nodoDispSel;
+        _nodoDispSel = null;
+        return AsignarDisponible();
+    }
+
+    private Task MoverAsignadaADisponibles()
+    {
+        if (_nodoSel is null) return Task.CompletedTask;
+        _ctxNodoAsig = _nodoSel;
+        return EliminarAsignada();
+    }
+
+    // ── Asignar opción al rol ─────────────────────────────────────────────
+    private async Task AsignarDisponible()
+    {
+        _ctxDisp = false;
+        if (_ctxNodoDisp is null || _rolSel is null) return;
+
+        var dto = new
+        {
+            COD_ROL_USUARIO       = _rolSel.COD_ROL_USUARIO,
+            COD_APLICACION        = _ctxNodoDisp.COD_APLICACION_ORIGINAL,
+            COD_OPCION_APLICACION = _ctxNodoDisp.COD_OPCION_ORIGINAL
+        };
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Seguridad.Opciones, dto);
+            var raw  = await resp.Content.ReadAsStringAsync();
+            var r    = System.Text.Json.JsonSerializer.Deserialize<ApiResp<object>>(raw,
+                           new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (r?.Success == true)
+            {
+                Snackbar.Add($"'{_ctxNodoDisp.DES_OPCION}' asignada al rol.", Severity.Success);
+                await CargarOpcionesRol();
+            }
+            else
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(AsignacionOpcionesRoles), nameof(AsignarDisponible));
+            }
+        }
+        catch (Exception ex)
+        {
+            await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(AsignacionOpcionesRoles));
+            await ErrorLog.LogAsync(ex, "AsignacionOpcionesRoles", nameof(AsignarDisponible));
+        }
+    }
+
+    // ── Quitar opción del rol ─────────────────────────────────────────────
+    private async Task EliminarAsignada()
+    {
+        _ctxAsig = false;
+        if (_ctxNodoAsig is null || _rolSel is null) return;
+        if (_nodoSel == _ctxNodoAsig) { _nodoSel = null; _botonesNodo.Clear(); }
+
+        var url = $"{ApiRoutes.Seguridad.Opciones}" +
+                  $"/{Uri.EscapeDataString(_rolSel.COD_ROL_USUARIO)}" +
+                  $"/{Uri.EscapeDataString(_ctxNodoAsig.COD_APLICACION_ORIGINAL)}" +
+                  $"/{Uri.EscapeDataString(_ctxNodoAsig.COD_OPCION_ORIGINAL)}";
+        try
+        {
+            var resp = await Http.DeleteAsync(url);
+            var raw  = await resp.Content.ReadAsStringAsync();
+            var r    = System.Text.Json.JsonSerializer.Deserialize<ApiResp<object>>(raw,
+                           new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (r?.Success == true || resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"'{_ctxNodoAsig.DES_OPCION}' quitada del rol.", Severity.Success);
+                await CargarOpcionesRol();
+            }
+            else
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(AsignacionOpcionesRoles), nameof(EliminarAsignada));
+            }
+        }
+        catch (Exception ex)
+        {
+            await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(AsignacionOpcionesRoles));
+            await ErrorLog.LogAsync(ex, "AsignacionOpcionesRoles", nameof(EliminarAsignada));
+        }
+    }
+
+    // ── Utilidades ────────────────────────────────────────────────────────
+    private static string IconoPorTipo(string? tipo) => tipo switch
+    {
+        "ROT" => Icons.Material.Filled.AccountTree,
+        "APP" => Icons.Material.Filled.AppsOutage,
+        "CRP" => Icons.Material.Filled.Folder,
+        "MDL" => Icons.Material.Filled.ViewModule,
+        "SMD" => Icons.Material.Filled.ViewQuilt,
+        "BTN" => Icons.Material.Filled.SmartButton,
+        _     => Icons.Material.Filled.Circle
+    };
+
+    private static string DescTipo(string? tipo) => tipo switch
+    {
+        "ROT" => "Raíz",
+        "APP" => "App",
+        "CRP" => "Carpeta",
+        "MDL" => "Módulo",
+        "SMD" => "Sub módulo",
+        "BTN" => "Botón",
+        _     => tipo ?? ""
+    };
+}

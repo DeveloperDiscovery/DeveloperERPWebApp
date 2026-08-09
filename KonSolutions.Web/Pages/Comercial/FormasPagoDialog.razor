@@ -1,0 +1,97 @@
+@using FormasPagoModel = KONSolutions.Shared.Models.Comercial.FormasPago
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_FORMA_PAGO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            @if (!_esNuevo)
+            {
+                <CampoTexto Tabla="COMERCIAL.FORMAS_PAGO" Columna="COD_FORMA_PAGO"
+                            @bind-Value="_codigoStr" Disabled="true" />
+            }
+            <CampoTexto Tabla="COMERCIAL.FORMAS_PAGO" Columna="DES_FORMA_PAGO"
+                        @bind-Value="_model.DES_FORMA_PAGO"
+                        Disabled="_readonly" Obligatorio="true" />
+            <CampoTexto Tabla="COMERCIAL.FORMAS_PAGO" Columna="COD_FORMA_PAGO_SUNAT"
+                        @bind-Value="_model.COD_FORMA_PAGO_SUNAT"
+                        Disabled="_readonly" Obligatorio="true" />
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.Payments" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_EFECTIVO" Color="Color.Primary" Label="Efectivo" Disabled="_readonly" /></div>
+            <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)" Label="Ícono" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public FormasPagoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private FormasPagoModel _model = new();
+    private string? _codigoStr;
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        // Mapeo inicial desde el Item que pasó la grilla — se usa como fallback mientras
+        // se resuelve el viaje a SHOWBYID (en OnInitializedAsync) o si ese viaje falla; una
+        // vez que responde, MapearDesdeModelo() pisa estos valores con los frescos de la BD.
+        if (Item is not null) MapearDesdeModelo(Item);
+        _codigoStr = _model.COD_FORMA_PAGO?.ToString();
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de SHOWBYID) hacia _model.</summary>
+    private void MapearDesdeModelo(FormasPagoModel m)
+    {
+        _model.COD_FORMA_PAGO = m.COD_FORMA_PAGO;
+        _model.DES_FORMA_PAGO = m.DES_FORMA_PAGO;
+        _model.FLG_EFECTIVO = m.FLG_EFECTIVO;
+        _model.COD_FORMA_PAGO_SUNAT = m.COD_FORMA_PAGO_SUNAT;
+        _model.IMG_ICONO = m.IMG_ICONO;
+        _codigoStr = _model.COD_FORMA_PAGO?.ToString();
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear), para no mostrar datos desactualizados de la
+    /// grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<FormasPagoModel>($"{ApiRoutes.Comercial.FormasPago}/{_model.COD_FORMA_PAGO}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Comercial.FormasPago;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_FORMA_PAGO}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(FormasPagoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // El SP hace upsert: POST tanto para crear como para editar (COD identity).
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(FormasPagoDialog), nameof(Submit));
+    }
+}

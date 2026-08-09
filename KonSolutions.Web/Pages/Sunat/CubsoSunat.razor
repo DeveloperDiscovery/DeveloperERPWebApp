@@ -1,0 +1,352 @@
+@page "/sunat/cubso-sunat"
+@attribute [Authorize]
+@using CubsoSunatModel = KONSolutions.Shared.Models.Sunat.CubsoSunat
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject ControlCambiosClientService Cambios
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+
+<PageTitle>Cubso Sunat · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Cubso Sunat" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema SUNAT · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar código o descripción CUBSO..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <MudButtonGroup Variant="Variant.Filled" Size="Size.Small">
+            <MudButton OnClick="@(() => _vista = Vista.Grilla)" StartIcon="@Icons.Material.Filled.TableRows"
+                       Style="@EstiloBotonVista(Vista.Grilla)">Grilla</MudButton>
+            <MudButton OnClick="@(() => _vista = Vista.Arbol)" StartIcon="@Icons.Material.Filled.AccountTree"
+                       Style="@EstiloBotonVista(Vista.Arbol)">Árbol</MudButton>
+        </MudButtonGroup>
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+@if (_vista == Vista.Grilla)
+{
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);">
+        <div data-resizable-grid="cubso-sunat" style="position:relative;">
+        <MudDataGrid T="CubsoSunatModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                     Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+            <Columns>
+                <TemplateColumn Sortable="false" Title="Código" Width="130">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_CUBSO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                            <FiltroExcelColumna T="CubsoSunatModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_CUBSO)"
+                                                ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.COD_CUBSO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Descripción">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_CUBSO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                            <FiltroExcelColumna T="CubsoSunatModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_CUBSO ?? "")"
+                                                ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.DES_CUBSO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Código Padre" Width="130">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_CUBSO_PARENT" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                            <FiltroExcelColumna T="CubsoSunatModel" ItemsBase="@Base(2)" ValorDe="@(x=>x.COD_CUBSO_PARENT ?? "")"
+                                                ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.COD_CUBSO_PARENT</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Código UNSPSC" Width="140">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_UNSPS" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                            <FiltroExcelColumna T="CubsoSunatModel" ItemsBase="@Base(3)" ValorDe="@(x=>x.COD_UNSPS ?? "")"
+                                                ValoresActivos="_filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.COD_UNSPS</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Descripción (español)">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_CUBSO_ES" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                            <FiltroExcelColumna T="CubsoSunatModel" ItemsBase="@Base(4)" ValorDe="@(x=>x.DES_CUBSO_ES ?? "")"
+                                                ValoresActivos="_filtros.GetValueOrDefault(4)" ValoresActivosChanged="@(v=>Filtro(4,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.DES_CUBSO_ES</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false">
+                    <CellTemplate>
+                        @{ var item = context.Item; }
+                        <div @onclick:stopPropagation="true">
+                            <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                             Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+            <PagerContent><MudDataGridPager T="CubsoSunatModel" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    </MudPaper>
+}
+else
+{
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);">
+        <MudToolBar Dense="true">
+            <MudButtonGroup Variant="Variant.Filled" Size="Size.Small">
+                <MudButton OnClick="ExpandirTodo" StartIcon="@Icons.Material.Filled.UnfoldMore"
+                           Style="font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">Expandir todo</MudButton>
+                <MudButton OnClick="ColapsarTodo" StartIcon="@Icons.Material.Filled.UnfoldLess"
+                           Style="font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">Colapsar todo</MudButton>
+            </MudButtonGroup>
+            <MudSpacer />
+            <MudText Class="mono" Style="opacity:.5;font-size:.78rem;">@_raices.Count raíces</MudText>
+        </MudToolBar>
+        <div data-resizable-grid="cubso-sunat-arbol" style="position:relative;padding:8px 4px;background:var(--grilla-fila-par,#1a1714);max-height:70vh;overflow:auto;">
+            @if (!_raices.Any())
+            {
+                <MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros con jerarquía (COD_CUBSO_PARENT) para mostrar.</MudText>
+            }
+            else
+            {
+                @foreach (var raiz in _raices)
+                {
+                    <CubsoSunatNodo Nodo="raiz" Nivel="0" PorPadre="_porPadre"
+                                    CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                    ForzarExpandido="_forzarExpandido"
+                                    OnAccion="@(t => OnAccionGrilla(t.Item1, t.Item2))" />
+                }
+            }
+        </div>
+    </MudPaper>
+}
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private enum Vista { Grilla, Arbol }
+    private Vista _vista = Vista.Grilla;
+    private string EstiloBotonVista(Vista v) => _vista == v
+        ? "font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));"
+        : "font-weight:700;opacity:.55;";
+
+    // ── Árbol (jerarquía UNSPSC vía COD_CUBSO_PARENT) ──────────────────────
+    private List<CubsoSunatModel> _raices = new();
+    private Dictionary<string, List<CubsoSunatModel>> _porPadre = new();
+    private bool? _forzarExpandido;
+
+    private void ConstruirArbol()
+    {
+        _porPadre = _items
+            .Where(x => !string.IsNullOrEmpty(x.COD_CUBSO_PARENT))
+            .GroupBy(x => x.COD_CUBSO_PARENT!)
+            .ToDictionary(g => g.Key, g => g.OrderBy(x => x.COD_CUBSO).ToList());
+        _raices = _items
+            .Where(x => string.IsNullOrEmpty(x.COD_CUBSO_PARENT))
+            .OrderBy(x => x.COD_CUBSO)
+            .ToList();
+    }
+
+    private void ExpandirTodo()  { _forzarExpandido = true;  StateHasChanged(); }
+    private void ColapsarTodo()  { _forzarExpandido = false; StateHasChanged(); }
+
+    private List<CubsoSunatModel> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<CubsoSunatModel> Ordenar(List<CubsoSunatModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_CUBSO).ToList() : items.OrderByDescending(x => x.COD_CUBSO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_CUBSO).ToList() : items.OrderByDescending(x => x.DES_CUBSO).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.COD_CUBSO_PARENT).ToList() : items.OrderByDescending(x => x.COD_CUBSO_PARENT).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.COD_UNSPS).ToList() : items.OrderByDescending(x => x.COD_UNSPS).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_CUBSO_ES).ToList() : items.OrderByDescending(x => x.DES_CUBSO_ES).ToList(),
+        _ => items
+    };
+    private List<CubsoSunatModel> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<CubsoSunatModel> Base(int col) => Aplicar(_items, col);
+
+    private List<CubsoSunatModel> Aplicar(List<CubsoSunatModel> src, int ex)
+    {
+        IEnumerable<CubsoSunatModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_CUBSO)),
+                1 => q.Where(x => v.Contains(x.DES_CUBSO ?? "")),
+                2 => q.Where(x => v.Contains(x.COD_CUBSO_PARENT ?? "")),
+                3 => q.Where(x => v.Contains(x.COD_UNSPS ?? "")),
+                4 => q.Where(x => v.Contains(x.DES_CUBSO_ES ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private async Task<string> Traducir(string texto, string origen, string destino)
+    {
+        try
+        {
+            // El endpoint resuelve solo qué Snippet usar (por nombre, ver SnippetsController.
+            // NombreSnippetTraductor) — no hace falta mandar ningún COD_SNIPPET desde aquí.
+            var payload = new { Texto = texto, Origen = origen, Destino = destino };
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Externo.Traducir, payload);
+            if (!resp.IsSuccessStatusCode) return texto;
+            var r = await resp.Content.ReadFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<string>>();
+            return string.IsNullOrWhiteSpace(r?.Data) ? texto : r!.Data!;
+        }
+        catch { return texto; } // si el traductor falla, se busca/muestra tal cual (nunca bloquea la pantalla)
+    }
+
+    private async Task Buscar()
+    {
+        if (string.IsNullOrWhiteSpace(_search))
+        {
+            _items = await Fetch();
+        }
+        else
+        {
+            // El catálogo CUBSO está en inglés — se traduce lo que el usuario escribe en
+            // español antes de buscarlo contra DES_CUBSO.
+            var terminoIngles = await Traducir(_search, "es", "en");
+            _items = await FetchSearch(terminoIngles);
+        }
+        ConstruirArbol();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("SUNAT", "CubsoSunat");
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("SUNAT.CUBSO_SUNAT", _onCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load() => await Buscar();
+
+    private async Task<List<CubsoSunatModel>> Fetch()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<CubsoSunatModel>>>(ApiRoutes.Sunat.CubsoSunat);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(CubsoSunat), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<CubsoSunatModel>> FetchSearch(string s)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<CubsoSunatModel>>>(
+                $"{ApiRoutes.Sunat.CubsoSunatSearch}?search={Uri.EscapeDataString(s)}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(CubsoSunat), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    // El botón "Importar desde Snippet" se configura en Seguridad → Opciones/Botones con
+    // DES_METODO="UploadJSON" (mismo mecanismo que Países/Ubigeos/Unidades de Medida) —
+    // el propio botón trae su (COD_APLICACION, COD_OPCION_APLICACION, COD_BOTON_OPCION),
+    // que es la llave con la que PROC_EXTERNO_SNIPPETS_SEARCHBOTON resuelve el snippet.
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        var metodo = (b.DES_METODO ?? "").Trim();
+        if (metodo.Equals("UploadJson", StringComparison.OrdinalIgnoreCase)) return ImportarDesdeSnippet(b);
+        return Task.CompletedTask;
+    }
+
+    private async Task ImportarDesdeSnippet(BotonTreeviewItem b)
+    {
+        try
+        {
+            var payload = new { b.COD_APLICACION, b.COD_OPCION_APLICACION, COD_BOTON_OPCION = b.COD_BOTON_OPCION };
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Sunat.CubsoSunatDownloadFromSnippet, payload);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Códigos CUBSO importados.", Severity.Success);
+                await Load();
+            }
+            else
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(CubsoSunat), nameof(ImportarDesdeSnippet));
+            }
+        }
+        catch (Exception ex)
+        {
+            await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(CubsoSunat));
+        }
+    }
+
+    private Task OnAccionGrilla(CubsoSunatModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(CubsoSunatModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo código CUBSO",
+            CrudModo.Delete => $"Eliminar · {item?.COD_CUBSO}",
+            CrudModo.Read   => $"Consultar · {item?.COD_CUBSO}",
+            _               => $"Editar · {item?.COD_CUBSO}"
+        };
+        var dlg = await DialogService.ShowAsync<CubsoSunatDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("SUNAT.CUBSO_SUNAT", _onCambio ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

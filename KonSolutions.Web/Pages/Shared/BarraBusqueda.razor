@@ -1,0 +1,69 @@
+@inject ConfigService ConfigSvc
+
+<MudTextField T="string" Value="@_val" ValueChanged="@OnValChanged"
+              Label="@Placeholder" Variant="Variant.Outlined"
+              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+              Immediate="true" DebounceInterval="@DebounceInterval"
+              OnDebounceIntervalElapsed="@DispararBusqueda"
+              Clearable="true" ClearIcon="@Icons.Material.Filled.DeleteOutline"
+              OnClearButtonClick="@(async () => { _val = ""; await ValueChanged.InvokeAsync(""); await OnSearch.InvokeAsync(""); })"
+              UserAttributes="@(new Dictionary<string,object>{["autocomplete"]="off"})"
+              Class="@($"barra-busqueda {Class}")" Style="@($"max-width:{MaxWidth};{EstiloTransformacion};{Style}")" />
+
+@code {
+    [Parameter] public string Value            { get; set; } = "";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public EventCallback<string> OnSearch     { get; set; }
+    [Parameter] public string Placeholder      { get; set; } = "Buscar...";
+    [Parameter] public int    DebounceInterval { get; set; } = 350;
+    [Parameter] public string MaxWidth         { get; set; } = "900px";
+    [Parameter] public string Class            { get; set; } = "mt-0";
+    [Parameter] public string Style            { get; set; } = "";
+
+    private string _val = "";
+
+    protected override void OnParametersSet()
+    {
+        if (_val != Value) _val = Value;
+    }
+
+    private async Task OnValChanged(string v)
+    {
+        _val = AplicarModoTexto(v);
+        await ValueChanged.InvokeAsync(_val);
+    }
+
+    /// <summary>Igual que CampoTexto.razor: MAYÚSCULAS/minúsculas/normal según Configuración General.</summary>
+    private string AplicarModoTexto(string v) => ConfigSvc.Current.ModoTexto switch
+    {
+        "upper" => v.ToUpperInvariant(),
+        "lower" => v.ToLowerInvariant(),
+        _ => v
+    };
+
+    /// <summary>MudBlazor no re-sincroniza visualmente un MudTextField mientras tiene foco
+    /// (para no perder la posición del cursor) — aunque el valor interno ya se transforma
+    /// en cada tecla (AplicarModoTexto), lo tipeado se seguía viendo tal cual en pantalla.
+    /// text-transform no lo hereda el &lt;input&gt; real desde este wrapper (los inputs son
+    /// "replaced elements"), así que se fija como variable CSS (esas sí atraviesan esa
+    /// barrera) y app.css la consume apuntando directo a ".barra-busqueda input".</summary>
+    private string EstiloTransformacion => ConfigSvc.Current.ModoTexto switch
+    {
+        "upper" => "--busqueda-text-transform:uppercase",
+        "lower" => "--busqueda-text-transform:lowercase",
+        _ => "--busqueda-text-transform:none"
+    };
+
+    /// <summary>
+    /// Solo dispara la búsqueda contra la BD si el texto está vacío (para volver a
+    /// mostrar todo) o llegó al mínimo de caracteres configurado en Configuración General
+    /// (NUM_CHARACTERS_MIO_SEARCH / ConfigSvc.Current.MinCaracteresBusqueda) — aplica a
+    /// TODAS las pantallas que usan este componente, sin tener que tocar cada una.
+    /// </summary>
+    private async Task DispararBusqueda()
+    {
+        var minimo = Math.Max(1, ConfigSvc.Current.MinCaracteresBusqueda);
+        if (_val.Length == 0 || _val.Length >= minimo)
+            await OnSearch.InvokeAsync(_val);
+    }
+}

@@ -1,0 +1,483 @@
+@page "/logistica/clases-movimiento"
+@attribute [Authorize]
+@using ClasesMovimientoModel = KONSolutions.Shared.Models.Logistica.ClasesMovimiento
+@using TiposMovimientoModel = KONSolutions.Shared.Models.Logistica.TiposMovimiento
+@using LogisticaRoute = KONSolutions.Web.Services.ApiRoutes.Logistica
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject ShortcutService ShortcutSvc
+@inject MenuService MenuSvc
+@implements IDisposable
+
+<PageTitle>Clases de Movimiento · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Clases de Movimiento" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema LOGISTICA · @_clases.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchClase" OnSearch="BuscarClases" Placeholder="Buscar clase..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="LoadClases" />
+        <AccionesBotones CodAplicacion="@_codApClase" CodOpcionAplicacion="@_codOpClase"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderClase" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);margin-bottom:16px;">
+    <div data-resizable-grid="clases-movimiento" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="ClasesMovimientoModel" Items="_clasesVisibles" Dense="true" Hover="true" Striped="true"
+                 RowClick="OnClaseRowClick"
+                 RowClassFunc="@((c, i) => c.COD_CLASE_MOVIMIENTO == _claseSel?.COD_CLASE_MOVIMIENTO ? "fila-seleccionada" : "")"
+                 RowStyleFunc="@((c, i) => "cursor:pointer;")"
+                 FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="90">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_CLASE_MOVIMIENTO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="ClasesMovimientoModel" ItemsBase="@BaseClase(0)" ValorDe="@(x => x.COD_CLASE_MOVIMIENTO)"
+                                            ValoresActivos="_filtrosClase.GetValueOrDefault(0)" ValoresActivosChanged="@(v => FiltroClase(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.COD_CLASE_MOVIMIENTO</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_CLASE_MOVIMIENTO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="ClasesMovimientoModel" ItemsBase="@BaseClase(1)" ValorDe="@(x => x.DES_CLASE_MOVIMIENTO)"
+                                            ValoresActivos="_filtrosClase.GetValueOrDefault(1)" ValoresActivosChanged="@(v => FiltroClase(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_CLASE_MOVIMIENTO</CellTemplate>
+            </TemplateColumn>
+            @* Ámbito de la clase. Dos columnas y no una sola combinada: son dos marcas
+               independientes y filtrarlas por separado es lo que se necesita al configurar. *@
+            <TemplateColumn Title="Almacenes" Sortable="false" Width="90" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Almacenes" /></HeaderTemplate>
+                <CellTemplate>
+                    @if (context.Item.FLG_ALMACENES == true)
+                    {
+                        <MudTooltip Text="Aplica a movimientos de almacén">
+                            <MudIcon Icon="@Icons.Material.Filled.Warehouse" Size="Size.Small" Color="Color.Primary" />
+                        </MudTooltip>
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Warehouse" Size="Size.Small" Style="opacity:.15;" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Producción" Sortable="false" Width="95" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Producción" /></HeaderTemplate>
+                <CellTemplate>
+                    @if (context.Item.FLG_PRODUCCION == true)
+                    {
+                        <MudTooltip Text="Aplica a movimientos de producción">
+                            <MudIcon Icon="@Icons.Material.Filled.PrecisionManufacturing" Size="Size.Small" Color="Color.Primary" />
+                        </MudTooltip>
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.PrecisionManufacturing" Size="Size.Small" Style="opacity:.15;" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Estado" Sortable="false" Width="140">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Estado" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="ClasesMovimientoModel" ItemsBase="@BaseClase(2)" ValorDe="@(x => x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtrosClase.GetValueOrDefault(2)" ValoresActivosChanged="@(v => FiltroClase(2, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrEmpty(context.Item.DES_ESTADO))
+                    {
+                        <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <div @onclick:stopPropagation="true">
+                        <AccionesBotones CodAplicacion="@_codApClase" CodOpcionAplicacion="@_codOpClase"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b => OnAccionGrillaClase(item, b))" />
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin clases de movimiento registradas.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="ClasesMovimientoModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div class="d-flex align-center gap-3 pa-3 grid-header-compacto">
+        <div class="grid-header-titulo">
+            <MudText Typo="Typo.h6">Tipos de Movimiento</MudText>
+            <MudText Class="mono" Style="opacity:.6;font-size:.78rem;">
+                @(_claseSel is null ? "Ninguna clase seleccionada" : $"Clase: {_claseSel.COD_CLASE_MOVIMIENTO} – {_claseSel.DES_CLASE_MOVIMIENTO}")
+            </MudText>
+        </div>
+        <BarraBusqueda @bind-Value="_searchTipo" OnSearch="@(() => Task.CompletedTask)" Placeholder="Buscar tipo de movimiento..." DebounceInterval="300" MaxWidth="719px" Class="grid-header-search" />
+        @if (_claseSel is not null)
+        {
+            <div class="grid-header-divider"></div>
+            <AccionesBotones CodAplicacion="@_codApTipo" CodOpcionAplicacion="@_codOpTipo"
+                             Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderTipo" />
+        }
+    </div>
+    <div data-resizable-grid="tipos-movimiento" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="TiposMovimientoModel" Items="_tiposVisibles" Dense="true" Hover="true" Striped="true"
+                 FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="90">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_TIPO_MOVIMIENTO" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="TiposMovimientoModel" ItemsBase="@BaseTipo(0)" ValorDe="@(x => x.COD_TIPO_MOVIMIENTO)"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(0)" ValoresActivosChanged="@(v => FiltroTipo(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.COD_TIPO_MOVIMIENTO</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_MOVIMIENTO" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="TiposMovimientoModel" ItemsBase="@BaseTipo(1)" ValorDe="@(x => x.DES_TIPO_MOVIMIENTO)"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(1)" ValoresActivosChanged="@(v => FiltroTipo(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_MOVIMIENTO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Entidad Asociada" Width="160">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Entidad Asociada" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="TiposMovimientoModel" ItemsBase="@BaseTipo(2)" ValorDe="@(x => x.DES_TIPO_ENTIDAD ?? "")"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(2)" ValoresActivosChanged="@(v => FiltroTipo(2, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_ENTIDAD</CellTemplate>
+            </TemplateColumn>
+            @* Tipo de estado que el movimiento aplica al documento relacionado
+               (COD_TIPO_ESTADO_RELACIONADO → ESTANDAR.TIPOS_ESTADOS). *@
+            <TemplateColumn Sortable="false" Title="Tipo de Estado Relacionado" Width="180">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Tipo de Estado Relacionado" Activo="@(_ordenColumna == 7)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(7))" />
+                        <FiltroExcelColumna T="TiposMovimientoModel" ItemsBase="@BaseTipo(4)" ValorDe="@(x => x.DES_TIPO_ESTADO ?? "")"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(4)" ValoresActivosChanged="@(v => FiltroTipo(4, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_TIPO_ESTADO ?? "—")</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Comportamiento" Sortable="false" Width="260">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Comportamiento" /></HeaderTemplate>
+                <CellTemplate>
+                    <div class="d-flex flex-wrap align-center" style="gap:5px;">
+                        @foreach (var f in FlagsActivos(context.Item))
+                        {
+                            <MudTooltip Text="@f.Label">
+                                <MudIcon Icon="@f.Icon" Size="Size.Small" Style="opacity:.75;" />
+                            </MudTooltip>
+                        }
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Estado" Sortable="false" Width="140">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Estado" Activo="@(_ordenColumna == 6)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(6))" />
+                        <FiltroExcelColumna T="TiposMovimientoModel" ItemsBase="@BaseTipo(3)" ValorDe="@(x => x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(3)" ValoresActivosChanged="@(v => FiltroTipo(3, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrEmpty(context.Item.DES_ESTADO))
+                    {
+                        <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <div @onclick:stopPropagation="true">
+                        <AccionesBotones CodAplicacion="@_codApTipo" CodOpcionAplicacion="@_codOpTipo"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b => OnAccionGrillaTipo(item, b))" />
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-6 mono" Style="opacity:.5;">
+                @(_claseSel is null ? "Seleccione una clase arriba." : "Sin tipos de movimiento para esta clase.")
+            </MudText>
+        </NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TiposMovimientoModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private string _codApClase = "", _codOpClase = "";
+    private string _codApTipo = "", _codOpTipo = "";
+
+    /// <summary>Íconos (mismos que el diálogo) de los FLG_* que estén en true, para la
+    /// columna "Comportamiento" — evita tener 14 columnas booleanas separadas en la grilla.</summary>
+    private static List<(string Icon, string Label)> FlagsActivos(TiposMovimientoModel t)
+    {
+        var pares = new (bool? Val, string Icon, string Label)[]
+        {
+            (t.FLG_POSITIVO, Icons.Material.Filled.Add, "Positivo"),
+            (t.FLG_TRANSFERENCIA, Icons.Material.Filled.SwapHoriz, "Transferencia"),
+            (t.FLG_COMERCIAL, Icons.Material.Filled.Storefront, "Comercial"),
+            (t.FLG_DEVOLUCION, Icons.Material.Filled.KeyboardReturn, "Devolución"),
+            (t.FLG_ANULACION, Icons.Material.Filled.Cancel, "Anulación"),
+            (t.FLG_CONSIGNACION, Icons.Material.Filled.Inventory2, "Consignación"),
+            (t.FLG_AJUSTE_INVENTARIO, Icons.Material.Filled.Rule, "Ajuste de Inventario"),
+            (t.FLG_COMPROBANTE_RELACIONADO, Icons.Material.Filled.ReceiptLong, "Comprobante Relacionado"),
+            (t.FLG_VALOR_INVENTARIO, Icons.Material.Filled.AttachMoney, "Valor de Inventario"),
+            (t.FLG_CONSIGNA_PROYECTO, Icons.Material.Filled.Work, "Consigna Proyecto"),
+            (t.FLG_CONSIGNA_CENTRO_COSTO, Icons.Material.Filled.AccountBalance, "Consigna Centro de Costo"),
+            (t.FLG_CONSIGNA_LOTE_CONTROL, Icons.Material.Filled.Numbers, "Consigna Lote Control"),
+            (t.FLG_DESTINO_AUTOMATICO, Icons.Material.Filled.AutoMode, "Destino Automático"),
+            (t.FLG_REQUIERE_CONFIRMACION_RECEPCION, Icons.Material.Filled.TaskAlt, "Requiere Confirmación Recepción"),
+            (t.FLG_CONTROL_CALIDAD, Icons.Material.Filled.VerifiedUser, "Control de Calidad"),
+            (t.FLG_REQUERIMIENTO, Icons.Material.Filled.Assignment, "Requerimiento"),
+            (t.FLG_PRODUCCION, Icons.Material.Filled.PrecisionManufacturing, "Producción"),
+        };
+        return pares.Where(p => p.Val == true).Select(p => (p.Icon, p.Label)).ToList();
+    }
+
+    private void ResolverCodigosPorSeccion()
+    {
+        (_codApClase, _codOpClase) = ResolverCod("Logistica/ClasesMovimiento.razor");
+        (_codApTipo, _codOpTipo)   = ResolverCod("Logistica/TiposMovimiento.razor");
+    }
+
+    private (string App, string Opcion) ResolverCod(string formulario)
+    {
+        var r = MenuSvc.BuscarCodigosPorFormulario(formulario);
+        return r is null ? (CodAplicacion, CodOpcionAplicacion) : (r.Value.CodAplicacion, r.Value.CodOpcionAplicacion);
+    }
+
+    private List<ClasesMovimientoModel> _clases = new();
+    private List<TiposMovimientoModel> _tipos = new();
+    private ClasesMovimientoModel? _claseSel;
+    private string _searchClase = "";
+    private string _searchTipo = "";
+
+    private List<TiposMovimientoModel> _tiposBuscados =>
+        string.IsNullOrWhiteSpace(_searchTipo) ? _tipos
+        : _tipos.Where(t => t.COD_TIPO_MOVIMIENTO.Contains(_searchTipo, StringComparison.OrdinalIgnoreCase)
+                          || t.DES_TIPO_MOVIMIENTO.Contains(_searchTipo, StringComparison.OrdinalIgnoreCase)
+                          || (t.DES_TIPO_ESTADO ?? "").Contains(_searchTipo, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosClase = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<ClasesMovimientoModel> OrdenarClases(List<ClasesMovimientoModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_CLASE_MOVIMIENTO).ToList() : items.OrderByDescending(x => x.COD_CLASE_MOVIMIENTO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_CLASE_MOVIMIENTO).ToList() : items.OrderByDescending(x => x.DES_CLASE_MOVIMIENTO).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+    private List<TiposMovimientoModel> OrdenarTipos(List<TiposMovimientoModel> items) => _ordenColumna switch
+    {
+        3 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_MOVIMIENTO).ToList() : items.OrderByDescending(x => x.COD_TIPO_MOVIMIENTO).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_MOVIMIENTO).ToList() : items.OrderByDescending(x => x.DES_TIPO_MOVIMIENTO).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_ENTIDAD).ToList() : items.OrderByDescending(x => x.DES_TIPO_ENTIDAD).ToList(),
+        6 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        7 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_ESTADO).ToList() : items.OrderByDescending(x => x.DES_TIPO_ESTADO).ToList(),
+        _ => items
+    };
+
+    private List<ClasesMovimientoModel> _clasesVisibles => OrdenarClases(AplicarClase(_clases, -1));
+    private List<ClasesMovimientoModel> BaseClase(int col) => AplicarClase(_clases, col);
+    private List<ClasesMovimientoModel> AplicarClase(List<ClasesMovimientoModel> src, int ex)
+    {
+        IEnumerable<ClasesMovimientoModel> q = src;
+        foreach (var (c, v) in _filtrosClase)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_CLASE_MOVIMIENTO)),
+                1 => q.Where(x => v.Contains(x.DES_CLASE_MOVIMIENTO)),
+                2 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroClase(int c, HashSet<string>? v) { _filtrosClase[c] = v; StateHasChanged(); }
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosTipo = new();
+    private List<TiposMovimientoModel> _tiposVisibles => OrdenarTipos(AplicarTipo(_tiposBuscados, -1));
+    private List<TiposMovimientoModel> BaseTipo(int col) => AplicarTipo(_tiposBuscados, col);
+    private List<TiposMovimientoModel> AplicarTipo(List<TiposMovimientoModel> src, int ex)
+    {
+        IEnumerable<TiposMovimientoModel> q = src;
+        foreach (var (c, v) in _filtrosTipo)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_TIPO_MOVIMIENTO)),
+                1 => q.Where(x => v.Contains(x.DES_TIPO_MOVIMIENTO)),
+                2 => q.Where(x => v.Contains(x.DES_TIPO_ENTIDAD ?? "")),
+                3 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                4 => q.Where(x => v.Contains(x.DES_TIPO_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroTipo(int c, HashSet<string>? v) { _filtrosTipo[c] = v; StateHasChanged(); }
+
+    protected override async Task OnInitializedAsync()
+    {
+        ResolverCodigosPorSeccion();
+        await AccessLog.LogNavegacionAsync("LOGISTICA", "ClasesMovimiento");
+        await LoadClases();
+
+        _claseSel = _clases.FirstOrDefault();
+        if (_claseSel is not null) await LoadTipos();
+
+        Cambios.Suscribir("LOGISTICA.CLASES_MOVIMIENTO", RefrescarClasesPorCambio);
+        Cambios.Suscribir("LOGISTICA.TIPOS_MOVIMIENTO", RefrescarTiposPorCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async Task RefrescarClasesPorCambio() => await InvokeAsync(async () => { await LoadClases(); StateHasChanged(); });
+    private async Task RefrescarTiposPorCambio() => await InvokeAsync(async () => { await LoadTipos(); StateHasChanged(); });
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => AbrirClase(null, CrudModo.Create));
+
+    private async Task LoadClases()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ClasesMovimientoModel>>>(LogisticaRoute.ClasesMovimiento);
+            _clases = r?.Data ?? new();
+        }
+        catch { _clases = new(); }
+    }
+
+    private async Task LoadTipos()
+    {
+        if (_claseSel is null) { _tipos = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposMovimientoModel>>>(
+                $"{LogisticaRoute.TiposMovimiento}?codClaseMovimiento={Uri.EscapeDataString(_claseSel.COD_CLASE_MOVIMIENTO)}");
+            _tipos = r?.Data ?? new();
+        }
+        catch { _tipos = new(); }
+    }
+
+    private async Task BuscarClases()
+    {
+        if (string.IsNullOrWhiteSpace(_searchClase)) { await LoadClases(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ClasesMovimientoModel>>>(
+                $"{LogisticaRoute.ClasesMovimientoSearch}?search={Uri.EscapeDataString(_searchClase)}");
+            _clases = r?.Data ?? new();
+        }
+        catch { _clases = new(); }
+    }
+
+    private async Task OnClaseRowClick(DataGridRowClickEventArgs<ClasesMovimientoModel> args)
+    {
+        _claseSel = args.Item;
+        await LoadTipos();
+    }
+
+    // ── Clases de Movimiento ──
+    private Task OnAccionHeaderClase(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirClase(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaClase(ClasesMovimientoModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirClase(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirClase(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirClase(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirClase(ClasesMovimientoModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva clase de movimiento",
+            CrudModo.Delete => $"Eliminar · {item?.DES_CLASE_MOVIMIENTO}",
+            CrudModo.Read   => $"Consultar · {item?.DES_CLASE_MOVIMIENTO}",
+            _               => $"Editar · {item?.DES_CLASE_MOVIMIENTO}"
+        };
+        var dlg = await DialogService.ShowAsync<ClasesMovimientoDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadClases();
+    }
+
+    // ── Tipos de Movimiento ──
+    private Task OnAccionHeaderTipo(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirTipo(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaTipo(TiposMovimientoModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirTipo(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirTipo(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirTipo(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirTipo(TiposMovimientoModel? item, CrudModo modo)
+    {
+        if (modo == CrudModo.Create && _claseSel is not null)
+            item = new TiposMovimientoModel { COD_CLASE_MOVIMIENTO = _claseSel.COD_CLASE_MOVIMIENTO, DES_CLASE_MOVIMIENTO = _claseSel.DES_CLASE_MOVIMIENTO };
+
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de movimiento",
+            CrudModo.Delete => $"Eliminar · {item?.DES_TIPO_MOVIMIENTO}",
+            CrudModo.Read   => $"Consultar · {item?.DES_TIPO_MOVIMIENTO}",
+            _               => $"Editar · {item?.DES_TIPO_MOVIMIENTO}"
+        };
+        var dlg = await DialogService.ShowAsync<TiposMovimientoDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadTipos();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("LOGISTICA.CLASES_MOVIMIENTO", RefrescarClasesPorCambio);
+        Cambios.Desuscribir("LOGISTICA.TIPOS_MOVIMIENTO", RefrescarTiposPorCambio);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

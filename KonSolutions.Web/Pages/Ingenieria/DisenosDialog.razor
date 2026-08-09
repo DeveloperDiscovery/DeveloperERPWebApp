@@ -1,0 +1,375 @@
+@using DisenosModel = KONSolutions.Shared.Models.Ingenieria.Disenos
+@using GruposProductoModel = KONSolutions.Shared.Models.Estandar.GruposProducto
+@using FamiliasProductoModel = KONSolutions.Shared.Models.Estandar.FamiliasProducto
+@using SubFamiliasProductoModel = KONSolutions.Shared.Models.Estandar.SubFamiliasProducto
+@using EstandarRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@using IngenieriaRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using SolicitudComercialModel = KONSolutions.Shared.Models.Comercial.SolicitudesComerciales
+@using KONSolutions.Shared.Models.Entorno
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+@* .mud-dialog-content trae su propio padding (24px) por defecto en MudBlazor. Si no se anula,
+   el ancho declarado en el div interno se SUMA a ese padding y el contenido se sale de la
+   tarjeta del diálogo — mismo tratamiento que en SolicitudesComercialesDialog. *@
+<style>
+    .diseno-dlg .mud-dialog-content { padding: 0 !important; }
+</style>
+
+<MudDialog Class="diseno-dlg" Style="max-width:96vw;max-height:92vh;">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_DISENO" />
+    </TitleContent>
+    <DialogContent>
+        @* Igual que en Solicitudes Comerciales: el formulario completo es la columna izquierda
+           (con su propio scroll vertical) y el visor de documentos aparece a la derecha,
+           ocupando la misma altura. Los anchos suman los 48px de padding horizontal para que
+           no aparezca scroll horizontal: formulario 736px, cerrado 736+48=784, abierto
+           736 + 16 de separación + 759 del visor + 48 = 1560. *@
+        <div style="@($"display:flex;gap:16px;align-items:stretch;width:{(_previewDocAbierto ? "min(1560px, 96vw)" : "min(784px, 94vw)")};max-width:96vw;height:80vh;max-height:900px;box-sizing:border-box;padding:16px 24px 24px 24px;transition:width .32s cubic-bezier(.4,0,.2,1);")">
+        <div style="width:736px;max-width:100%;height:100%;flex-shrink:0;overflow-y:auto;overflow-x:hidden;">
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <MudGrid Class="align-end">
+                @if (!_esNuevo)
+                {
+                    <MudItem xs="12" sm="4">
+                        <CampoTexto Tabla="INGENIERIA.DISENOS" Columna="COD_DISENO"
+                                    @bind-Value="_model.COD_DISENO" Disabled="true" />
+                    </MudItem>
+                }
+                <MudItem xs="12" sm="@(_esNuevo ? 12 : 8)">
+                    <CampoTexto Tabla="INGENIERIA.DISENOS" Columna="DES_DISENO"
+                                @bind-Value="_model.DES_DISENO" Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+            </MudGrid>
+
+            <AriaCombo TItem="ComboboxItem" Items="_tiposDiseno"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       @bind-Value="_model.COD_TIPO_DISENO"
+                       Label="Tipo de Diseño" Disabled="_readonly" Obligatorio="true" />
+
+            <AriaCombo TItem="ComboboxItem" Items="_grupos"
+                       TextFunc="@(g => $"{g.Id} - {g.Texto}")" ValueFunc="@(g => g.Id)"
+                       Value="@_model.COD_GRUPO_PRODUCTO" ValueChanged="@(v => OnGrupoChanged(v))"
+                       Label="Grupo de Producto" Disabled="_readonly" Obligatorio="true" />
+            <AriaCombo TItem="ComboboxItem" Items="_familias"
+                       TextFunc="@(f => $"{f.Id} - {f.Texto}")" ValueFunc="@(f => f.Id)"
+                       Value="@_model.COD_FAMILIA_PRODUCTO" ValueChanged="@(v => OnFamiliaChanged(v))"
+                       Label="Familia de Producto" Disabled="@(_readonly || string.IsNullOrEmpty(_model.COD_GRUPO_PRODUCTO))" Obligatorio="true" />
+            <AriaCombo TItem="ComboboxItem" Items="_subFamilias"
+                       TextFunc="@(s => $"{s.Id} - {s.Texto}")" ValueFunc="@(s => s.Id)"
+                       Value="@_model.COD_SUB_FAMILIA_PRODUCTO" ValueChanged="@(v => OnSubFamiliaChanged(v))"
+                       Label="Sub Familia de Producto" Disabled="@(_readonly || string.IsNullOrEmpty(_model.COD_FAMILIA_PRODUCTO))" Obligatorio="true" />
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="6">
+                    <MudTextField Value="@_desUnidadMedida" Label="Unidad de Medida" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField Value="@_desUnidadMedidaSecundaria" Label="Unidad de Medida Secundaria" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+                </MudItem>
+            </MudGrid>
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_entidades"
+                               TextFunc="@(e => $"{e.Id} - {e.Texto}")" ValueFunc="@(e => e.Id)"
+                               Value="@(_model.COD_ENTIDAD?.ToString())" ValueChanged="@(v => OnEntidadChanged(v))"
+                               Label="Entidad" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <div class="d-flex align-end gap-1">
+                        <div style="flex:1;min-width:0;">
+                            <AriaCombo TItem="ComboboxItem" Items="_solicitudesComerciales"
+                                       TextFunc="@(s => $"{s.Id} - {s.Texto}")" ValueFunc="@(s => s.Id)"
+                                       Value="@(_model.NUM_SOLICITUD_COMERICAL?.ToString())" ValueChanged="@(v => _model.NUM_SOLICITUD_COMERICAL = int.TryParse(v, out var ns) ? ns : null)"
+                                       Label="Solicitud Comercial" Disabled="_readonly" />
+                        </div>
+                        @* Mismo diálogo de detalle que usa la grilla de Solicitudes Comerciales
+                           (SolicitudesComercialesDialog en modo Ver), no un panel resumido aparte. *@
+                        @if (_model.NUM_SOLICITUD_COMERICAL is not null)
+                        {
+                            <MudTooltip Text="Consultar Solicitud Comercial">
+                                <MudIconButton Icon="@Icons.Material.Filled.Assignment" Size="Size.Small"
+                                               Color="Color.Primary" Class="mb-3"
+                                               OnClick="AbrirSolicitud" />
+                            </MudTooltip>
+                        }
+                    </div>
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_temporadas"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               Value="@(_model.NUM_TEMPORADA?.ToString())" ValueChanged="@(v => OnTemporadaChanged(v))"
+                               Label="Temporada" Disabled="@(_readonly || _model.COD_ENTIDAD is null)" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_colecciones"
+                               TextFunc="@(c => $"{c.Id} - {c.Texto}")" ValueFunc="@(c => c.Id)"
+                               Value="@(_model.NUM_COLECCION?.ToString())" ValueChanged="@(v => _model.NUM_COLECCION = int.TryParse(v, out var dc) ? dc : null)"
+                               Label="Colección" Disabled="@(_readonly || _model.NUM_TEMPORADA is null)" />
+                </MudItem>
+            </MudGrid>
+
+            @* Documentos del diseño: se guardan como archivos físicos en una carpeta con el
+               código del diseño, dentro de la ruta configurada en ENTORNO.PATHFILES bajo la
+               clave KEY_PATH_FILE_DISENOS_DOCUMENTOS. Solo al Modificar/Ver: al Crear todavía
+               no hay código asignado con el cual nombrar la carpeta. *@
+            @if (!_esNuevo)
+            {
+                <DocumentosCarpetaPanel @ref="_docsPanelRef"
+                                        CodKeyPathfile="KEY_PATH_FILE_DISENOS_DOCUMENTOS"
+                                        Identificador="@_model.COD_DISENO" ReadOnly="_readonly"
+                                        @bind-PreviewAbierto="_previewDocAbierto"
+                                        @bind-DocSeleccionado="_docSeleccionado"
+                                        @bind-BlobUrl="_blobUrl"
+                                        @bind-PreviewCargando="_previewCargando" />
+            }
+
+            <EstadoCombo DesTabla="INGENIERIA.DISENOS" @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+        </div>
+
+        @* BlobUrl va con @: es parámetro de tipo string y sin la arroba Razor pasa el texto
+           literal "_blobUrl", con lo que el iframe cargaría la propia aplicación. *@
+        @if (_previewDocAbierto)
+        {
+            <VisorArchivoPanel Documento="_docSeleccionado" BlobUrl="@_blobUrl" Cargando="_previewCargando"
+                               Ancho="clamp(320px, 42vw, 759px)"
+                               OnCerrar="@(() => _docsPanelRef!.CerrarPreviewAsync())" />
+        }
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public DisenosModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private KONSolutions.Shared.Models.Ingenieria.DisenosDto _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    // Estado del visor de documentos, compartido con DocumentosCarpetaPanel (@bind-Xxx) y
+    // dibujado en este diálogo con VisorArchivoPanel, para que quede al lado de todo el
+    // formulario y no solo al lado de la grilla de Documentos.
+    private DocumentosCarpetaPanel? _docsPanelRef;
+    private bool _previewDocAbierto;
+    private DocumentoCarpetaDto? _docSeleccionado;
+    private string? _blobUrl;
+    private bool _previewCargando;
+
+    // Abre el mismo diálogo de detalle que la grilla de Solicitudes Comerciales, en modo Ver
+    // (CrudModo.Read) — trae el registro fresco vía SHOWBYID igual que ese diálogo lo hace
+    // internamente al recibir un Item con Modo != Create.
+    private async Task AbrirSolicitud()
+    {
+        if (_model.NUM_SOLICITUD_COMERICAL is null) return;
+        var solicitud = await Http.SafeGetAsync<SolicitudComercialModel>(
+            $"{ComercialRoute.SolicitudesComerciales}/{_model.NUM_SOLICITUD_COMERICAL}");
+        if (solicitud is null) { Snackbar.Add("No se pudo cargar la solicitud.", Severity.Warning); return; }
+
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Comercial.SolicitudesComercialesDialog>(
+            $"Consultar · {solicitud.DES_SOLICITUD_COMERCIAL}",
+            new DialogParameters { ["Item"] = solicitud, ["Modo"] = CrudModo.Read },
+            new DialogOptions { MaxWidth = MaxWidth.False, FullWidth = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private List<ComboboxItem> _grupos         = new();
+    private List<ComboboxItem> _familias        = new();
+    private List<ComboboxItem> _subFamilias     = new();
+    private List<ComboboxItem> _tiposDiseno     = new();
+    private List<ComboboxItem> _entidades       = new();
+    private List<ComboboxItem> _temporadas      = new();
+    private List<ComboboxItem> _colecciones     = new();
+    private List<ComboboxItem> _solicitudesComerciales = new();
+
+    // Lista completa (no solo Id/Texto) para poder leer las unidades de medida heredadas.
+    private List<SubFamiliasProductoModel> _subFamiliasCompletas = new();
+    private string? _desUnidadMedida;
+    private string? _desUnidadMedidaSecundaria;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(DisenosModel m)
+    {
+        _model = new KONSolutions.Shared.Models.Ingenieria.DisenosDto
+        {
+            COD_DISENO = m.COD_DISENO,
+            DES_DISENO = m.DES_DISENO,
+            COD_GRUPO_PRODUCTO = m.COD_GRUPO_PRODUCTO,
+            COD_FAMILIA_PRODUCTO = m.COD_FAMILIA_PRODUCTO,
+            COD_SUB_FAMILIA_PRODUCTO = m.COD_SUB_FAMILIA_PRODUCTO,
+            COD_UNIDAD_MEDIDA = m.COD_UNIDAD_MEDIDA,
+            COD_UNIDAD_MEDIDA_SECUNDARIA = m.COD_UNIDAD_MEDIDA_SECUNDARIA,
+            COD_ENTIDAD = m.COD_ENTIDAD,
+            NUM_TEMPORADA = m.NUM_TEMPORADA,
+            NUM_COLECCION = m.NUM_COLECCION,
+            NUM_SOLICITUD_COMERICAL = m.NUM_SOLICITUD_COMERICAL,
+            COD_TIPO_DISENO = m.COD_TIPO_DISENO,
+            COD_TIPO_ESTADO = m.COD_TIPO_ESTADO,
+            COD_ESTADO = m.COD_ESTADO,
+        };
+    }
+
+    /// <summary>Trae el Diseño fresco desde SHOWBYID — evita mostrar datos desactualizados
+    /// de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<DisenosModel>($"{IngenieriaRoute.Disenos}/{Uri.EscapeDataString(_model.COD_DISENO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        // /loadcombos (PROC_INGENIERIA_DISENOS_LOADCOMBOS) trae en un solo roundtrip Tipos de
+        // Diseño, Grupos de Producto, Unidad de Medida y Entidades tipo Cliente ('CLI') — esto
+        // último reemplaza el combo "Entidad" que antes mostraba TODAS las entidades sin
+        // filtrar (proveedores, empleados, etc.), que no tiene sentido como dueño de un diseño.
+        var tLoadcombos = Http.SafeGetAsync<KONSolutions.Shared.Models.Ingenieria.DisenosLoadCombosResult>(IngenieriaRoute.DisenosLoadcombos);
+        var tFamilias = string.IsNullOrEmpty(_model.COD_GRUPO_PRODUCTO)
+            ? Task.FromResult<List<FamiliasProductoModel>?>(null) : CargarFamilias(_model.COD_GRUPO_PRODUCTO!);
+        var tSubFamilias = (string.IsNullOrEmpty(_model.COD_GRUPO_PRODUCTO) || string.IsNullOrEmpty(_model.COD_FAMILIA_PRODUCTO))
+            ? Task.FromResult<List<SubFamiliasProductoModel>?>(null) : CargarSubFamilias(_model.COD_GRUPO_PRODUCTO!, _model.COD_FAMILIA_PRODUCTO!);
+        var tTemporadas = _model.COD_ENTIDAD is null
+            ? Task.FromResult<List<ComboboxItem>?>(null) : CargarTemporadas(_model.COD_ENTIDAD.Value);
+        var tColecciones = (_model.COD_ENTIDAD is null || _model.NUM_TEMPORADA is null)
+            ? Task.FromResult<List<ComboboxItem>?>(null) : CargarColecciones(_model.COD_ENTIDAD.Value, _model.NUM_TEMPORADA.Value);
+        var tSolicitudesComerciales = CargarSolicitudesComerciales(_model.COD_ENTIDAD);
+
+        await Task.WhenAll(tLoadcombos, tFamilias, tSubFamilias, tTemporadas, tColecciones, tSolicitudesComerciales);
+
+        var combos = await tLoadcombos;
+        _grupos = combos?.GruposProducto ?? new();
+        _tiposDiseno = combos?.TiposDiseno ?? new();
+        _entidades = combos?.Clientes ?? new();
+        _familias = ((await tFamilias) ?? new()).Select(f => new ComboboxItem { Id = f.COD_FAMILIA_PRODUCTO.Trim(), Texto = f.DES_FAMILIA_PRODUCTO }).ToList();
+        _subFamiliasCompletas = (await tSubFamilias) ?? new();
+        _subFamilias = _subFamiliasCompletas.Select(s => new ComboboxItem { Id = s.COD_SUB_FAMILIA_PRODUCTO.Trim(), Texto = s.DES_SUB_FAMILIA_PRODUCTO }).ToList();
+        _temporadas = (await tTemporadas) ?? new();
+        _colecciones = (await tColecciones) ?? new();
+        _solicitudesComerciales = (await tSolicitudesComerciales) ?? new();
+        ActualizarUnidadesMedidaDesdeSubFamilia();
+    }
+
+    private Task<List<ComboboxItem>?> CargarTemporadas(decimal codEntidad) =>
+        Http.SafeGetAsync<List<ComboboxItem>>($"{KONSolutions.Web.Services.ApiRoutes.Comercial.EntidadesTemporadas}/combobox?codEntidad={codEntidad}");
+
+    private Task<List<ComboboxItem>?> CargarColecciones(decimal codEntidad, int numTemporada) =>
+        Http.SafeGetAsync<List<ComboboxItem>>($"{KONSolutions.Web.Services.ApiRoutes.Comercial.EntidadesTemporadasColecciones}/combobox?codEntidad={codEntidad}&numTemporada={numTemporada}");
+
+    // El combo de Solicitud Comercial se filtra por Entidad (Cliente); si no hay Entidad
+    // seleccionada el SP no filtra por defecto (@COD_ENTIDAD_CLIENTE = NULL).
+    private Task<List<ComboboxItem>?> CargarSolicitudesComerciales(decimal? codEntidadCliente) =>
+        Http.SafeGetAsync<List<ComboboxItem>>(codEntidadCliente is null
+            ? KONSolutions.Web.Services.ApiRoutes.Comercial.SolicitudesComercialesCombobox
+            : $"{KONSolutions.Web.Services.ApiRoutes.Comercial.SolicitudesComercialesCombobox}?codEntidadCliente={codEntidadCliente}");
+
+    private void ActualizarUnidadesMedidaDesdeSubFamilia()
+    {
+        var sub = _subFamiliasCompletas.FirstOrDefault(s => s.COD_SUB_FAMILIA_PRODUCTO.Trim() == _model.COD_SUB_FAMILIA_PRODUCTO);
+        _model.COD_UNIDAD_MEDIDA = sub?.COD_UNIDAD_MEDIDA;
+        _model.COD_UNIDAD_MEDIDA_SECUNDARIA = sub?.COD_UNIDAD_MEDIDA_SECUNDARIA;
+        _desUnidadMedida = string.IsNullOrEmpty(sub?.DES_UNIDAD_MEDIDA) ? sub?.COD_UNIDAD_MEDIDA : sub!.DES_UNIDAD_MEDIDA;
+        _desUnidadMedidaSecundaria = sub?.COD_UNIDAD_MEDIDA_SECUNDARIA;
+    }
+
+    private Task<List<FamiliasProductoModel>?> CargarFamilias(string codGrupoProducto) =>
+        Http.SafeGetAsync<List<FamiliasProductoModel>>($"{EstandarRoute.FamiliasProducto}?codGrupoProducto={Uri.EscapeDataString(codGrupoProducto)}");
+
+    private Task<List<SubFamiliasProductoModel>?> CargarSubFamilias(string codGrupoProducto, string codFamiliaProducto) =>
+        Http.SafeGetAsync<List<SubFamiliasProductoModel>>(
+            $"{EstandarRoute.SubFamiliasProducto}?codGrupoProducto={Uri.EscapeDataString(codGrupoProducto)}&codFamiliaProducto={Uri.EscapeDataString(codFamiliaProducto)}");
+
+    private async Task OnGrupoChanged(string? val)
+    {
+        _model.COD_GRUPO_PRODUCTO = val ?? "";
+        _model.COD_FAMILIA_PRODUCTO = "";
+        _model.COD_SUB_FAMILIA_PRODUCTO = "";
+        var familias = string.IsNullOrEmpty(val) ? new() : (await CargarFamilias(val!)) ?? new();
+        _familias = familias.Select(f => new ComboboxItem { Id = f.COD_FAMILIA_PRODUCTO.Trim(), Texto = f.DES_FAMILIA_PRODUCTO }).ToList();
+        _subFamilias = new();
+    }
+
+    private async Task OnFamiliaChanged(string? val)
+    {
+        _model.COD_FAMILIA_PRODUCTO = val ?? "";
+        _model.COD_SUB_FAMILIA_PRODUCTO = "";
+        _subFamiliasCompletas = (string.IsNullOrEmpty(_model.COD_GRUPO_PRODUCTO) || string.IsNullOrEmpty(val))
+            ? new() : (await CargarSubFamilias(_model.COD_GRUPO_PRODUCTO!, val!)) ?? new();
+        _subFamilias = _subFamiliasCompletas.Select(s => new ComboboxItem { Id = s.COD_SUB_FAMILIA_PRODUCTO.Trim(), Texto = s.DES_SUB_FAMILIA_PRODUCTO }).ToList();
+        ActualizarUnidadesMedidaDesdeSubFamilia();
+    }
+
+    private void OnSubFamiliaChanged(string? val)
+    {
+        _model.COD_SUB_FAMILIA_PRODUCTO = val ?? "";
+        ActualizarUnidadesMedidaDesdeSubFamilia();
+    }
+
+    private async Task OnEntidadChanged(string? val)
+    {
+        _model.COD_ENTIDAD = decimal.TryParse(val, out var d) ? d : null;
+        _model.NUM_TEMPORADA = null;
+        _model.NUM_COLECCION = null;
+        _model.NUM_SOLICITUD_COMERICAL = null;
+        _colecciones = new();
+        _temporadas = _model.COD_ENTIDAD is null ? new() : (await CargarTemporadas(_model.COD_ENTIDAD.Value)) ?? new();
+        _solicitudesComerciales = (await CargarSolicitudesComerciales(_model.COD_ENTIDAD)) ?? new();
+    }
+
+    private async Task OnTemporadaChanged(string? val)
+    {
+        _model.NUM_TEMPORADA = int.TryParse(val, out var t) ? t : null;
+        _model.NUM_COLECCION = null;
+        _colecciones = (_model.COD_ENTIDAD is null || _model.NUM_TEMPORADA is null)
+            ? new() : (await CargarColecciones(_model.COD_ENTIDAD.Value, _model.NUM_TEMPORADA.Value)) ?? new();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{IngenieriaRoute.Disenos}/{Uri.EscapeDataString(_model.COD_DISENO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(DisenosDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // PROC_INGENIERIA_DISENOS_INSERT es upsert (inserta o actualiza según exista el código) —
+        // el Controller nunca tuvo un endpoint PUT, siempre se llama al mismo POST.
+        var resp = await Http.PostAsJsonAsync(IngenieriaRoute.Disenos, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(DisenosDialog), nameof(Submit));
+    }
+}

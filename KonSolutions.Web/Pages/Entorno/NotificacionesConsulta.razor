@@ -1,0 +1,253 @@
+@page "/entorno/notificaciones-consulta"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Entorno
+@inject NotificacionesFlujoService FlujoSvc
+@inject FotoUsuarioService FotoSvc
+@inject NotificacionesAprobacionesService AprobSvc
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+@inject ConfigService ConfigSvc
+
+<PageTitle>Notificaciones · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-3">
+    <div>
+        <TituloPagina Fallback="Notificaciones" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+            Consulta de notificaciones recibidas y emitidas
+        </MudText>
+    </div>
+    <GridRefreshButton OnRefresh="RecargarAsync" />
+</div>
+
+<MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pt-4"
+         @bind-ActivePanelIndex="_tab">
+    <MudTabPanel Text="Recibidas" Icon="@Icons.Material.Filled.MoveToInbox">
+        @Grilla(_recibidas, "recibidas", _searchRecibidas, v => _searchRecibidas = v, _filtrosRecibidas)
+    </MudTabPanel>
+    <MudTabPanel Text="Emitidas" Icon="@Icons.Material.Filled.Send">
+        @Grilla(_emitidas, "emitidas", _searchEmitidas, v => _searchEmitidas = v, _filtrosEmitidas)
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    // Pasados por AbrirTabOpcion al abrir cualquier pantalla desde el menú; esta pantalla
+    // no los usa, pero deben declararse para que Blazor no falle.
+    [Parameter] public string? CodAplicacion { get; set; }
+    [Parameter] public string? CodOpcionAplicacion { get; set; }
+
+    private int _tab;
+    private bool _cargado;
+    private List<NotificacionFlujoDetalle> _recibidas = new();
+    private List<NotificacionFlujoDetalle> _emitidas  = new();
+
+    private string _searchRecibidas = "";
+    private string _searchEmitidas  = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtrosRecibidas = new();
+    private readonly Dictionary<int, HashSet<string>?> _filtrosEmitidas  = new();
+
+    protected override async Task OnInitializedAsync() => await RecargarAsync();
+
+    private async Task RecargarAsync()
+    {
+        _cargado = false; StateHasChanged();
+        _recibidas = await FlujoSvc.GetShowallAsync(recepcionada: true);
+        _emitidas  = await FlujoSvc.GetShowallAsync(recepcionada: false);
+        _cargado = true; StateHasChanged();
+
+        // Fotos de los usuarios: se descargan UNA vez por usuario (cacheadas) desde el
+        // endpoint dedicado; la grilla ya no las trae embebidas (más liviana y rápida).
+        _ = FotoSvc.PrecargarVariosAsync(
+                _recibidas.Select(n => n.COD_USUARIO).Concat(_emitidas.Select(n => n.COD_USUARIO)))
+            .ContinueWith(async t => { if (t.Result) await InvokeAsync(StateHasChanged); });
+    }
+
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<NotificacionFlujoDetalle> Ordenar(List<NotificacionFlujoDetalle> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.DES_NOTIFICACION).ToList() : items.OrderByDescending(x => x.DES_NOTIFICACION).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_USUARIO).ToList() : items.OrderByDescending(x => x.DES_USUARIO).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO_FLUJO).ToList() : items.OrderByDescending(x => x.DES_ESTADO_FLUJO).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.FEC_NOTIFICACION).ToList() : items.OrderByDescending(x => x.FEC_NOTIFICACION).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.FEC_VENCIMIENTO).ToList() : items.OrderByDescending(x => x.FEC_VENCIMIENTO).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_NOTIFICACION).ToList() : items.OrderByDescending(x => x.DES_TIPO_NOTIFICACION).ToList(),
+        6 => _ordenAscendente ? items.OrderBy(x => x.NUM_NOTIFICACION).ToList() : items.OrderByDescending(x => x.NUM_NOTIFICACION).ToList(),
+        _ => items
+    };
+
+    private List<NotificacionFlujoDetalle> Aplicar(List<NotificacionFlujoDetalle> src, string search,
+        Dictionary<int, HashSet<string>?> filtros, int ex)
+    {
+        IEnumerable<NotificacionFlujoDetalle> q = src;
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            q = q.Where(x => (x.DES_NOTIFICACION ?? "").Contains(s, StringComparison.OrdinalIgnoreCase)
+                           || (x.DES_INFORMACION ?? "").Contains(s, StringComparison.OrdinalIgnoreCase)
+                           || (x.DES_USUARIO ?? "").Contains(s, StringComparison.OrdinalIgnoreCase)
+                           || x.NUM_NOTIFICACION.ToString().Contains(s));
+        }
+        foreach (var (c, v) in filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.DES_NOTIFICACION ?? "")),
+                1 => q.Where(x => v.Contains(x.DES_USUARIO ?? "")),
+                2 => q.Where(x => v.Contains(x.DES_ESTADO_FLUJO ?? "")),
+                3 => q.Where(x => v.Contains(x.FEC_NOTIFICACION?.ToString("dd/MM/yyyy") ?? "")),
+                4 => q.Where(x => v.Contains(x.FEC_VENCIMIENTO?.ToString("dd/MM/yyyy") ?? "")),
+                5 => q.Where(x => v.Contains(x.DES_TIPO_NOTIFICACION ?? "")),
+                6 => q.Where(x => v.Contains(x.NUM_NOTIFICACION.ToString())),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private RenderFragment Grilla(List<NotificacionFlujoDetalle> items, string clave, string search,
+        Action<string> setSearch, Dictionary<int, HashSet<string>?> filtros) => @<div>
+        <MudToolBar Dense="true" Class="pl-0 pr-0">
+            <BarraBusqueda Value="@search" ValueChanged="@((string v) => { setSearch(v); StateHasChanged(); })"
+                           OnSearch="@((string v) => { setSearch(v); StateHasChanged(); return Task.CompletedTask; })"
+                           Placeholder="Buscar notificación, usuario..." DebounceInterval="300" />
+            <GridClearFiltersButton OnClear="@(() => { foreach (var k in filtros.Keys.ToList()) filtros[k] = null; StateHasChanged(); })"
+                                    HasFilters="@(filtros.Any(f => f.Value is not null))" />
+        </MudToolBar>
+        <div data-resizable-grid="@($"notificaciones-{clave}")" style="position:relative;">
+        <MudDataGrid T="NotificacionFlujoDetalle" Items="@Ordenar(Aplicar(items, search, filtros, -1))" Dense="true" Hover="true"
+                     Bordered="true" Striped="true" Loading="@(!_cargado)" FixedHeader="true" Height="100%"
+                     RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Title="Tipo" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    @if (Base64(context.Item.IMG_TIPO_NOTIFICACION) is { } src)
+                    {
+                        <img src="@src" style="width:26px;height:26px;object-fit:contain;" title="@context.Item.DES_TIPO_NOTIFICACION" alt="" />
+                    }
+                    else { <MudIcon Icon="@Icons.Material.Filled.Notifications" /> }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_NOTIFICACION" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="NotificacionFlujoDetalle" ItemsBase="@Aplicar(items, search, filtros, 5)" ValorDe="@(x=>x.DES_TIPO_NOTIFICACION ?? "")"
+                                            ValoresActivos="filtros.GetValueOrDefault(5)" ValoresActivosChanged="@(v=>{ filtros[5]=v; StateHasChanged(); })" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_NOTIFICACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="N°">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="NUM_NOTIFICACION" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="NotificacionFlujoDetalle" ItemsBase="@Aplicar(items, search, filtros, 6)" ValorDe="@(x=>x.NUM_NOTIFICACION.ToString())"
+                                            ValoresActivos="filtros.GetValueOrDefault(6)" ValoresActivosChanged="@(v=>{ filtros[6]=v; StateHasChanged(); })" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.NUM_NOTIFICACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Notificación">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_NOTIFICACION" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="NotificacionFlujoDetalle" ItemsBase="@Aplicar(items, search, filtros, 0)" ValorDe="@(x=>x.DES_NOTIFICACION ?? "")"
+                                            ValoresActivos="filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>{ filtros[0]=v; StateHasChanged(); })" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <div style="font-weight:600;">@context.Item.DES_NOTIFICACION</div>
+                    <div style="font-size:.75rem;opacity:.7;">@context.Item.DES_INFORMACION</div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Usuario">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_USUARIO" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="NotificacionFlujoDetalle" ItemsBase="@Aplicar(items, search, filtros, 1)" ValorDe="@(x=>x.DES_USUARIO ?? "")"
+                                            ValoresActivos="filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>{ filtros[1]=v; StateHasChanged(); })" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <div class="d-flex align-center gap-2">
+                        @{ var foto = FotoSvc.ObtenerCacheada(context.Item.COD_USUARIO); }
+                        @if (foto is not null)
+                        {
+                            <img src="@($"data:image/png;base64,{foto}")" style="width:28px;height:28px;border-radius:50%;object-fit:cover;" alt="" />
+                        }
+                        else { <MudIcon Icon="@Icons.Material.Filled.Person" Style="opacity:.4;" /> }
+                        <span>@context.Item.DES_USUARIO</span>
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Notificado">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="FEC_NOTIFICACION" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="NotificacionFlujoDetalle" ItemsBase="@Aplicar(items, search, filtros, 3)" ValorDe="@(x=>x.FEC_NOTIFICACION?.ToString("dd/MM/yyyy") ?? "")"
+                                            ValoresActivos="filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>{ filtros[3]=v; StateHasChanged(); })" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.FEC_NOTIFICACION?.ToString("dd/MM/yyyy") ?? "—")</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Vence">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="FEC_VENCIMIENTO" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="NotificacionFlujoDetalle" ItemsBase="@Aplicar(items, search, filtros, 4)" ValorDe="@(x=>x.FEC_VENCIMIENTO?.ToString("dd/MM/yyyy") ?? "")"
+                                            ValoresActivos="filtros.GetValueOrDefault(4)" ValoresActivosChanged="@(v=>{ filtros[4]=v; StateHasChanged(); })" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.FEC_VENCIMIENTO?.ToString("dd/MM/yyyy") ?? "—")</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Estado">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ESTADO_FLUJO" Activo="@(_ordenColumna == 6)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(6))" />
+                        <FiltroExcelColumna T="NotificacionFlujoDetalle" ItemsBase="@Aplicar(items, search, filtros, 2)" ValorDe="@(x=>x.DES_ESTADO_FLUJO ?? "")"
+                                            ValoresActivos="filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>{ filtros[2]=v; StateHasChanged(); })" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <div class="d-flex align-center gap-1">
+                        @if (Base64(context.Item.IMG_PICTURE_NOTIFICACION) is { } e)
+                        {
+                            <img src="@e" style="width:16px;height:16px;object-fit:contain;" alt="" />
+                        }
+                        <span style="font-size:.78rem;">@context.Item.DES_ESTADO_FLUJO</span>
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" Color="Color.Primary"
+                                   Title="Ver" OnClick="@(() => VerAsync(context.Item.NUM_NOTIFICACION))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Align="Align.Center" Class="pa-4" Style="opacity:.6;">Sin notificaciones.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="NotificacionFlujoDetalle" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    </div>;
+
+    private async Task VerAsync(int numNotificacion)
+    {
+        try { await JS.InvokeVoidAsync("cursorBusy.show"); } catch { }
+        var data = await AprobSvc.GetByIdAsync(numNotificacion);
+        try { await JS.InvokeVoidAsync("cursorBusy.hide"); } catch { }
+
+        var parameters = new DialogParameters { ["Data"] = data, ["SoloLectura"] = true };
+        await DialogService.ShowAsync<NotificacionAprobacionDialog>(
+            "", parameters, new DialogOptions
+            {
+                CloseButton = false, MaxWidth = MaxWidth.False, FullWidth = false,
+                Position = DialogPosition.Center, BackdropClick = false, CloseOnEscapeKey = false
+            });
+    }
+
+    private static string? Base64(byte[]? img)
+        => img is { Length: > 0 } ? $"data:image/png;base64,{Convert.ToBase64String(img)}" : null;
+}

@@ -1,0 +1,112 @@
+@using ComprobanteVinculoModel = KONSolutions.Shared.Models.Comercial.TiposOperacionTiposComprobantePago
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using EstandarRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@DesComprobanteTexto" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <MudTextField Value="@CodTipoOperacionTexto" Label="Tipo de operación"
+                          Variant="Variant.Outlined" Disabled="true" Class="mb-3" />
+            <AriaCombo TItem="ComboboxItem" Items="_tiposComprobantePago"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       @bind-Value="_model.COD_TIPO_COMPROBANTE_PAGO"
+                       Label="Tipo de comprobante de pago" Disabled="@(!_esNuevo || _readonly)" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ComprobanteVinculoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public string CodClaseOperacion { get; set; } = "";
+    [Parameter] public string CodTipoOperacion { get; set; } = "";
+    [Parameter] public string DesTipoOperacion { get; set; } = "";
+
+    private ComprobanteVinculoModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+    private string CodTipoOperacionTexto => string.IsNullOrEmpty(DesTipoOperacion) ? CodTipoOperacion : $"{CodTipoOperacion} - {DesTipoOperacion}";
+    private string DesComprobanteTexto
+    {
+        get
+        {
+            var match = _tiposComprobantePago.FirstOrDefault(t => t.Id == _model.COD_TIPO_COMPROBANTE_PAGO);
+            return match is null ? _model.COD_TIPO_COMPROBANTE_PAGO : $"{match.Id} - {match.Texto}";
+        }
+    }
+
+    private List<ComboboxItem> _tiposComprobantePago = new();
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        else
+        {
+            _model.COD_CLASE_OPERACION = CodClaseOperacion;
+            _model.COD_TIPO_OPERACION  = CodTipoOperacion;
+        }
+    }
+
+    private void MapearDesdeModelo(ComprobanteVinculoModel m) =>
+        _model = new ComprobanteVinculoModel
+        {
+            COD_CLASE_OPERACION       = m.COD_CLASE_OPERACION,
+            COD_TIPO_OPERACION        = m.COD_TIPO_OPERACION,
+            COD_TIPO_COMPROBANTE_PAGO = m.COD_TIPO_COMPROBANTE_PAGO,
+        };
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<ComprobanteVinculoModel>(
+            $"{ComercialRoute.TiposOperacionTiposComprobantePago}/{Uri.EscapeDataString(_model.COD_CLASE_OPERACION)}/{Uri.EscapeDataString(_model.COD_TIPO_OPERACION)}/{Uri.EscapeDataString(_model.COD_TIPO_COMPROBANTE_PAGO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        var r = await Http.SafeGetAsync<List<ComboboxItem>>(EstandarRoute.TiposComprobantesPagoCombobox);
+        _tiposComprobantePago = r ?? new();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ComercialRoute.TiposOperacionTiposComprobantePago;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync(
+                $"{ruta}/{Uri.EscapeDataString(_model.COD_CLASE_OPERACION)}/{Uri.EscapeDataString(_model.COD_TIPO_OPERACION)}/{Uri.EscapeDataString(_model.COD_TIPO_COMPROBANTE_PAGO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposOperacionTiposComprobantePagoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new
+        {
+            _model.COD_CLASE_OPERACION, _model.COD_TIPO_OPERACION, _model.COD_TIPO_COMPROBANTE_PAGO
+        };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposOperacionTiposComprobantePagoDialog), nameof(Submit));
+    }
+}

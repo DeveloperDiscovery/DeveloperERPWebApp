@@ -1,0 +1,495 @@
+@* AriaCombo.razor — combobox con el patrón W3C ARIA 1.2 (combobox editable + listbox +
+   aria-activedescendant), con manejo de teclado propio en C# y JS solo para lo que Blazor
+   no cubre bien (cerrar al clickear afuera, scroll de la opción activa a la vista).
+   Pensado como reemplazo de ComboSelect (MudAutocomplete) — primera prueba en
+   TablaTipoEstadoDialog.razor.
+   Uso:
+     <AriaCombo TItem="TablaDisponible"
+                Items="_tablasDisponibles"
+                TextFunc="@(t => t.NombreTabla)"
+                ValueFunc="@(t => t.NombreTabla)"
+                @bind-Value="_model.DES_TABLA"
+                Label="Tabla" Disabled="_readonly" /> *@
+@typeparam TItem
+@inject IJSRuntime JS
+@inject ConfigService ConfigSvc
+@implements IAsyncDisposable
+@implements IDisposable
+
+<div class="aria-combo @Class @(_invalido ? "campo-invalido aria-combo-invalido" : "")" style="@Style;@EstiloTransformacion" @ref="_root">
+    <div class="aria-combo-box @(Disabled ? "aria-combo-disabled" : "")">
+        <input id="@_inputId"
+               role="combobox"
+               aria-expanded="@(_abierto ? "true" : "false")"
+               aria-controls="@_listId"
+               aria-autocomplete="list"
+               aria-activedescendant="@(_abierto && _activo >= 0 ? $"{_optId}-{_activo}" : "")"
+               autocomplete="off"
+               placeholder=" "
+               disabled="@Disabled"
+               value="@_texto"
+               @oninput="OnInput"
+               @onkeydown="OnKeyDown"
+               @onkeydown:preventDefault="@DebePreveerTecla"
+               @onfocus="OnFocus"
+               @onfocusout="@(() => _hasFocus = false)" />
+        @if (!string.IsNullOrEmpty(Label))
+        {
+            <label class="aria-combo-label" for="@_inputId">@Label</label>
+        }
+        @if (!Disabled && !string.IsNullOrEmpty(_texto))
+        {
+            @* Mismo ícono que CampoTexto.razor/CampoTextoEstable.razor (Icons.Material.Filled.DeleteOutline)
+               en vez de un SVG dibujado a mano — para que la papelera se vea idéntica en toda la app. *@
+            <button type="button" class="aria-combo-limpiar" title="Borrar" aria-label="Borrar"
+                    @onclick="Limpiar" @onclick:stopPropagation="true" @onmousedown:preventDefault="true">
+                <svg viewBox="0 0 24 24">@((MarkupString)Icons.Material.Filled.DeleteOutline)</svg>
+            </button>
+        }
+        <svg class="aria-combo-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="@($"transform:rotate({(_abierto ? 180 : 0)}deg);")">
+            <path d="M6 9l6 6 6-6" />
+        </svg>
+    </div>
+    @if (_invalido)
+    {
+        <div class="campo-error-mensaje">Este campo es obligatorio.</div>
+    }
+
+    @if (_abierto && _filtrados.Count > 0)
+    {
+        <ul role="listbox" id="@_listId" class="aria-combo-listbox" @ref="_listEl">
+            @for (var i = 0; i < _filtrados.Count; i++)
+            {
+                var idx = i;
+                var item = _filtrados[idx];
+                var texto = TextFunc(item);
+                var esActivo = idx == _activo;
+                var esSeleccionado = ValorDe(item) == Value;
+                // La clave combina posición + valor: algunos combos de la app tienen ítems
+                // con el mismo código (o vacío) repetido — usar solo ValorDe(item) como key
+                // rompía el render ("More than one sibling... has the same key value") en
+                // cuanto esa lista tenía 2+ coincidencias. La posición garantiza unicidad sin
+                // perder la identidad por valor para el caso normal (sin duplicados).
+                <li @key="@($"{idx}:{ValorDe(item)}")"
+                    role="option"
+                    id="@($"{_optId}-{idx}")"
+                    aria-selected="@(esSeleccionado ? "true" : "false")"
+                    class="aria-combo-option @(esActivo ? "activo" : "") @(esSeleccionado ? "seleccionado" : "")"
+                    @onmousedown="@(() => Seleccionar(item))"
+                    @onmousedown:preventDefault="true">
+                    @if (OptionTemplate is not null)
+                    {
+                        @OptionTemplate(item)
+                    }
+                    else
+                    {
+                        @((MarkupString)ResaltarCoincidencia(texto))
+                    }
+                </li>
+            }
+        </ul>
+    }
+    else if (_abierto && !string.IsNullOrWhiteSpace(_texto))
+    {
+        <ul role="listbox" id="@_listId" class="aria-combo-listbox">
+            <li class="aria-combo-vacio">
+                @(_buscando ? "Buscando…" : (EsRemoto && _texto.Trim().Length < MinCharacters ? $"Escribe al menos {MinCharacters} carácter(es)" : "Sin resultados"))
+            </li>
+        </ul>
+    }
+</div>
+
+@code {
+    [Parameter] public IEnumerable<TItem> Items { get; set; } = Enumerable.Empty<TItem>();
+    [Parameter, EditorRequired] public Func<TItem, string> TextFunc { get; set; } = t => t?.ToString() ?? "";
+    [Parameter] public Func<TItem, string>? ValueFunc { get; set; }
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string Class { get; set; } = "mb-3";
+    [Parameter] public string? Style { get; set; }
+    /// <summary>Cuando es true, lo que el usuario escribe se guarda tal cual en Value aunque
+    /// no coincida con ningún ítem de la lista (combo con sugerencias, no selector estricto de
+    /// catálogo) — ej. "Método de la API" en botones de opción, donde la lista es solo una
+    /// ayuda y el campo debe seguir aceptando cualquier texto si no hay coincidencia.</summary>
+    [Parameter] public bool PermitirTextoLibre { get; set; }
+    /// <summary>Cuando es true, ignora el modo MAYÚSCULAS/minúsculas de Configuración General
+    /// al escribir en este combo — ej. "Método de la API" (DES_METODO), donde el valor debe
+    /// respetar el casing exacto de un identificador C# (nombre de método del Controller) y
+    /// no debe forzarse a mayúsculas aunque esa sea la configuración global.</summary>
+    [Parameter] public bool IgnorarModoTexto { get; set; }
+    /// <summary>
+    /// v4: al marcarlo, el combo se autovalida contra el EditContext cascingado por el
+    /// &lt;EditForm&gt; contenedor — si al intentar guardar Value sigue vacío, muestra un
+    /// mensaje inline debajo del combo y se marca como "campo-invalido" (ver
+    /// validationFocus.js, que enfoca/hace scroll al primer campo inválido del diálogo).
+    /// </summary>
+    [Parameter] public bool Obligatorio { get; set; }
+
+    [CascadingParameter] private EditContext? CascadedEditContext { get; set; }
+    private ValidationMessageStore? _messageStore;
+    private FieldIdentifier _field;
+    private bool _invalido;
+    private EventHandler<ValidationRequestedEventArgs>? _onValidationRequested;
+
+    // Modo remoto (opcional): en vez de filtrar Items en memoria, busca en el servidor a medida
+    // que el usuario escribe (con debounce), igual que MudAutocomplete.SearchFunc — pensado para
+    // catálogos grandes (Ubigeo, Entidades, etc.) que no conviene precargar completos.
+    [Parameter] public Func<string, CancellationToken, Task<IEnumerable<TItem>>>? SearchFunc { get; set; }
+    [Parameter] public int MinCharacters { get; set; } = 1;
+    [Parameter] public int DebounceMs { get; set; } = 300;
+    /// <summary>Texto a mostrar cuando el combo carga con un Value ya asignado (modo remoto:
+    /// no hay forma de derivarlo de Items porque no está precargado).</summary>
+    [Parameter] public string? TextoInicial { get; set; }
+    /// <summary>Opcional: se dispara con el objeto TItem completo elegido (o null al limpiar),
+    /// para casos donde el padre necesita más que el string de Value/ValueChanged.</summary>
+    [Parameter] public EventCallback<TItem?> ItemSelected { get; set; }
+    /// <summary>Opcional: contenido personalizado por opción de la lista (ej. punto de color
+    /// antes del texto). Si no se define, se usa el texto resaltado por defecto.</summary>
+    [Parameter] public RenderFragment<TItem>? OptionTemplate { get; set; }
+
+    private bool EsRemoto => SearchFunc is not null;
+    private CancellationTokenSource? _debounceCts;
+    private bool _buscando;
+
+    private readonly string _inputId = $"aria-combo-{Guid.NewGuid():N}";
+    private string _listId => $"{_inputId}-list";
+    private string _optId => $"{_inputId}-opt";
+
+    private ElementReference _root;
+    private ElementReference _listEl;
+    private DotNetObjectReference<AriaCombo<TItem>>? _selfRef;
+
+    private string _texto = "";
+    private bool _abierto;
+    private int _activo = -1;
+    private string? _prevValue;
+    private IEnumerable<TItem>? _prevItems;
+
+    private string ValorDe(TItem item) => ValorFunc(item);
+    private Func<TItem, string> ValorFunc => ValueFunc ?? TextFunc;
+
+    // Cacheada en vez de propiedad calculada: antes se recalculaba (Where+ToList sobre TODO
+    // Items) cada vez que se LEÍA "_filtrados", y dentro del for del listado se leía una vez
+    // por cada ítem renderizado — con N ítems eso era ~N² trabajo por cada tecla. Ahora se
+    // recalcula una sola vez por cambio real (de texto o de Items).
+    private List<TItem> _filtrados = new();
+
+    private void RecalcularFiltrados()
+    {
+        _filtrados = string.IsNullOrWhiteSpace(_texto)
+            ? Items.ToList()
+            : Items.Where(i => TextFunc(i).Contains(_texto.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    private bool DebePreveerTecla { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (CascadedEditContext is not null)
+        {
+            _field = new FieldIdentifier(this, nameof(Value));
+            _messageStore = new ValidationMessageStore(CascadedEditContext);
+            _onValidationRequested = (s, e) => Validar();
+            CascadedEditContext.OnValidationRequested += _onValidationRequested;
+        }
+    }
+
+    private void Validar()
+    {
+        _messageStore?.Clear(_field);
+        _invalido = Obligatorio && string.IsNullOrWhiteSpace(Value);
+        if (_invalido) _messageStore?.Add(_field, "Este campo es obligatorio.");
+        CascadedEditContext?.NotifyValidationStateChanged();
+    }
+
+    private void LimpiarErrorSiCorresponde()
+    {
+        if (_invalido && !string.IsNullOrWhiteSpace(Value))
+        {
+            _invalido = false;
+            _messageStore?.Clear(_field);
+            CascadedEditContext?.NotifyValidationStateChanged();
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (EsRemoto)
+        {
+            if (Value == _prevValue) return;
+            _prevValue = Value;
+            if (!_hasFocus) _texto = string.IsNullOrEmpty(Value) ? "" : (TextoInicial ?? _texto);
+            LimpiarErrorSiCorresponde();
+            return;
+        }
+
+        var itemsChanged = !ReferenceEquals(Items, _prevItems);
+        if (Value == _prevValue && !itemsChanged) return;
+        _prevValue = Value;
+        _prevItems = Items;
+
+        var actual = Items.FirstOrDefault(i => ValorDe(i) == Value);
+        if (!_hasFocus)
+            _texto = actual is not null ? TextFunc(actual) : (PermitirTextoLibre ? (Value ?? "") : "");
+        RecalcularFiltrados();
+        LimpiarErrorSiCorresponde();
+
+        // TEMPORAL — diagnóstico para el bug del combo de Estado en Productos. Revisar
+        // en la Consola del navegador (F12 → Console) el mensaje "[AriaCombo]" cuando
+        // se abre el diálogo. Quitar este bloque una vez resuelto.
+        if (Label == "Estado")
+        {
+            var idsDisponibles = string.Join(", ", Items.Select(i => $"\"{ValorDe(i)}\""));
+            Console.WriteLine($"[AriaCombo:Estado] Value=\"{Value}\" | Items.Count={Items.Count()} | IDs=[{idsDisponibles}] | Match={(actual is not null ? TextFunc(actual) : "NINGUNO")}");
+        }
+    }
+
+    // Cuando el combo vive dentro de un contenedor con scroll propio (ej. las grillas
+    // editables de EntidadesDialog, o el diálogo mismo si es alto), la lista quedaba
+    // recortada por el overflow:auto de ese ancestro — no un simple "hay pocos ítems",
+    // Items sigue teniendo todos, solo que el navegador no deja ver más allá del borde
+    // recortado. Se resuelve reposicionando el <ul> con position:fixed (coordenadas de
+    // viewport, que ningún overflow:auto normal recorta) apenas Blazor termina de
+    // insertarlo en el DOM — por eso se dispara desde OnAfterRenderAsync (con el <ul> ya
+    // renderizado), no desde Abrir() (que corre ANTES de que Blazor pinte el nuevo nodo).
+    private bool _debeReposicionar;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // ariaCombo.js se carga como <script> global en index.html (no es ES module),
+            // así que se llama directo por su objeto window.ariaCombo.
+            _selfRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("ariaCombo.init", _root, _selfRef);
+        }
+        if (_debeReposicionar)
+        {
+            _debeReposicionar = false;
+            try { await JS.InvokeVoidAsync("ariaCombo.posicionar", _root, _listEl); } catch { }
+        }
+    }
+
+    // Ver comentario de _hasFocus en OnParametersSet — evita que el modo PermitirTextoLibre
+    // (Value se actualiza en cada tecla) resincronice _texto con el valor YA TRANSFORMADO
+    // (MAYÚSCULAS/minúsculas) que rebota del padre mientras el usuario sigue escribiendo,
+    // que reseteaba el cursor al final igual que en CampoTexto.razor.
+    private bool _hasFocus;
+
+    private Task OnFocus()
+    {
+        _hasFocus = true;
+        return Abrir();
+    }
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        // _texto se deja TAL CUAL lo tecleó el usuario (no AplicarModoTexto acá) — es el
+        // valor bindeado directo al value="" del <input>, y reescribirlo con un case
+        // distinto en cada tecla forzaba a Blazor a reponer el .value real del DOM,
+        // mandando el cursor al final al corregir a mitad de la cadena. La presentación en
+        // MAYÚSCULAS/minúsculas la resuelve EstiloTransformacion (CSS text-transform, mismo
+        // criterio que BarraBusqueda.razor/CampoTexto.razor); solo se transforma el valor que
+        // realmente se emite hacia afuera (PermitirTextoLibre).
+        _texto = e.Value?.ToString() ?? "";
+
+        if (EsRemoto)
+        {
+            await Abrir();
+            if (string.IsNullOrEmpty(_texto)) await LimpiarValor();
+            BuscarRemotoConDebounce();
+            return;
+        }
+
+        RecalcularFiltrados();
+        await Abrir();
+        _activo = _filtrados.Count > 0 ? 0 : -1;
+        if (string.IsNullOrEmpty(_texto)) await LimpiarValor();
+        else if (PermitirTextoLibre) await ValueChanged.InvokeAsync(AplicarModoTexto(_texto));
+    }
+
+    private async Task LimpiarValor()
+    {
+        await ValueChanged.InvokeAsync(null);
+        if (ItemSelected.HasDelegate) await ItemSelected.InvokeAsync(default);
+    }
+
+    private void BuscarRemotoConDebounce()
+    {
+        _debounceCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _debounceCts = cts;
+        _ = EjecutarBusquedaRemota(_texto, cts.Token);
+    }
+
+    private async Task EjecutarBusquedaRemota(string texto, CancellationToken ct)
+    {
+        if (texto.Trim().Length < MinCharacters)
+        {
+            _filtrados = new();
+            _activo = -1;
+            _buscando = false;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+        try { await Task.Delay(DebounceMs, ct); }
+        catch (TaskCanceledException) { return; }
+        if (ct.IsCancellationRequested) return;
+
+        _buscando = true;
+        await InvokeAsync(StateHasChanged);
+        List<TItem> resultados;
+        try { resultados = (await SearchFunc!(texto.Trim(), ct)).ToList(); }
+        catch { resultados = new(); }
+        if (ct.IsCancellationRequested) return;
+
+        _filtrados = resultados;
+        _activo = _filtrados.Count > 0 ? 0 : -1;
+        _buscando = false;
+        // El listbox recién ahora toma su tamaño final (antes mostraba el placeholder
+        // "Buscando…"/"Sin resultados") — hay que reposicionarlo de nuevo, si no puede
+        // quedar mal calculado (recortado o "flotando" en el punto viejo).
+        _debeReposicionar = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Igual criterio que BarraBusqueda.razor/CampoTexto.razor: NO se usa para
+    /// reescribir el .value real del &lt;input&gt; mientras el usuario edita a mitad del
+    /// texto (eso reseteaba el cursor al final) — la presentación visual la resuelve
+    /// EstiloTransformacion vía CSS text-transform; esto solo transforma el valor que
+    /// realmente se guarda/envía (Value/ValueChanged).</summary>
+    private string AplicarModoTexto(string v) => IgnorarModoTexto ? v : ConfigSvc.Current.ModoTexto switch
+    {
+        "upper" => v.ToUpperInvariant(),
+        "lower" => v.ToLowerInvariant(),
+        _ => v
+    };
+
+    /// <summary>Ver comentario de AplicarModoTexto/OnInput — MAYÚSCULAS/minúsculas en vivo
+    /// solo por CSS, nunca reescribiendo el value real del input.</summary>
+    private string EstiloTransformacion => IgnorarModoTexto ? "" : ConfigSvc.Current.ModoTexto switch
+    {
+        "upper" => "--aria-combo-transform:uppercase;",
+        "lower" => "--aria-combo-transform:lowercase;",
+        _ => "--aria-combo-transform:none;"
+    };
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        DebePreveerTecla = e.Key is "ArrowDown" or "ArrowUp" or "Enter" or "Escape" or "Home" or "End";
+
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                await Abrir();
+                if (_filtrados.Count > 0) _activo = Math.Min(_activo + 1, _filtrados.Count - 1);
+                await DesplazarActivo();
+                break;
+            case "ArrowUp":
+                await Abrir();
+                if (_filtrados.Count > 0) _activo = Math.Max(_activo - 1, 0);
+                await DesplazarActivo();
+                break;
+            case "Home":
+                if (_abierto && _filtrados.Count > 0) { _activo = 0; await DesplazarActivo(); }
+                break;
+            case "End":
+                if (_abierto && _filtrados.Count > 0) { _activo = _filtrados.Count - 1; await DesplazarActivo(); }
+                break;
+            case "Enter":
+                if (_abierto && _activo >= 0 && _activo < _filtrados.Count)
+                    await Seleccionar(_filtrados[_activo]);
+                break;
+            case "Escape":
+                await Cerrar();
+                break;
+        }
+    }
+
+    private async Task DesplazarActivo()
+    {
+        if (_activo < 0) return;
+        StateHasChanged();
+        await Task.Yield();
+        try { await JS.InvokeVoidAsync("ariaCombo.scrollActiveIntoView", _listEl, $"{_optId}-{_activo}"); } catch { }
+    }
+
+    /// <summary>Marca la caja como abierta y le pide al JS que ensanche el MudDialog contenedor
+    /// mientras el listbox esté visible (la lista puede ser más ancha que el diálogo original).</summary>
+    private async Task Abrir()
+    {
+        if (_abierto) return;
+        if (!EsRemoto)
+        {
+            RecalcularFiltrados();
+            _activo = _filtrados.Count > 0 ? 0 : -1;
+        }
+        _abierto = true;
+        _debeReposicionar = true;
+        try { await JS.InvokeVoidAsync("ariaCombo.marcarAbierto", _root); } catch { }
+    }
+
+    private async Task Cerrar()
+    {
+        if (!_abierto) return;
+        _abierto = false;
+        _activo = -1;
+        try { await JS.InvokeVoidAsync("ariaCombo.marcarCerrado", _root); } catch { }
+    }
+
+    [JSInvokable]
+    public async Task CerrarDesdeJs()
+    {
+        if (!_abierto) return;
+        await Cerrar();
+        StateHasChanged();
+    }
+
+    private async Task Limpiar()
+    {
+        _texto = "";
+        _debounceCts?.Cancel();
+        if (EsRemoto) _filtrados = new(); else RecalcularFiltrados();
+        await Cerrar();
+        await LimpiarValor();
+    }
+
+    private async Task Seleccionar(TItem item)
+    {
+        _texto = TextFunc(item);
+        await Cerrar();
+        await ValueChanged.InvokeAsync(ValorDe(item));
+        if (ItemSelected.HasDelegate) await ItemSelected.InvokeAsync(item);
+    }
+
+    private string ResaltarCoincidencia(string texto)
+    {
+        if (string.IsNullOrWhiteSpace(_texto)) return System.Net.WebUtility.HtmlEncode(texto);
+        var idx = texto.IndexOf(_texto.Trim(), StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return System.Net.WebUtility.HtmlEncode(texto);
+        var antes = System.Net.WebUtility.HtmlEncode(texto[..idx]);
+        var match = System.Net.WebUtility.HtmlEncode(texto.Substring(idx, _texto.Trim().Length));
+        var despues = System.Net.WebUtility.HtmlEncode(texto[(idx + _texto.Trim().Length)..]);
+        return $"{antes}<mark>{match}</mark>{despues}";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _debounceCts?.Cancel();
+        try
+        {
+            if (_abierto) await JS.InvokeVoidAsync("ariaCombo.marcarCerrado", _root);
+            await JS.InvokeVoidAsync("ariaCombo.dispose", _root);
+        }
+        catch { }
+        _selfRef?.Dispose();
+    }
+
+    public void Dispose()
+    {
+        if (CascadedEditContext is not null && _onValidationRequested is not null)
+            CascadedEditContext.OnValidationRequested -= _onValidationRequested;
+    }
+}

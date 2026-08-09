@@ -1,0 +1,117 @@
+@*
+    NodoMenuItem.razor
+    --------------------------------------------------------------------------
+    Renderiza un nodo del árbol jerárquico del menú lateral, según su tipo
+    (SEGURIDAD.TIPOS_OPCIONES):
+    - MDL (Módulo)     → opción real, clicable, abre su DES_FORMULARIO. Si
+                         tiene hijos (ej. SMD agrupando BTN), también se
+                         renderizan debajo, siempre visibles (no colapsa).
+    - SMD (Sub Módulo) → no se muestra (filtrado, defensivo) — pero sus
+                         hijos sí se "suben" visualmente bajo el padre.
+    - CRP (Carpeta)    → expandible/colapsable, contiene hijos.
+    - BTN (Botón)      → opción real, abre su pantalla al hacer clic.
+    - SPR/ROT (Separador) → línea visual decorativa, sin hijos.
+
+    Es recursivo: cada hijo se renderiza con otra instancia de este mismo
+    componente, permitiendo anidamiento de profundidad variable (carpetas
+    dentro de carpetas).
+*@
+
+@if (Nodo.EsSubModulo)
+{
+    @* SMD no se muestra, pero sus hijos sí — se "suben" un nivel visualmente. *@
+    @foreach (var hijo in Nodo.Hijos)
+    {
+        <NodoMenuItem Nodo="hijo" Expandido="Expandido" CarpetasExpandidas="CarpetasExpandidas"
+                      OnAbrirOpcion="OnAbrirOpcion" OnMenuContextual="OnMenuContextual"
+                      OnToggleCarpeta="OnToggleCarpeta" />
+    }
+}
+else if (Nodo.EsSeparador)
+{
+    <div style="height:1px;background:rgba(255,255,255,.08);margin:6px 14px;"></div>
+}
+else if (Nodo.EsCarpeta)
+{
+    var expandida = CarpetasExpandidas.Contains(Nodo.COD_OPCION_APLICACION);
+    <div class="sidebar-item-wrap">
+        <div class="sidebar-item" @onclick="@(() => OnToggleCarpeta.InvokeAsync(Nodo.COD_OPCION_APLICACION))"
+             @oncontextmenu="@(() => { })" @oncontextmenu:preventDefault="true">
+            <MudIcon Icon="@(expandida ? Icons.Material.Filled.FolderOpen : Icons.Material.Filled.Folder)" Class="item-icon" />
+            <span class="item-text">@Nodo.DES_OPCION_APLICACION</span>
+            <MudIcon Icon="@(expandida ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                     Style="font-size:1rem;opacity:.6;margin-left:auto;" />
+        </div>
+        @if (!Expandido)
+        {
+            <div class="sidebar-tooltip" style="top:50%;transform:translateY(-50%);">@Nodo.DES_OPCION_APLICACION</div>
+        }
+    </div>
+    @if (expandida)
+    {
+        <div style="padding-left:14px;">
+            @foreach (var hijo in Nodo.Hijos)
+            {
+                <NodoMenuItem Nodo="hijo" Expandido="Expandido" CarpetasExpandidas="CarpetasExpandidas"
+                              OnAbrirOpcion="OnAbrirOpcion" OnMenuContextual="OnMenuContextual"
+                              OnToggleCarpeta="OnToggleCarpeta" />
+            }
+        </div>
+    }
+}
+else
+{
+    @* MDL y BTN: opción real, clicable, abre su pantalla. *@
+    <div class="sidebar-item-wrap">
+        <div class="sidebar-item"
+             @onclick="@(() => OnAbrirOpcion.InvokeAsync(OpcionDelNodo))"
+             @oncontextmenu="@(e => { Console.WriteLine($"[TRACE] {DateTime.Now:HH:mm:ss.fff} — contextmenu recibido en '{Nodo.DES_OPCION_APLICACION}' (form='{Nodo.DES_FORMULARIO}')"); return OnMenuContextual.InvokeAsync((e, OpcionDelNodo)); })"
+             @oncontextmenu:preventDefault="true">
+            @* Ícono propio de la opción en la BD; si no tiene, el estándar (flecha),
+               con el mismo color del texto del menú lateral (currentColor). *@
+            @if (!string.IsNullOrWhiteSpace(Nodo.IMG_ICONO_OPCION))
+            {
+                <img src="data:image/png;base64,@Nodo.IMG_ICONO_OPCION" class="item-icon item-icon-img" alt="" />
+            }
+            else
+            {
+                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Class="item-icon" />
+            }
+            <span class="item-text">@Nodo.DES_OPCION_APLICACION</span>
+        </div>
+        @if (!Expandido)
+        {
+            <div class="sidebar-tooltip" style="top:50%;transform:translateY(-50%);">@Nodo.DES_OPCION_APLICACION</div>
+        }
+    </div>
+    @if (Nodo.Hijos.Any())
+    {
+        @foreach (var hijo in Nodo.Hijos)
+        {
+            <NodoMenuItem Nodo="hijo" Expandido="Expandido" CarpetasExpandidas="CarpetasExpandidas"
+                          OnAbrirOpcion="OnAbrirOpcion" OnMenuContextual="OnMenuContextual"
+                          OnToggleCarpeta="OnToggleCarpeta" />
+        }
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public NodoMenu Nodo { get; set; } = default!;
+    [Parameter] public bool Expandido { get; set; }
+    [Parameter, EditorRequired] public HashSet<string> CarpetasExpandidas { get; set; } = new();
+
+    [Parameter] public EventCallback<OpcionMenu> OnAbrirOpcion { get; set; }
+    [Parameter] public EventCallback<(MouseEventArgs, OpcionMenu)> OnMenuContextual { get; set; }
+    [Parameter] public EventCallback<string> OnToggleCarpeta { get; set; }
+
+    private OpcionMenu OpcionDelNodo => new()
+    {
+        COD_APLICACION = Nodo.COD_APLICACION,
+        COD_OPCION_APLICACION = Nodo.COD_OPCION_APLICACION,
+        DES_OPCION_APLICACION = Nodo.DES_OPCION_APLICACION,
+        DES_FORMULARIO = Nodo.DES_FORMULARIO,
+        IMG_ICONO_OPCION = Nodo.IMG_ICONO_OPCION,
+        FLG_EXIGE_PASSWORD = Nodo.FLG_EXIGE_PASSWORD,
+        FLG_ACCESO_PERMITIDO = true
+    };
+}

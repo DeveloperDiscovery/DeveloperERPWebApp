@@ -1,0 +1,89 @@
+@*
+    CopiarMotivosDialog.razor
+    --------------------------------------------------------------------------
+    Puntos 2/13: copia (duplica) los motivos seleccionados de un tipo de motivo
+    a otro tipo destino. Crea nuevos registros (COD_MOTIVO nulo) bajo el destino.
+*@
+@inject MotivoService MotivoService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject IDialogService DialogService
+
+<MudDialog>
+    <DialogContent>
+        <MudText Class="mb-3">
+            Copiar <strong>@Motivos.Count</strong> motivo(s) al tipo destino:
+        </MudText>
+        <AriaCombo TItem="TipoMotivo"
+                     Items="TiposDestino"
+                     TextFunc="@(t => t.DES_TIPO_MOTIVO ?? "")"
+                     ValueFunc="@(t => t.COD_TIPO_MOTIVO?.ToString() ?? "")"
+                     Value="@(_tipoDestino?.ToString())"
+                     ValueChanged="@(v => _tipoDestino = int.TryParse(v, out var n) ? n : (int?)null)"
+                     Label="Tipo de motivo destino" />
+
+        <div class="d-flex justify-end gap-2 mt-4 dialog-acciones-fijas">
+            <MudButton OnClick="@(async () => { try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { } MudDialog.Cancel(); })"
+                       Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel"
+                       Style="background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cancelar</MudButton>
+            <MudButton OnClick="Copiar" Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.ContentCopy"
+                       Style="background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));"
+                       Disabled="@(_copiando || _tipoDestino is null)">
+                @if (_copiando) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                Copiar
+            </MudButton>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public List<Motivo> Motivos { get; set; } = new();
+    [Parameter] public List<TipoMotivo> TiposDestino { get; set; } = new();
+
+    private int? _tipoDestino;
+    private bool _copiando;
+
+    /// <summary>Duplica cada motivo seleccionado en el tipo destino (como nuevo).</summary>
+    private async Task Copiar()
+    {
+        if (_tipoDestino is null) return;
+        _copiando = true;
+
+        int ok = 0, fallo = 0;
+        var errores = new List<string>();
+        foreach (var m in Motivos)
+        {
+            var dto = new MotivoDto
+            {
+                COD_TIPO_MOTIVO = _tipoDestino,
+                COD_MOTIVO = null,   // nuevo: el SP recalcula el código en el tipo destino
+                EsNuevo = true,
+                DES_MOTIVO = m.DES_MOTIVO ?? "",
+                FLG_DEFAULT = m.FLG_DEFAULT,
+                FLG_EXPLICAR = m.FLG_EXPLICAR,
+                FLG_AUTOMATICO = m.FLG_AUTOMATICO,
+                NUM_ORDEN_PRESENTACION = m.NUM_ORDEN_PRESENTACION ?? 0,
+                IMG_PICTURE = m.IMG_PICTURE
+            };
+            var (exito, msg) = await MotivoService.GuardarAsync(dto);
+            if (exito) ok++; else { fallo++; errores.Add($"{m.DES_MOTIVO}: {msg}"); }
+        }
+
+        _copiando = false;
+        if (fallo == 0)
+        {
+            Snackbar.Add($"{ok} motivo(s) copiados.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+        {
+            if (ok > 0) Snackbar.Add($"{ok} copiados correctamente.", Severity.Success);
+            await ErrorDialogHelper.MostrarMensajeAsync(
+                string.Join(" · ", errores), DialogService, nameof(CopiarMotivosDialog),
+                titulo: $"No se pudieron copiar {fallo} motivo(s)");
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+    }
+}

@@ -1,0 +1,84 @@
+@inject CatalogoService<EstadoEstandar, EstadoEstandarDto> EstandarService
+@inject EstadoService EstadoService
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">
+            Seleccione uno o más estados estándar para importarlos al tipo de estado actual.
+        </MudText>
+
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else
+        {
+            <MudDataGrid T="EstadoEstandar" Items="_items" Dense="true" Hover="true"
+                         MultiSelection="true" @bind-SelectedItems="_selected"
+                 Filterable="true"
+                 FilterMode="DataGridFilterMode.ColumnFilterMenu">
+                <Columns>
+                    <SelectColumn T="EstadoEstandar" />
+                    <TemplateColumn Title="Imagen">
+                        <CellTemplate>
+                            <GridImage Image="context.Item.IMG_PICTURE" />
+                        </CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Title="Estado" SortBy="x=>x.DES_ESTADO">
+                        <CellTemplate>
+                            <MudChip T="string" Size="Size.Small"
+                                     Style="@($"background-color:{context.Item.DES_BACKCOLOR};color:{context.Item.DES_FORECOLOR};")">
+                                @context.Item.DES_ESTADO
+                            </MudChip>
+                        </CellTemplate>
+                    </TemplateColumn>
+                </Columns>
+            </MudDataGrid>
+        }
+
+        <div class="d-flex justify-end gap-2 mt-4 dialog-acciones-fijas">
+            <MudButton OnClick="@(async () => { try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { } MudDialog.Cancel(); })"
+                       Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel"
+                       Style="background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cancelar</MudButton>
+            <MudButton OnClick="Importar" Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.FileDownload"
+                       Disabled="_importando || !_selected.Any()"
+                       Style="font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">
+                Importar (@_selected.Count)
+            </MudButton>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int CodTipoEstado { get; set; }
+
+    private List<EstadoEstandar> _items = new();
+    private HashSet<EstadoEstandar> _selected = new();
+    private bool _loading = true, _importando;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _items = await EstandarService.GetAllAsync();
+        _loading = false;
+    }
+
+    private async Task Importar()
+    {
+        _importando = true;
+        int ok = 0, fail = 0;
+        foreach (var e in _selected)
+        {
+            if (e.COD_ESTADO is null) continue;
+            var (success, _) = await EstadoService.ImportarDeEstandarAsync(CodTipoEstado, e.COD_ESTADO.Value);
+            if (success) ok++; else fail++;
+        }
+        _importando = false;
+        Snackbar.Add($"Importados: {ok}." + (fail > 0 ? $" Fallidos: {fail}." : ""),
+            fail > 0 ? Severity.Warning : Severity.Success);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

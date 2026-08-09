@@ -1,0 +1,97 @@
+@using KONSolutions.Shared.Models.Seguridad
+
+@* Nodo visual en forma de rombo para la vista radial. *@
+
+<div @onclick="@(() => OnClick.InvokeAsync(Nodo))"
+     style="@EstiloContenedor"
+     title="@(string.IsNullOrWhiteSpace(Nodo.DES_OPCION) ? Nodo.COD_CHILDREN : Nodo.DES_OPCION)">
+
+    @* Rombo exterior *@
+    <div style="@EstiloRombo">
+        @* Icono interno *@
+        <div style="transform:rotate(-45deg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
+            <MudIcon Icon="@IconoPorTipo(Nodo.COD_TIPO)"
+                     Style="@($"font-size:{(EsCentro ? "1.4rem" : "1.1rem")};color:{ColorPorTipo(Nodo.COD_TIPO)};")" />
+        </div>
+    </div>
+
+    @* Etiqueta debajo *@
+    <div style="@EstiloEtiqueta">
+        @Etiqueta
+    </div>
+
+    @* Indicador de hijos *@
+    @if (!EsCentro && Nodo.Hijos.Any())
+    {
+        <div style="position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);
+                    background:@ColorPorTipo(Nodo.COD_TIPO);color:#fff;
+                    border-radius:8px;font-size:.6rem;padding:1px 5px;white-space:nowrap;">
+            @Nodo.Hijos.Count
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public NodoOpcion  Nodo     { get; set; } = null!;
+    [Parameter] public int         Tamaño   { get; set; } = 54;
+    [Parameter] public bool        EsCentro { get; set; }
+    [Parameter] public EventCallback<NodoOpcion> OnClick { get; set; }
+
+    private string Etiqueta
+    {
+        get
+        {
+            var txt = string.IsNullOrWhiteSpace(Nodo.DES_OPCION) ? Nodo.COD_CHILDREN : Nodo.DES_OPCION;
+            return txt.Length > 14 ? txt[..14] + "…" : txt;
+        }
+    }
+
+    private string EstiloContenedor =>
+        $"position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;" +
+        $"cursor:{(EsCentro || !Nodo.Hijos.Any() ? "default" : "pointer")};" +
+        $"user-select:none;width:{Tamaño + 20}px;";
+
+    private string EstiloRombo =>
+        $"width:{Tamaño}px;height:{Tamaño}px;" +
+        $"transform:rotate(45deg);" +
+        $"background:{FondoRombo};" +
+        $"border:2px solid {ColorPorTipo(Nodo.COD_TIPO)};" +
+        $"border-radius:6px;" +
+        $"display:flex;align-items:center;justify-content:center;" +
+        $"box-shadow:{(EsCentro ? $"0 0 18px {ColorPorTipo(Nodo.COD_TIPO)}55" : $"0 2px 8px rgba(0,0,0,.12)")};" +
+        $"transition:box-shadow .2s,transform .2s;";
+
+    private string FondoRombo => EsCentro
+        ? $"linear-gradient(135deg, {ColorPorTipo(Nodo.COD_TIPO)}22, {ColorPorTipo(Nodo.COD_TIPO)}44)"
+        : "rgba(255,255,255,.95)";
+
+    private string EstiloEtiqueta =>
+        $"font-size:{(EsCentro ? ".78rem" : ".72rem")};" +
+        $"font-weight:{(EsCentro ? "700" : "500")};" +
+        $"text-align:center;line-height:1.2;" +
+        $"max-width:{Tamaño + 16}px;" +
+        $"word-break:break-word;" +
+        $"color:{(EsCentro ? ColorPorTipo(Nodo.COD_TIPO) : "var(--ink)")};";
+
+    private static string IconoPorTipo(string tipo) => tipo switch
+    {
+        "ROT" => Icons.Material.Filled.AccountTree,
+        "APP" => Icons.Material.Filled.AppsOutage,
+        "CRP" => Icons.Material.Filled.Folder,
+        "MDL" => Icons.Material.Filled.ViewModule,
+        "SMD" => Icons.Material.Filled.ViewQuilt,
+        "BTN" => Icons.Material.Filled.SmartButton,
+        _     => Icons.Material.Filled.Circle
+    };
+
+    private static string ColorPorTipo(string tipo) => tipo switch
+    {
+        "ROT" => "#16130f",
+        "APP" => "#b8472d",
+        "CRP" => "#e6921a",
+        "MDL" => "#2b6cb0",
+        "SMD" => "#6b46c1",
+        "BTN" => "#2f855a",
+        _     => "#888"
+    };
+}

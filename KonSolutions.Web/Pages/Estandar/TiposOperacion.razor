@@ -1,0 +1,317 @@
+@page "/estandar/tipos-operacion"
+@attribute [Authorize]
+@using TipoOperacionModel = KONSolutions.Shared.Models.Estandar.TipoOperacion
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+
+<PageTitle>Tipos de Operación · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Operación" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="@(() => Task.CompletedTask)" Placeholder="Buscar tipo de operación..." DebounceInterval="300" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="LoadTipos" />
+        @if (_claseSel is not null)
+        {
+            <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                             Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+        }
+    </div>
+</div>
+
+<MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:1px solid var(--line);">
+    <AriaCombo TItem="ComboboxItem" Items="_clases"
+               TextFunc="@(c => $"{c.Id} - {c.Texto}")" ValueFunc="@(c => c.Id)"
+               Value="_claseSel?.Id" ValueChanged="OnClaseChanged"
+               Label="Clase de operación" Class="" />
+</MudPaper>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="tipos-operacion-standalone" style="position:relative;">
+    <MudDataGrid T="TipoOperacionModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Title="Código" Sortable="false" Width="90">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_TIPO_OPERACION" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TipoOperacionModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_TIPO_OPERACION)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_OPERACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Descripción" Sortable="false">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_OPERACION" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TipoOperacionModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_TIPO_OPERACION)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_OPERACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Tipo de entidad" Sortable="false" Width="150">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_ENTIDAD" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="TipoOperacionModel" ItemsBase="@Base(2)" ValorDe="@(x=>x.DES_TIPO_ENTIDAD)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_ENTIDAD</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Clase de operación sincronizada" Sortable="false" Width="200">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Clase de operación sincronizada" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="TipoOperacionModel" ItemsBase="@Base(4)" ValorDe="@(x=>x.DES_CLASE_OPERACION_SINCRONIZADA ?? x.COD_CLASE_OPERACION_SINCRONIZADA ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(4)" ValoresActivosChanged="@(v=>Filtro(4,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_CLASE_OPERACION_SINCRONIZADA ?? context.Item.COD_CLASE_OPERACION_SINCRONIZADA)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Tipo de operación sincronizada" Sortable="false" Width="200">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Tipo de operación sincronizada" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="TipoOperacionModel" ItemsBase="@Base(5)" ValorDe="@(x=>x.DES_TIPO_OPERACION_SINCRONIZADA ?? x.COD_TIPO_OPERACION_SINCRONIZADA ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(5)" ValoresActivosChanged="@(v=>Filtro(5,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_TIPO_OPERACION_SINCRONIZADA ?? context.Item.COD_TIPO_OPERACION_SINCRONIZADA)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Tipo de estado relacionado" Sortable="false" Width="170">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Tipo de estado relacionado" Activo="@(_ordenColumna == 6)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(6))" />
+                        <FiltroExcelColumna T="TipoOperacionModel" ItemsBase="@Base(6)" ValorDe="@(x=>x.DES_TIPO_ESTADO_RELACIONADO ?? x.COD_TIPO_ESTADO_RELACIONADO?.ToString() ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(6)" ValoresActivosChanged="@(v=>Filtro(6,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_TIPO_ESTADO_RELACIONADO ?? context.Item.COD_TIPO_ESTADO_RELACIONADO?.ToString())</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Tipo de pedido comercial" Sortable="false" Width="200">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_PEDIDO_COMERCIAL" Activo="@(_ordenColumna == 7)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(7))" />
+                        <FiltroExcelColumna T="TipoOperacionModel" ItemsBase="@Base(7)" ValorDe="@(x=>x.DES_TIPO_PEDIDO_COMERCIAL ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(7)" ValoresActivosChanged="@(v=>Filtro(7,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_PEDIDO_COMERCIAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Características" Sortable="false" Width="220">
+                <CellTemplate>
+                    <div class="d-flex align-center gap-1 flex-wrap">
+                        @foreach (var (icono, texto) in Flags(context.Item))
+                        {
+                            <MudTooltip Text="@texto"><MudIcon Icon="@icono" Size="Size.Small" Style="opacity:.8;" /></MudTooltip>
+                        }
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Estado" Width="110">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="TipoOperacionModel" ItemsBase="@Base(3)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrEmpty(context.Item.DES_ESTADO))
+                    {
+                        <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-6 mono" Style="opacity:.5;">
+                @(_claseSel is null ? "Seleccione una clase de operación arriba." : "Sin registros.")
+            </MudText>
+        </NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TipoOperacionModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio0;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<ComboboxItem>      _clases  = new();
+    private List<TipoOperacionModel> _items  = new();
+    private ComboboxItem?            _claseSel;
+    private string _search = "";
+
+    private List<TipoOperacionModel> _busqueda =>
+        string.IsNullOrWhiteSpace(_search) ? _items
+        : _items.Where(t => (t.COD_TIPO_OPERACION?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
+                          || (t.DES_TIPO_OPERACION?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<TipoOperacionModel> Ordenar(List<TipoOperacionModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_OPERACION).ToList() : items.OrderByDescending(x => x.COD_TIPO_OPERACION).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_OPERACION).ToList() : items.OrderByDescending(x => x.DES_TIPO_OPERACION).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_ENTIDAD).ToList() : items.OrderByDescending(x => x.DES_TIPO_ENTIDAD).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_CLASE_OPERACION_SINCRONIZADA ?? x.COD_CLASE_OPERACION_SINCRONIZADA).ToList() : items.OrderByDescending(x => x.DES_CLASE_OPERACION_SINCRONIZADA ?? x.COD_CLASE_OPERACION_SINCRONIZADA).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_OPERACION_SINCRONIZADA ?? x.COD_TIPO_OPERACION_SINCRONIZADA).ToList() : items.OrderByDescending(x => x.DES_TIPO_OPERACION_SINCRONIZADA ?? x.COD_TIPO_OPERACION_SINCRONIZADA).ToList(),
+        6 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_ESTADO_RELACIONADO ?? x.COD_TIPO_ESTADO_RELACIONADO?.ToString()).ToList() : items.OrderByDescending(x => x.DES_TIPO_ESTADO_RELACIONADO ?? x.COD_TIPO_ESTADO_RELACIONADO?.ToString()).ToList(),
+        7 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_PEDIDO_COMERCIAL).ToList() : items.OrderByDescending(x => x.DES_TIPO_PEDIDO_COMERCIAL).ToList(),
+        _ => items
+    };
+    private List<TipoOperacionModel> _visibles => Ordenar(Aplicar(_busqueda, -1));
+    private List<TipoOperacionModel> Base(int col) => Aplicar(_busqueda, col);
+
+    private List<TipoOperacionModel> Aplicar(List<TipoOperacionModel> src, int ex)
+    {
+        IEnumerable<TipoOperacionModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_TIPO_OPERACION)),
+                1 => q.Where(x => v.Contains(x.DES_TIPO_OPERACION)),
+                2 => q.Where(x => v.Contains(x.DES_TIPO_ENTIDAD)),
+                3 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                4 => q.Where(x => v.Contains(x.DES_CLASE_OPERACION_SINCRONIZADA ?? x.COD_CLASE_OPERACION_SINCRONIZADA ?? "")),
+                5 => q.Where(x => v.Contains(x.DES_TIPO_OPERACION_SINCRONIZADA ?? x.COD_TIPO_OPERACION_SINCRONIZADA ?? "")),
+                6 => q.Where(x => v.Contains(x.DES_TIPO_ESTADO_RELACIONADO ?? x.COD_TIPO_ESTADO_RELACIONADO?.ToString() ?? "")),
+                7 => q.Where(x => v.Contains(x.DES_TIPO_PEDIDO_COMERCIAL ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private static IEnumerable<(string Icono, string Texto)> Flags(TipoOperacionModel t)
+    {
+        if (t.FLG_POSITIVO == true)      yield return (Icons.Material.Filled.Add, "Positivo");
+        if (t.FLG_PROVISION == true)     yield return (Icons.Material.Filled.Schedule, "Provisión");
+        if (t.FLG_CANCELACION == true)   yield return (Icons.Material.Filled.Cancel, "Cancelación");
+        if (t.FLG_BIEN == true)          yield return (Icons.Material.Filled.Inventory2, "Bien");
+        if (t.FLG_DEVOLUCION == true)    yield return (Icons.Material.Filled.KeyboardReturn, "Devolución");
+        if (t.FLG_ANULACION == true)     yield return (Icons.Material.Filled.Block, "Anulación");
+        if (t.FLG_ANTICIPO == true)      yield return (Icons.Material.Filled.Payments, "Anticipo");
+        if (t.FLG_CENTRO_COSTO == true)  yield return (Icons.Material.Filled.RequestQuote, "Centro de costo");
+        if (t.FLG_PROYECTO == true)      yield return (Icons.Material.Filled.Engineering, "Proyecto");
+        if (t.FLG_LOTE_CONTROL == true)  yield return (Icons.Material.Filled.Numbers, "Lote / control");
+        if (t.FLG_CAJA == true)          yield return (Icons.Material.Filled.PointOfSale, "Caja");
+        if (t.FLG_BANCO == true)         yield return (Icons.Material.Filled.AccountBalanceWallet, "Banco");
+        if (t.FLG_EXTORNO == true)       yield return (Icons.Material.Filled.Undo, "Extorno");
+        if (t.FLG_COMERCIO_EXTERIOR == true) yield return (Icons.Material.Filled.Public, "Comercio exterior");
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ESTANDAR", "TiposOperacion");
+        try
+        {
+            // No se usa /combobox: el SP SHOWCOMBOX de Clases de Operación devuelve las
+            // columnas completas, no Id/Texto — se arma el combo desde el listado completo.
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<KONSolutions.Shared.Models.Estandar.ClaseOperacion>>>(ApiRoutes.Estandar.ClasesOperacion);
+            _clases = (r?.Data ?? new())
+                .Select(c => new ComboboxItem { Id = c.COD_CLASE_OPERACION, Texto = c.DES_CLASE_OPERACION })
+                .ToList();
+        }
+        catch { _clases = new(); }
+
+        _claseSel = _clases.FirstOrDefault();
+        if (_claseSel is not null) await LoadTipos();
+
+        _onCambio0 = async () => await InvokeAsync(async () => { await LoadTipos(); StateHasChanged(); });
+        Cambios.Suscribir("ESTANDAR.TIPOS_OPERACION", _onCambio0);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task OnClaseChanged(string? codClase)
+    {
+        _claseSel = _clases.FirstOrDefault(c => c.Id == codClase);
+        await LoadTipos();
+    }
+
+    private async Task LoadTipos()
+    {
+        if (_claseSel is null) { _items = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TipoOperacionModel>>>(
+                $"{ApiRoutes.Estandar.TiposOperacion}?codClaseOperacion={Uri.EscapeDataString(_claseSel.Id)}");
+            _items = r?.Data ?? new();
+        }
+        catch { _items = new(); }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(TipoOperacionModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(TipoOperacionModel? item, CrudModo modo)
+    {
+        if (_claseSel is null) return;
+        var dlg = await DialogService.ShowAsync<TipoOperacionDialog>(
+            modo switch
+            {
+                CrudModo.Create => "Nuevo tipo de operación",
+                CrudModo.Delete => $"Eliminar · {item?.DES_TIPO_OPERACION}",
+                CrudModo.Read   => $"Consultar · {item?.DES_TIPO_OPERACION}",
+                _               => $"Editar · {item?.DES_TIPO_OPERACION}"
+            },
+            new DialogParameters
+            {
+                ["Item"] = item,
+                ["Modo"] = modo,
+                ["CodClaseOperacion"] = _claseSel.Id,
+                ["DesClaseOperacion"] = _claseSel.Texto
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadTipos();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ESTANDAR.TIPOS_OPERACION", _onCambio0 ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

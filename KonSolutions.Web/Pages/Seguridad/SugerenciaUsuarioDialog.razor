@@ -1,0 +1,58 @@
+@* Picker que se abre desde el ícono junto a Perfil en UsuarioDialog.razor — lista
+   entidades sin usuario relacionado (ESTANDAR.ENTIDADES_USUARIOS_COMERCIALES /
+   ..._DEPENDIENTES) y, al elegir una fila, devuelve el ítem para que el diálogo padre
+   cargue COD_USUARIO (con COD_USUARIO_SUGERIDO) y COD_ENTIDAD. *@
+@using SugeridoModel = KONSolutions.Shared.Models.Estandar.EntidadUsuarioSugerido
+
+<MudDialog Style="width:min(720px,95vw);">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@Titulo</MudText>
+    </TitleContent>
+    <DialogContent>
+        <CampoTextoEstable @bind-Value="_busqueda" Placeholder="Buscar..." Adornment="Adornment.Start"
+                      AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Class="mb-2" />
+        <MudDataGrid T="SugeridoModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                     RowClick="@(args => Elegir(args.Item))" RowStyleFunc="@((x,i) => "cursor:pointer;")"
+                     FixedHeader="true" Height="360px">
+            <Columns>
+                <TemplateColumn Title="Entidad" Sortable="false">
+                    <CellTemplate>
+                        @context.Item.DES_ENTIDAD
+                        @if (!string.IsNullOrWhiteSpace(context.Item.DES_ENTIDAD_DEPENDENCIA))
+                        {
+                            <MudText Typo="Typo.caption" Class="mono" Style="opacity:.6;display:block;">Dependiente de: @context.Item.DES_ENTIDAD_DEPENDENCIA</MudText>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Documento" Sortable="false" Width="160">
+                    <CellTemplate>@context.Item.NUM_DOCUMENTO_IDENTIDAD</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Código sugerido" Sortable="false" Width="200">
+                    <CellTemplate><span class="mono">@context.Item.COD_USUARIO_SUGERIDO</span></CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent>
+                <MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText>
+            </NoRecordsContent>
+        </MudDataGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => MudDialog.Cancel())" Variant="Variant.Filled">Cancelar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string Titulo { get; set; } = "Seleccionar entidad";
+    [Parameter] public List<SugeridoModel> Items { get; set; } = new();
+
+    private string _busqueda = "";
+
+    private List<SugeridoModel> _visibles =>
+        string.IsNullOrWhiteSpace(_busqueda) ? Items
+        : Items.Where(x => (x.DES_ENTIDAD?.Contains(_busqueda, StringComparison.OrdinalIgnoreCase) ?? false)
+                         || (x.NUM_DOCUMENTO_IDENTIDAD?.Contains(_busqueda, StringComparison.OrdinalIgnoreCase) ?? false)
+                         || (x.COD_USUARIO_SUGERIDO?.Contains(_busqueda, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+    private void Elegir(SugeridoModel item) => MudDialog.Close(DialogResult.Ok(item));
+}

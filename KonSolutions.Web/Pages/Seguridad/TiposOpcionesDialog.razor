@@ -1,0 +1,106 @@
+@using KONSolutions.Shared.Models.Seguridad
+@inject CatalogoService<TipoOpcion, TipoOpcionDto> Service
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo"
+                         Codigo="@Item?.COD_TIPO_OPCION_APLICACION"
+                         Descripcion="@Item?.DES_TIPO_OPCION_APLICACION" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="SEGURIDAD.TIPOS_OPCIONES_APLICACION" Columna="COD_TIPO_OPCION_APLICACION"
+                        @bind-Value="_model.COD_TIPO_OPCION_APLICACION" Disabled="@(_isEdit || _readonly)" />
+            <CampoTexto Tabla="SEGURIDAD.TIPOS_OPCIONES_APLICACION" Columna="DES_TIPO_OPCION_APLICACION"
+                        @bind-Value="_model.DES_TIPO_OPCION_APLICACION" Disabled="_readonly" />
+
+            <div class="d-flex gap-4 mb-3">
+                <div class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.ViewModule" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_MODULO ?? false)" ValueChanged="@(v => _model.FLG_MODULO = v)"
+                                 Disabled="_readonly" Label="Es módulo" Color="Color.Primary" />
+                </div>
+                <div class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_CARPETA ?? false)" ValueChanged="@(v => _model.FLG_CARPETA = v)"
+                                 Disabled="_readonly" Label="Es carpeta" Color="Color.Primary" />
+                </div>
+                <div class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.HorizontalRule" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_SEPARADOR ?? false)" ValueChanged="@(v => _model.FLG_SEPARADOR = v)"
+                                 Disabled="_readonly" Label="Es separador" Color="Color.Primary" />
+                </div>
+            </div>
+
+            <div class="my-3">
+                <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)" Label="Icono" />
+            </div>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TipoOpcion? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TipoOpcionDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de GetByIdAsync) hacia _model.</summary>
+    private void MapearDesdeModelo(TipoOpcion m)
+    {
+        _model = new TipoOpcionDto
+        {
+            COD_TIPO_OPCION_APLICACION = m.COD_TIPO_OPCION_APLICACION,
+            DES_TIPO_OPCION_APLICACION = m.DES_TIPO_OPCION_APLICACION ?? "",
+            FLG_MODULO    = m.FLG_MODULO,
+            FLG_SEPARADOR = m.FLG_SEPARADOR,
+            FLG_CARPETA   = m.FLG_CARPETA,
+            IMG_ICONO     = m.IMG_ICONO
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde GetByIdAsync — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_TIPO_OPCION_APLICACION);
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Modo != CrudModo.Create && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.COD_TIPO_OPCION_APLICACION);
+            _saving = false;
+            if (okd) { Snackbar.Add("Tipo de opción eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(TiposOpcionesDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model, Modo == CrudModo.Create);
+        _saving = false;
+        if (ok) { Snackbar.Add("Tipo de opción guardado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(TiposOpcionesDialog));
+    }
+}

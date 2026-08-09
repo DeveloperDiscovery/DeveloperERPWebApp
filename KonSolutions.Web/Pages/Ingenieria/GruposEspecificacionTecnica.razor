@@ -1,0 +1,751 @@
+@page "/ingenieria/grupos-especificacion-tecnica"
+@attribute [Authorize]
+@using TreeListModel = KONSolutions.Shared.Models.Ingenieria.GruposFamiliasSubFamiliasEspecificacionTecnicaTreeList
+@using InsertDto = KONSolutions.Shared.Models.Ingenieria.GruposFamiliasSubFamiliasEspecificacionTecnicaInsertDto
+@using ItemsTreeModel = KONSolutions.Shared.Models.Comercial.EspecificacionesItemsTecnicosTreeList
+@using GruposProductoModel = KONSolutions.Shared.Models.Estandar.GruposProducto
+@using FamiliasProductoModel = KONSolutions.Shared.Models.Estandar.FamiliasProducto
+@using SubFamiliasProductoModel = KONSolutions.Shared.Models.Estandar.SubFamiliasProducto
+@using EstandarRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@using IngenieriaRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject AccessLogService AccessLog
+@inject ErrorLogService ErrorLog
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@implements IDisposable
+
+<PageTitle>Especificaciones Técnicas por Sub Familia · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Especificaciones Técnicas por Sub Familia" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema INGENIERIA · configuración</MudText>
+    </div>
+</div>
+
+<MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:1px solid var(--line);">
+    <div class="d-flex align-center gap-3 flex-wrap">
+        <AriaCombo TItem="ComboboxItem" Items="_grupos"
+                   TextFunc="@(g => $"{g.Id} - {g.Texto}")" ValueFunc="@(g => g.Id)"
+                   Value="@_codGrupoProducto" ValueChanged="@(v => OnGrupoChanged(v ?? ""))"
+                   Label="Grupo de Producto" Style="min-width:280px;" />
+        <AriaCombo TItem="ComboboxItem" Items="_familias"
+                   TextFunc="@(f => $"{f.Id} - {f.Texto}")" ValueFunc="@(f => f.Id)"
+                   Value="@_codFamiliaProducto" ValueChanged="@(v => OnFamiliaChanged(v ?? ""))"
+                   Label="Familia de Producto" Disabled="@string.IsNullOrEmpty(_codGrupoProducto)" Style="min-width:280px;" />
+        <AriaCombo TItem="ComboboxItem" Items="_subFamilias"
+                   TextFunc="@(s => $"{s.Id} - {s.Texto}")" ValueFunc="@(s => s.Id)"
+                   Value="@_codSubFamiliaProducto" ValueChanged="@(v => OnSubFamiliaChanged(v ?? ""))"
+                   Label="Sub Familia de Producto" Disabled="@string.IsNullOrEmpty(_codFamiliaProducto)" Style="min-width:280px;" />
+        @if (!string.IsNullOrEmpty(_codSubFamiliaProducto))
+        {
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="AbrirCopiar" Class="ms-auto">
+                Copiar a otras Familias/Sub Familias
+            </MudButton>
+        }
+    </div>
+</MudPaper>
+
+@* Antes había un MudTabs con un único MudTabPanel ("Especificaciones Técnicas") — un tab
+   que no tenía con qué alternar, así que se quitó y este contenido pasó a mostrarse directo. *@
+@* Sin la propagación de height:100% de .ws-tab-content que daba MudTabPanel, se usa
+   max-height (basado en vh, no depende de esa propagación) + height:fit-content para que
+   el "Por asignar" con muchos ítems tenga scroll propio, sin forzar un alto mínimo cuando
+   el contenido es corto (eso sí puede dejar un hueco debajo, comportamiento esperado). *@
+<div style="max-height:calc(100vh - 210px);height:fit-content;overflow-y:auto;padding-right:4px;">
+        @if (string.IsNullOrEmpty(_codSubFamiliaProducto))
+        {
+            <MudText Class="pa-6 mono" Style="opacity:.5;">Seleccione Grupo, Familia y Sub Familia arriba para ver sus Especificaciones Técnicas.</MudText>
+        }
+        else if (_cargando)
+        {
+            <div class="d-flex justify-center pa-6"><MudProgressCircular Color="Color.Primary" Indeterminate="true" /></div>
+        }
+        else if (!_todas.Any())
+        {
+            <MudText Class="pa-6 mono" Style="opacity:.5;">No hay Especificaciones Técnicas registradas en el sistema (módulo "Especificaciones Técnicas").</MudText>
+        }
+        else
+        {
+            <div class="d-flex gap-4" style="align-items:flex-start;">
+                <MudPaper Elevation="0" Class="flex-grow-1" Style="border:1px solid var(--line);min-width:0;align-self:flex-start;height:fit-content;">
+                    <div class="pa-3" style="border-bottom:1px solid var(--line);">
+                        <MudText Typo="Typo.h6">Asignadas</MudText>
+                        <MudText Class="mono" Style="opacity:.5;font-size:.78rem;">@_asignadas.Count especificación(es)</MudText>
+                    </div>
+                    @if (!_asignadas.Any())
+                    {
+                        <MudText Class="pa-6 mono" Style="opacity:.4;">Ninguna especificación asignada todavía.</MudText>
+                    }
+                    else
+                    {
+                        @* Scroll propio de este panel (no del contenedor de la página) — así, cuando
+                           "Por asignar" tiene muchos más ítems que "Asignadas", desplazar uno no deja
+                           un hueco en blanco debajo del otro (cada lista se mueve dentro de su propio
+                           marco, del mismo alto que su vecina). *@
+                        <div style="max-height:calc(100vh - 172px);overflow-y:auto;">
+                        <div class="gea-header gea-header-asignadas">
+                            <span>Especificación</span><span>Orden</span><span>Tipo</span><span>Singular</span><span>Registro</span><span>Grupo</span><span>Incl. Desc.</span><span>Reg. Comercial</span><span>Ficha Técnica</span><span>Control Calidad</span><span></span>
+                        </div>
+                        @foreach (var e in _asignadas)
+                        {
+                            <div class="gea-row gea-row-asignadas" @onclick="@(() => AbrirDialog(e, esNuevo: false))">
+                                <div class="d-flex align-center gap-2">
+                                    @if (!string.IsNullOrEmpty(e.DES_BACKCOLOR))
+                                    { <div style="width:10px;height:10px;border-radius:50%;background:@e.DES_BACKCOLOR;flex-shrink:0;"></div> }
+                                    <div>
+                                        <div>@e.DES_KEY</div>
+                                        <div class="mono" style="font-size:.74rem;opacity:.6;">
+                                            @(e.VAL_ESPECIFICACION_TENICA) @(e.VAL_MINIMO is not null || e.VAL_MAXIMO is not null ? $"({e.VAL_MINIMO:N2} – {e.VAL_MAXIMO:N2})" : "")
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mono">@e.NUM_ORDEN_PRESENTACION</div>
+                                <div title="@e.COD_TIPO_ESPECIFICACION_TECNICA">@e.DES_TIPO_ESPECIFICACION_TECNICA</div>
+                                <div>@e.DES_ESPECIFICACION_TECNICA_SINGULAR</div>
+                                <div title="@e.COD_TIPO_REGISTRO_DATOS">@e.DES_TIPO_REGISTRO_DATOS</div>
+                                <div>@e.DES_GRUPO_ESPECIFICACION_TECNICA</div>
+                                <div>
+                                    <MudIcon Icon="@(e.FLG_INCLUIR_DESCRIPCION == true ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.RadioButtonUnchecked)"
+                                             Color="@(e.FLG_INCLUIR_DESCRIPCION == true ? Color.Success : Color.Default)" Size="Size.Small" />
+                                </div>
+                                <div>
+                                    <MudIcon Icon="@(e.FLG_REGISTRO_COMERCIAL == true ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.RadioButtonUnchecked)"
+                                             Color="@(e.FLG_REGISTRO_COMERCIAL == true ? Color.Success : Color.Default)" Size="Size.Small" />
+                                </div>
+                                <div>
+                                    <MudIcon Icon="@(e.FLG_FICHA_TECNICA == true ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.RadioButtonUnchecked)"
+                                             Color="@(e.FLG_FICHA_TECNICA == true ? Color.Success : Color.Default)" Size="Size.Small" />
+                                </div>
+                                <div>
+                                    <MudIcon Icon="@(e.FLG_CONTROL_CALIDAD == true ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.RadioButtonUnchecked)"
+                                             Color="@(e.FLG_CONTROL_CALIDAD == true ? Color.Success : Color.Default)" Size="Size.Small" />
+                                </div>
+                                <div @onclick:stopPropagation="true">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                   OnClick="@(() => QuitarAsignacion(e))" />
+                                </div>
+                            </div>
+                            @if (e.Hijos.Any())
+                            {
+                                @foreach (var h in e.Hijos)
+                                {
+                                    <div class="gea-hijo-row" style="padding:4px 10px 4px 34px;font-size:.78rem;opacity:.65;border-bottom:1px solid var(--grilla-lineas,rgba(255,255,255,.1));">
+                                        ↳ @h.DES_KEY
+                                    </div>
+                                }
+                            }
+                        }
+                        </div>
+                    }
+                </MudPaper>
+
+                <MudPaper Elevation="0" Class="flex-grow-1" Style="border:1px solid var(--line);min-width:0;align-self:flex-start;height:fit-content;">
+                    <div class="pa-3" style="border-bottom:1px solid var(--line);">
+                        <MudText Typo="Typo.h6">Por asignar</MudText>
+                        <MudText Class="mono" Style="opacity:.5;font-size:.78rem;">@_pendientes.Count especificación(es)</MudText>
+                    </div>
+                    @if (!_pendientes.Any())
+                    {
+                        <MudText Class="pa-6 mono" Style="opacity:.4;">Ya se asignaron todas las Especificaciones Técnicas disponibles.</MudText>
+                    }
+                    else
+                    {
+                        <div style="max-height:calc(100vh - 172px);overflow-y:auto;">
+                        <div class="gea-header gea-header-pendientes">
+                            <span>Especificación</span><span>Orden</span><span>Tipo</span><span>Singular</span><span></span><span></span>
+                        </div>
+                        @foreach (var e in _pendientes)
+                        {
+                            <div class="gea-row gea-row-pendientes" @onclick="@(() => AbrirDialog(e, esNuevo: true))">
+                                <span>@e.DES_KEY</span>
+                                <span class="mono">@e.NUM_ORDEN_PRESENTACION</span>
+                                <span title="@e.COD_TIPO_ESPECIFICACION_TECNICA">@e.DES_TIPO_ESPECIFICACION_TECNICA</span>
+                                <span>@e.DES_ESPECIFICACION_TECNICA_SINGULAR</span>
+                                <span></span>
+                                <MudIconButton Icon="@Icons.Material.Filled.AddCircle" Size="Size.Small" Color="Color.Primary" />
+                            </div>
+                            @if (e.Hijos.Any())
+                            {
+                                @foreach (var h in e.Hijos)
+                                {
+                                    <div class="gea-hijo-row" style="padding:4px 10px 4px 34px;font-size:.78rem;opacity:.65;border-bottom:1px solid var(--grilla-lineas,rgba(255,255,255,.1));">
+                                        ↳ @h.DES_KEY
+                                    </div>
+                                }
+                            }
+                        }
+                        </div>
+                    }
+                </MudPaper>
+            </div>
+
+            @if (_gruposRegistroComercial.Any() || _gruposFichaTecnica.Any() || _gruposControlCalidad.Any())
+            {
+                <MudText Typo="Typo.h6" Class="mt-4">Simulador</MudText>
+                <MudText Class="mono mb-2" Style="opacity:.5;font-size:.78rem;">
+                    Vista previa por Grupo de Especificación Técnica, separada según dónde aplica cada Especificación asignada
+                    (Registro Comercial / Ficha Técnica / Control de Calidad).
+                </MudText>
+                <div class="sim-paneles">
+                    <MudPaper Elevation="0" Class="sim-panel">
+                        <div class="sim-panel-cab">
+                            <MudText Typo="Typo.subtitle1">Registro Comercial</MudText>
+                            <MudText Class="mono" Style="opacity:.5;font-size:.72rem;">Especificaciones con Registro Comercial activo</MudText>
+                        </div>
+                        @if (!_gruposRegistroComercial.Any())
+                        {
+                            <div class="sim-panel-vacio">Ninguna Especificación asignada tiene Registro Comercial activo.</div>
+                        }
+                        else
+                        {
+                            @foreach (var grp in _gruposRegistroComercial)
+                            {
+                                <div class="sim-grupo-box">
+                                <div class="sim-grupo-label">@grp.DesGrupo<span class="cnt">@grp.Filas.Count() especificación(es) en Fila / @grp.Columnas.Count() en Columna / @grp.Dats.Count() en Dato</span></div>
+                                @if (grp.Filas.Any() && grp.Columnas.Any())
+                                {
+                                    @* Las columnas Fila×Columna son cantidad (input numérico); las de tipo
+                                       "Dato en Fila" son lista (combo) y se repiten al lado, una vez por
+                                       cada fila de la grilla — no arman un eje propio, solo acompañan. *@
+                                    <table class="sim-grid" style="margin:0 10px 14px;">
+                                        <thead>
+                                            <tr>
+                                                <th></th>
+                                                @foreach (var col in grp.Columnas)
+                                                {
+                                                    <th>@string.Join(" / ", col)</th>
+                                                }
+                                                @foreach (var dat in grp.Dats)
+                                                {
+                                                    <th>@dat.Descripcion</th>
+                                                }
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var fila in grp.Filas)
+                                            {
+                                                <tr>
+                                                    <th>@string.Join(" / ", fila)</th>
+                                                    @foreach (var col in grp.Columnas)
+                                                    {
+                                                        <td><input type="number" min="0" class="sim-cantidad" placeholder="0" /></td>
+                                                    }
+                                                    @foreach (var dat in grp.Dats)
+                                                    {
+                                                        <td>
+                                                            <select class="sim-combo">
+                                                                <option value=""></option>
+                                                                @foreach (var it in dat.Items)
+                                                                {
+                                                                    <option value="@it">@it</option>
+                                                                }
+                                                            </select>
+                                                        </td>
+                                                    }
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                }
+                                else if (grp.Filas.Any() || grp.Columnas.Any())
+                                {
+                                    <MudText Class="mono px-3 pb-2" Style="opacity:.5;font-size:.76rem;">
+                                        Falta asignar al menos una Especificación de tipo @(grp.Filas.Any() ? "Columna" : "Fila") para completar la grilla.
+                                    </MudText>
+                                }
+                                else if (grp.Dats.Any())
+                                {
+                                    @* Ninguna especificación de este grupo es Fila/Columna — solo "Dato en
+                                       Fila" — no hay eje que armar, se muestra un combo por cada una en una
+                                       sola fila (siguen siendo lista, no cantidad). *@
+                                    <table class="sim-grid" style="margin:0 10px 14px;">
+                                        <thead>
+                                            <tr>
+                                                @foreach (var dat in grp.Dats)
+                                                {
+                                                    <th>@dat.Descripcion</th>
+                                                }
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                @foreach (var dat in grp.Dats)
+                                                {
+                                                    <td>
+                                                        <select class="sim-combo">
+                                                            <option value=""></option>
+                                                            @foreach (var it in dat.Items)
+                                                            {
+                                                                <option value="@it">@it</option>
+                                                            }
+                                                        </select>
+                                                    </td>
+                                                }
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                }
+                                </div>
+                            }
+                        }
+                    </MudPaper>
+
+                    <MudPaper Elevation="0" Class="sim-panel">
+                        <div class="sim-panel-cab">
+                            <MudText Typo="Typo.subtitle1">Ficha Técnica</MudText>
+                            <MudText Class="mono" Style="opacity:.5;font-size:.72rem;">Especificaciones con Ficha Técnica activa</MudText>
+                        </div>
+                        @if (!_gruposFichaTecnica.Any())
+                        {
+                            <div class="sim-panel-vacio">Ninguna Especificación asignada tiene Ficha Técnica activa.</div>
+                        }
+                        else
+                        {
+                            @foreach (var grp in _gruposFichaTecnica)
+                            {
+                                <div class="sim-grupo-box">
+                                <div class="sim-grupo-label">@grp.DesGrupo<span class="cnt">@grp.Specs.Count especificación(es)</span></div>
+                                @foreach (var s in grp.Specs)
+                                {
+                                    <div class="sim-campo">
+                                        <div>@(s.DES_ESPECIFICACION_TECNICA_SINGULAR ?? s.DES_KEY)</div>
+                                        @switch (s.COD_TIPO_ESPECIFICACION_TECNICA)
+                                        {
+                                            case "COL":
+                                                <div class="d-flex align-center gap-2">
+                                                    <div class="sim-campo-ctrl sim-swatch"></div>
+                                                    <MudIcon Icon="@Icons.Material.Filled.Palette" Size="Size.Small" Style="opacity:.5;" />
+                                                </div>
+                                                break;
+                                            case "LOG":
+                                                <MudSwitch T="bool?" Disabled="true" Color="Color.Primary" />
+                                                break;
+                                            case "LST":
+                                                <div class="sim-campo-ctrl">
+                                                    <span class="flex-grow-1">Seleccionar…</span>
+                                                    <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Size="Size.Small" Style="opacity:.5;" />
+                                                </div>
+                                                break;
+                                            case "ENT":
+                                            case "NUM":
+                                                <div class="sim-campo-ctrl">
+                                                    <span class="flex-grow-1">@(s.VAL_MINIMO is not null || s.VAL_MAXIMO is not null ? "___ a ___" : "___")</span>
+                                                    <MudIcon Icon="@Icons.Material.Filled.UnfoldMore" Size="Size.Small" Style="opacity:.5;" />
+                                                </div>
+                                                break;
+                                            case "FEC":
+                                            case "FHR":
+                                                <div class="sim-campo-ctrl">
+                                                    <span class="flex-grow-1">Ingresar…</span>
+                                                    <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" Size="Size.Small" Style="opacity:.5;" />
+                                                </div>
+                                                break;
+                                            case "HOR":
+                                                <div class="sim-campo-ctrl">
+                                                    <span class="flex-grow-1">Ingresar…</span>
+                                                    <MudIcon Icon="@Icons.Material.Filled.AccessTime" Size="Size.Small" Style="opacity:.5;" />
+                                                </div>
+                                                break;
+                                            default:
+                                                <div class="sim-campo-ctrl">Ingresar…</div>
+                                                break;
+                                        }
+                                    </div>
+                                }
+                                </div>
+                            }
+                        }
+                    </MudPaper>
+
+                    <MudPaper Elevation="0" Class="sim-panel">
+                        <div class="sim-panel-cab">
+                            <MudText Typo="Typo.subtitle1">Control de Calidad</MudText>
+                            <MudText Class="mono" Style="opacity:.5;font-size:.72rem;">Especificaciones con Control de Calidad activo</MudText>
+                        </div>
+                        @if (!_gruposControlCalidad.Any())
+                        {
+                            <div class="sim-panel-vacio">Ninguna Especificación asignada tiene Control de Calidad activo.</div>
+                        }
+                        else
+                        {
+                            @foreach (var grp in _gruposControlCalidad)
+                            {
+                                <div class="sim-grupo-box">
+                                <div class="sim-grupo-label">@grp.DesGrupo<span class="cnt">@grp.Specs.Count especificación(es)</span></div>
+                                @foreach (var s in grp.Specs)
+                                {
+                                    <div class="sim-campo">
+                                        <div>@(s.DES_ESPECIFICACION_TECNICA_SINGULAR ?? s.DES_KEY)</div>
+                                        @switch (s.COD_TIPO_ESPECIFICACION_TECNICA)
+                                        {
+                                            case "COL":
+                                                <div class="d-flex align-center gap-2">
+                                                    <div class="sim-campo-ctrl sim-swatch"></div>
+                                                    <MudIcon Icon="@Icons.Material.Filled.Palette" Size="Size.Small" Style="opacity:.5;" />
+                                                </div>
+                                                break;
+                                            case "LOG":
+                                                <MudSwitch T="bool?" Disabled="true" Color="Color.Primary" />
+                                                break;
+                                            case "LST":
+                                                <div class="sim-campo-ctrl">
+                                                    <span class="flex-grow-1">Seleccionar…</span>
+                                                    <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Size="Size.Small" Style="opacity:.5;" />
+                                                </div>
+                                                break;
+                                            case "ENT":
+                                            case "NUM":
+                                                <div class="sim-campo-ctrl">
+                                                    <span class="flex-grow-1">@(s.VAL_MINIMO is not null || s.VAL_MAXIMO is not null ? "___ a ___" : "___")</span>
+                                                    <MudIcon Icon="@Icons.Material.Filled.UnfoldMore" Size="Size.Small" Style="opacity:.5;" />
+                                                </div>
+                                                break;
+                                            case "FEC":
+                                            case "FHR":
+                                                <div class="sim-campo-ctrl">
+                                                    <span class="flex-grow-1">Ingresar…</span>
+                                                    <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" Size="Size.Small" Style="opacity:.5;" />
+                                                </div>
+                                                break;
+                                            case "HOR":
+                                                <div class="sim-campo-ctrl">
+                                                    <span class="flex-grow-1">Ingresar…</span>
+                                                    <MudIcon Icon="@Icons.Material.Filled.AccessTime" Size="Size.Small" Style="opacity:.5;" />
+                                                </div>
+                                                break;
+                                            default:
+                                                <div class="sim-campo-ctrl">Ingresar…</div>
+                                                break;
+                                        }
+                                    </div>
+                                }
+                                </div>
+                            }
+                        }
+                    </MudPaper>
+                </div>
+            }
+        }
+        </div>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<ComboboxItem> _grupos = new();
+    private List<ComboboxItem> _familias = new();
+    private List<ComboboxItem> _subFamilias = new();
+    private string _codGrupoProducto = "";
+    private string _codFamiliaProducto = "";
+    private string _codSubFamiliaProducto = "";
+
+    // El TREELIST trae 2 niveles (Especificación / Ítem) — para este panel doble solo se
+    // usan las de nivel 1 (Especificación Técnica), separadas por si ya están asignadas.
+    private List<TreeListModel> _todas = new();
+    private List<TreeListModel> _asignadas = new();
+    private List<TreeListModel> _pendientes = new();
+    private bool _cargando;
+
+    // Simulador: 3 paneles independientes (Registro Comercial / Ficha Técnica / Control de
+    // Calidad), cada uno filtrando las Especificaciones asignadas por su flag correspondiente
+    // y agrupándolas por COD_GRUPO_ESPECIFICACION_TECNICA.
+    private Dictionary<string, List<ItemsTreeModel>> _itemsPorEspec = new();
+
+    private class GrupoGrillaSimulador
+    {
+        public string DesGrupo = "";
+        public List<List<string>> Filas = new();
+        public List<List<string>> Columnas = new();
+        public List<(string Descripcion, List<string> Items)> Dats = new();
+    }
+    private class GrupoCamposSimulador
+    {
+        public string DesGrupo = "";
+        public List<TreeListModel> Specs = new();
+    }
+
+    private List<GrupoGrillaSimulador> _gruposRegistroComercial = new();
+    private List<GrupoCamposSimulador> _gruposFichaTecnica = new();
+    private List<GrupoCamposSimulador> _gruposControlCalidad = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("INGENIERIA", "GruposEspecificacionTecnica");
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(EstandarRoute.GruposProductoCombobox);
+            _grupos = r?.Data ?? new();
+        }
+        catch { _grupos = new(); }
+    }
+
+    private async Task OnGrupoChanged(string val)
+    {
+        _codGrupoProducto = val;
+        _codFamiliaProducto = "";
+        _codSubFamiliaProducto = "";
+        _familias = new(); _subFamilias = new();
+        Clasificar(new());
+        if (string.IsNullOrEmpty(val)) return;
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<FamiliasProductoModel>>>(
+                $"{EstandarRoute.FamiliasProducto}?codGrupoProducto={Uri.EscapeDataString(val)}");
+            _familias = (r?.Data ?? new()).Select(f => new ComboboxItem { Id = f.COD_FAMILIA_PRODUCTO.Trim(), Texto = f.DES_FAMILIA_PRODUCTO }).ToList();
+        }
+        catch { _familias = new(); }
+    }
+
+    private async Task OnFamiliaChanged(string val)
+    {
+        _codFamiliaProducto = val;
+        _codSubFamiliaProducto = "";
+        _subFamilias = new();
+        Clasificar(new());
+        if (string.IsNullOrEmpty(val) || string.IsNullOrEmpty(_codGrupoProducto)) return;
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<SubFamiliasProductoModel>>>(
+                $"{EstandarRoute.SubFamiliasProducto}?codGrupoProducto={Uri.EscapeDataString(_codGrupoProducto)}&codFamiliaProducto={Uri.EscapeDataString(val)}");
+            _subFamilias = (r?.Data ?? new()).Select(s => new ComboboxItem { Id = s.COD_SUB_FAMILIA_PRODUCTO.Trim(), Texto = s.DES_SUB_FAMILIA_PRODUCTO }).ToList();
+        }
+        catch { _subFamilias = new(); }
+    }
+
+    private async Task OnSubFamiliaChanged(string val)
+    {
+        _codSubFamiliaProducto = val;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        if (string.IsNullOrEmpty(_codSubFamiliaProducto)) { Clasificar(new()); return; }
+        _cargando = true;
+        StateHasChanged();
+        try
+        {
+            // El SearchDto bindea por nombre exacto de propiedad (COD_GRUPO_PRODUCTO, etc.) —
+            // a diferencia de otros endpoints simples con parámetros sueltos, acá hace falta
+            // usar esos mismos nombres en la query string o el [ApiController] devuelve 400
+            // (los [Required] quedan sin bindear).
+            var url = $"{IngenieriaRoute.GruposEspecificacionTecnicaTreelist}?COD_GRUPO_PRODUCTO={Uri.EscapeDataString(_codGrupoProducto)}" +
+                      $"&COD_FAMILIA_PRODUCTO={Uri.EscapeDataString(_codFamiliaProducto)}&COD_SUB_FAMILIA_PRODUCTO={Uri.EscapeDataString(_codSubFamiliaProducto)}";
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TreeListModel>>>(url);
+            Clasificar(r?.Data ?? new());
+        }
+        catch { Clasificar(new()); }
+        await CargarSimulador();
+        _cargando = false;
+    }
+
+    private void Clasificar(List<TreeListModel> items)
+    {
+        // El TREELIST ahora trae la jerarquía real (COD_KEY_FATHER apunta a otra
+        // Especificación Técnica de la misma lista para los hijos, ej. MODELOS cuelga de
+        // MARCAS; o al sentinela Root "00000" — que no es una fila del resultset — para las
+        // de primer nivel). Solo las de primer nivel son seleccionables/eliminables desde
+        // este panel doble; sus hijos se arman en Hijos y se muestran solo informativos,
+        // se asignan/eliminan siempre junto con el padre (AsignarHijosAsync/QuitarAsignacion).
+        var porCodigo = items.Where(i => i.COD_KEY_TYPE == "1").ToDictionary(i => i.COD_KEY);
+        foreach (var i in porCodigo.Values) i.Hijos = new();
+
+        var top = new List<TreeListModel>();
+        foreach (var i in porCodigo.Values)
+        {
+            if (!string.IsNullOrEmpty(i.COD_KEY_FATHER) && porCodigo.TryGetValue(i.COD_KEY_FATHER, out var padre))
+                padre.Hijos.Add(i);
+            else
+                top.Add(i);
+        }
+        foreach (var i in porCodigo.Values)
+            i.Hijos = i.Hijos.OrderBy(h => h.NUM_ORDEN_PRESENTACION ?? int.MaxValue).ToList();
+
+        _todas = top.OrderBy(i => i.NUM_ORDEN_PRESENTACION ?? int.MaxValue).ToList();
+        _asignadas = _todas.Where(i => i.FLG_ASIGNADO == true).ToList();
+        _pendientes = _todas.Where(i => i.FLG_ASIGNADO != true).ToList();
+    }
+
+    private async Task CargarSimulador()
+    {
+        _itemsPorEspec.Clear();
+        _gruposRegistroComercial = new(); _gruposFichaTecnica = new(); _gruposControlCalidad = new();
+
+        var specsConRol = _asignadas.Where(a => a.COD_TIPO_REGISTRO_DATOS is "FIL" or "COL" or "DAT").ToList();
+        if (specsConRol.Any())
+        {
+            var tareas = specsConRol.Select(async s =>
+            {
+                try
+                {
+                    var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ItemsTreeModel>>>(
+                        $"{IngenieriaRoute.EspecificacionesItemsTecnicosTreelistPorEspecificacion}?codEspecificacionTecnica={Uri.EscapeDataString(s.COD_KEY)}");
+                    var items = (r?.Data ?? new()).Where(i => i.COD_KEY_TYPE == "2")
+                                  .OrderBy(i => i.NUM_ORDEN_PRESENTACION ?? int.MaxValue).ToList();
+                    return (s.COD_KEY, Items: items);
+                }
+                catch { return (s.COD_KEY, Items: new List<ItemsTreeModel>()); }
+            });
+            foreach (var (cod, items) in await Task.WhenAll(tareas)) _itemsPorEspec[cod] = items;
+        }
+
+        // Registro Comercial: mismo simulador de grilla Fila×Columna×Dato de siempre, pero
+        // solo con las Especificaciones marcadas FLG_REGISTRO_COMERCIAL, agrupadas por
+        // COD_GRUPO_ESPECIFICACION_TECNICA (un bloque de grilla por grupo).
+        var regComercial = _asignadas.Where(a => a.FLG_REGISTRO_COMERCIAL == true
+                                               && a.COD_TIPO_REGISTRO_DATOS is "FIL" or "COL" or "DAT").ToList();
+        _gruposRegistroComercial = regComercial
+            .GroupBy(a => a.COD_GRUPO_ESPECIFICACION_TECNICA)
+            .Select(g =>
+            {
+                var lista = g.ToList();
+                return new GrupoGrillaSimulador
+                {
+                    DesGrupo = lista.FirstOrDefault()?.DES_GRUPO_ESPECIFICACION_TECNICA ?? "Sin Grupo",
+                    Filas = CombinarEtiquetas(lista.Where(a => a.COD_TIPO_REGISTRO_DATOS == "FIL").ToList()),
+                    Columnas = CombinarEtiquetas(lista.Where(a => a.COD_TIPO_REGISTRO_DATOS == "COL").ToList()),
+                    Dats = lista.Where(a => a.COD_TIPO_REGISTRO_DATOS == "DAT")
+                                .Select(s => (Descripcion: s.DES_KEY ?? s.COD_KEY,
+                                              Items: (_itemsPorEspec.TryGetValue(s.COD_KEY, out var l) ? l : new()).Select(i => i.DES_KEY ?? "").ToList()))
+                                .ToList()
+                };
+            }).ToList();
+
+        // Ficha Técnica / Control de Calidad: no arman una grilla Fila×Columna — muestran cada
+        // Especificación como un campo individual (mismo espíritu del tab de Especificaciones
+        // Técnicas de ProductosDialog), agrupadas también por Grupo de Especificación Técnica.
+        _gruposFichaTecnica = _asignadas.Where(a => a.FLG_FICHA_TECNICA == true)
+            .GroupBy(a => a.COD_GRUPO_ESPECIFICACION_TECNICA)
+            .Select(g => new GrupoCamposSimulador
+            {
+                DesGrupo = g.FirstOrDefault()?.DES_GRUPO_ESPECIFICACION_TECNICA ?? "Sin Grupo",
+                Specs = g.OrderBy(s => s.NUM_ORDEN_PRESENTACION ?? int.MaxValue).ToList()
+            }).ToList();
+
+        _gruposControlCalidad = _asignadas.Where(a => a.FLG_CONTROL_CALIDAD == true)
+            .GroupBy(a => a.COD_GRUPO_ESPECIFICACION_TECNICA)
+            .Select(g => new GrupoCamposSimulador
+            {
+                DesGrupo = g.FirstOrDefault()?.DES_GRUPO_ESPECIFICACION_TECNICA ?? "Sin Grupo",
+                Specs = g.OrderBy(s => s.NUM_ORDEN_PRESENTACION ?? int.MaxValue).ToList()
+            }).ToList();
+    }
+
+
+    /// <summary>Combina en cartesiano las descripciones de los Ítems de cada Especificación con
+    /// rol Fila/Columna — si hay más de una, cada combinación pasa a ser un encabezado compuesto
+    /// (ej. "Talla / Color"). Si no hay ninguna especificación con ese rol, devuelve vacío.</summary>
+    private List<List<string>> CombinarEtiquetas(List<TreeListModel> specs)
+    {
+        if (!specs.Any()) return new();
+        var resultado = new List<List<string>> { new() };
+        foreach (var spec in specs)
+        {
+            var items = _itemsPorEspec.TryGetValue(spec.COD_KEY, out var l) ? l : new();
+            var nuevo = new List<List<string>>();
+            foreach (var combo in resultado)
+                foreach (var item in items)
+                    nuevo.Add(new List<string>(combo) { item.DES_KEY ?? "" });
+            resultado = nuevo;
+        }
+        return resultado;
+    }
+
+    private async Task AbrirDialog(TreeListModel nodo, bool esNuevo)
+    {
+        var parametros = new DialogParameters
+        {
+            ["CodGrupoProducto"] = _codGrupoProducto,
+            ["CodFamiliaProducto"] = _codFamiliaProducto,
+            ["CodSubFamiliaProducto"] = _codSubFamiliaProducto,
+            ["Nodo"] = nodo,
+            ["EsNuevo"] = esNuevo
+        };
+        var opciones = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        var titulo = esNuevo ? "Asignar Especificación Técnica" : "Editar Especificación Técnica";
+        var dialog = await DialogService.ShowAsync<GruposEspecificacionTecnicaDialog>(titulo, parametros, opciones);
+        var resultado = await dialog.Result;
+        if (resultado is not null && !resultado.Canceled)
+        {
+            // Al asignar (o editar) un padre, sus hijos se sincronizan automáticamente (sin
+            // diálogo propio) — no se puede asignar/editar un hijo por separado. Se les copian
+            // los mismos flags (Reg. Comercial/Ficha Técnica/Control de Calidad/Grupo) que el
+            // padre, para que el hijo (ej. MODELOS) aparezca en los mismos paneles/diálogos
+            // donde aparece el padre (ej. MARCAS) — si no, el hijo queda sin estos flags y no se
+            // ve en ningún simulador ni en la ficha de Producto que los filtra. Se hace tanto al
+            // asignar por primera vez como al editar, para corregir también las asignaciones ya
+            // existentes cuyos hijos hayan quedado desincronizados.
+            if (nodo.Hijos.Any() && resultado.Data is InsertDto modeloPadre)
+                await AsignarHijosAsync(nodo, modeloPadre);
+            await Load();
+        }
+    }
+
+    /// <summary>Asigna automáticamente todos los hijos de un nodo recién asignado, con los
+    /// mismos Grupo/Familia/Sub Familia y los mismos flags/Grupo de Especificación que el padre
+    /// que se acaba de guardar — sin valor propio (el usuario lo completa después editando cada
+    /// uno si hace falta).</summary>
+    private async Task AsignarHijosAsync(TreeListModel padre, InsertDto modeloPadre)
+    {
+        foreach (var hijo in padre.Hijos)
+        {
+            var dto = new
+            {
+                COD_GRUPO_PRODUCTO = _codGrupoProducto,
+                COD_FAMILIA_PRODUCTO = _codFamiliaProducto,
+                COD_SUB_FAMILIA_PRODUCTO = _codSubFamiliaProducto,
+                COD_ESPECIFICACION_TECNICA = hijo.COD_KEY,
+                modeloPadre.FLG_INCLUIR_DESCRIPCION,
+                modeloPadre.FLG_REGISTRO_COMERCIAL,
+                modeloPadre.FLG_FICHA_TECNICA,
+                modeloPadre.FLG_CONTROL_CALIDAD,
+                modeloPadre.COD_GRUPO_ESPECIFICACION_TECNICA,
+            };
+            try { await Http.PostAsJsonAsync(IngenieriaRoute.GruposEspecificacionTecnica, dto); } catch { }
+        }
+    }
+
+    private async Task AbrirCopiar()
+    {
+        var parametros = new DialogParameters
+        {
+            ["CodGrupoProducto"] = _codGrupoProducto,
+            ["CodFamiliaProducto"] = _codFamiliaProducto,
+            ["CodSubFamiliaProducto"] = _codSubFamiliaProducto
+        };
+        var opciones = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
+        await DialogService.ShowAsync<CopiarEspecificacionesDialog>("Copiar Especificaciones Técnicas", parametros, opciones);
+    }
+
+    private async Task QuitarAsignacion(TreeListModel nodo)
+    {
+        var mensaje = nodo.Hijos.Any()
+            ? $"¿Quitar \"{nodo.DES_KEY}\" y sus {nodo.Hijos.Count} hijo(s) de esta Sub Familia?"
+            : $"¿Quitar \"{nodo.DES_KEY}\" de esta Sub Familia?";
+        var confirmar = await DialogService.ShowMessageBox("Quitar asignación", mensaje, yesText: "Quitar", cancelText: "Cancelar");
+        if (confirmar != true) return;
+
+        var url = $"{IngenieriaRoute.GruposEspecificacionTecnica}/{Uri.EscapeDataString(_codGrupoProducto)}/{Uri.EscapeDataString(_codFamiliaProducto)}/{Uri.EscapeDataString(_codSubFamiliaProducto)}/{Uri.EscapeDataString(nodo.COD_KEY)}";
+        var resp = await Http.DeleteAsync(url);
+        if (!resp.IsSuccessStatusCode)
+        {
+            await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(GruposEspecificacionTecnica), nameof(QuitarAsignacion), "No se pudo quitar la asignación");
+            return;
+        }
+        // El padre se elimina siempre junto con sus hijos — no quedan asignaciones huérfanas
+        // que el usuario no pueda ver/gestionar (los hijos no son seleccionables solos).
+        foreach (var hijo in nodo.Hijos)
+        {
+            var urlHijo = $"{IngenieriaRoute.GruposEspecificacionTecnica}/{Uri.EscapeDataString(_codGrupoProducto)}/{Uri.EscapeDataString(_codFamiliaProducto)}/{Uri.EscapeDataString(_codSubFamiliaProducto)}/{Uri.EscapeDataString(hijo.COD_KEY)}";
+            try { await Http.DeleteAsync(urlHijo); } catch { }
+        }
+        Snackbar.Add("Asignación quitada.", Severity.Success);
+        await Load();
+    }
+
+    public void Dispose() { }
+}

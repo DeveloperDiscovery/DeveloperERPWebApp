@@ -1,0 +1,470 @@
+@page "/seguridad/configuracion"
+@attribute [Authorize]
+@inject ConfigService Config
+@inject ControlCambiosClientService Cambios
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject IDialogService DialogService
+@using KONSolutions.Shared.Models.Config
+
+<PageTitle>Configuración · @Config.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <TituloPagina Fallback="Configuración de apariencia" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Colores y tipografía · se guarda en XML</MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.Download"
+                   OnClick="ExportarXml" Size="Size.Small">Exportar XML</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="Guardar" Style="font-weight:700;">Guardar</MudButton>
+    </div>
+</div>
+
+<MudGrid>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Identidad de la aplicación</MudText>
+            <CampoTextoEstable @bind-Value="_cfg.NombreApp" Label="Nombre de la aplicación"
+                          Variant="Variant.Outlined" Class="mb-3" MaxLength="60" />
+            <MudText Typo="Typo.caption" Class="mono mb-1" Style="opacity:.6;">Logo de la aplicación (AppBar derecho · Sidebar):</MudText>
+            @if (LogoBytes is { Length: > 0 })
+            {
+                <div class="d-flex justify-center mb-3 pa-3" style="border:1px dashed var(--line);border-radius:8px;background:#fff;">
+                    <MudImage Src="@($"data:image/png;base64,{_cfg.LogoApp}")" Height="120"
+                              Style="object-fit:contain;max-width:100%;" />
+                </div>
+            }
+            <ImagePicker Image="@LogoBytes" ImageChanged="OnLogoChanged" Label="Logo aplicación" />
+
+            <MudDivider Class="my-4" />
+            <CampoTextoEstable @bind-Value="_cfg.NombreEmpresa" Label="Nombre de la empresa"
+                          Variant="Variant.Outlined" Class="mb-3" MaxLength="80" />
+            <MudText Typo="Typo.caption" Class="mono mb-1" Style="opacity:.6;">Logo de la empresa (AppBar izquierdo):</MudText>
+            @if (LogoEmpresaBytes is { Length: > 0 })
+            {
+                <div class="d-flex justify-center mb-3 pa-3" style="border:1px dashed var(--line);border-radius:8px;background:#fff;">
+                    <MudImage Src="@($"data:image/png;base64,{_cfg.LogoEmpresa}")" Height="80"
+                              Style="object-fit:contain;max-width:100%;" />
+                </div>
+            }
+            <ImagePicker Image="@LogoEmpresaBytes" ImageChanged="OnLogoEmpresaChanged" Label="Logo empresa" />
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Colores de pantalla</MudText>
+            <ColorConSwatch @bind-Text="_cfg.ColorPrimario" Label="Color primario" Class="mb-3" />
+            <ColorConSwatch @bind-Text="_cfg.ColorFondo" Label="Color de fondo" Class="mb-3" />
+            <ColorConSwatch @bind-Text="_cfg.ColorTexto" Label="Color de texto" Class="mb-3" />
+            <ColorConSwatch @bind-Text="_cfg.ColorSecundario" Label="Color secundario" />
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Tipografía</MudText>
+
+            <MudText Typo="Typo.subtitle2" Class="mono mt-2">Títulos</MudText>
+            <div class="d-flex gap-2 mb-3">
+                <MudSelect T="string" @bind-Value="_cfg.TituloFuente" Label="Fuente" Variant="Variant.Outlined">
+                    @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                </MudSelect>
+                <MudNumericField @bind-Value="_cfg.TituloTamano" Label="Tamaño (px)" Variant="Variant.Outlined" Min="8" Max="72" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                <ColorConSwatch @bind-Text="_cfg.TituloColor" Label="Color" />
+            </div>
+
+            <MudText Typo="Typo.subtitle2" Class="mono mt-2">Subtítulos</MudText>
+            <div class="d-flex gap-2 mb-3">
+                <MudSelect T="string" @bind-Value="_cfg.SubtituloFuente" Label="Fuente" Variant="Variant.Outlined">
+                    @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                </MudSelect>
+                <MudNumericField @bind-Value="_cfg.SubtituloTamano" Label="Tamaño (px)" Variant="Variant.Outlined" Min="8" Max="48" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                <ColorConSwatch @bind-Text="_cfg.SubtituloColor" Label="Color" />
+            </div>
+
+            <MudText Typo="Typo.subtitle2" Class="mono mt-2">Controles (textbox, labels, combos)</MudText>
+            <div class="d-flex gap-2">
+                <MudSelect T="string" @bind-Value="_cfg.ControlFuente" Label="Fuente" Variant="Variant.Outlined">
+                    @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                </MudSelect>
+                <MudNumericField @bind-Value="_cfg.ControlTamano" Label="Tamaño (px)" Variant="Variant.Outlined" Min="8" Max="32" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                <ColorConSwatch @bind-Text="_cfg.ControlColor" Label="Color" />
+            </div>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12">
+        <MudPaper Elevation="0" Class="pa-4" Style="@($"border:1px solid var(--line);background:{_cfg.ColorFondo};")">
+            <MudText Typo="Typo.caption" Class="mono mb-2" Style="opacity:.5;">Vista previa:</MudText>
+            <div style="@($"font-family:'{_cfg.TituloFuente}';font-size:{_cfg.TituloTamano}px;color:{_cfg.ColorTexto};font-weight:700;")">
+                Título de ejemplo
+            </div>
+            <div style="@($"font-family:'{_cfg.SubtituloFuente}';font-size:{_cfg.SubtituloTamano}px;color:{_cfg.ColorSecundario};")">
+                Subtítulo de ejemplo
+            </div>
+            <div style="@($"font-family:'{_cfg.ControlFuente}';font-size:{_cfg.ControlTamano}px;color:{_cfg.ColorTexto};margin-top:.5rem;")">
+                Texto de control (labels, textbox, combos)
+            </div>
+            <MudButton Variant="Variant.Filled" Class="mt-2" Style="@($"background:{_cfg.ColorPrimario};color:#fff;")">
+                Botón de ejemplo
+            </MudButton>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Refresco automático de grillas</MudText>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">
+                Detecta cambios hechos en la base de datos (por otros usuarios o procesos) y
+                actualiza las grillas automáticamente.
+            </MudText>
+            <MudSwitch @bind-Value="_cfg.RefrescoAutomatico" Color="Color.Primary" Class="mb-2"
+                       Label="Activar refresco automático" />
+            <MudNumericField @bind-Value="_cfg.RefrescoIntervaloSegs" Label="Intervalo (segundos)"
+                             Variant="Variant.Outlined" Min="3" Max="300"
+                             Disabled="@(!_cfg.RefrescoAutomatico)"
+                             Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+            <MudText Typo="Typo.caption" Class="mono mt-2" Style="opacity:.5;">
+                Menor intervalo = más inmediato pero más consultas. Recomendado: 10s.
+            </MudText>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Bloqueo por inactividad</MudText>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">
+                Bloquea la sesión tras un tiempo sin actividad. Pide la contraseña para desbloquear.
+            </MudText>
+            <MudSwitch @bind-Value="_cfg.BloqueoActivo" Color="Color.Primary" Label="Activar bloqueo automático" Class="mb-3" />
+            <MudNumericField @bind-Value="_cfg.BloqueoMinutos" Label="Minutos de inactividad"
+                             Variant="Variant.Outlined" Min="1" Max="120" Disabled="@(!_cfg.BloqueoActivo)"
+                             Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Reconocimiento facial</MudText>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">
+                Tiempo máximo para verificar la identidad facial durante el login. Al agotarse,
+                la sesión se cierra automáticamente y la pestaña se cierra.
+            </MudText>
+            <MudNumericField @bind-Value="_cfg.FaceTimeoutSegundos" Label="Segundos de espera"
+                             Variant="Variant.Outlined" Min="10" Max="120"
+                             HelperText="Rango: 10 – 120 segundos. Por defecto: 30 s." Class="mb-3"
+                             Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+            <MudSwitch @bind-Value="_cfg.UsarReconocimientoFacialEnBloqueo" Color="Color.Primary"
+                       Label="Requerir reconocimiento facial al desbloquear pantalla" />
+            <MudText Typo="Typo.caption" Class="mono mt-1" Style="opacity:.5;">
+                Si está activo, al desbloquear la pantalla se pedirá reconocimiento facial.
+                Si falla o se cancela, se solicita la contraseña.
+            </MudText>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Campos obligatorios</MudText>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">
+                Color de fondo de los campos requeridos en las pantallas CRUD.
+            </MudText>
+            <ColorConSwatch @bind-Text="_cfg.ObligatorioBackColor" Label="Fondo obligatorio" />
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Grillas e imágenes</MudText>
+            <div class="d-flex gap-2 mb-3">
+                <MudNumericField @bind-Value="_cfg.IconoGrillaAncho" Label="Ancho icono (px)"
+                                 Variant="Variant.Outlined" Min="12" Max="64" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                <MudNumericField @bind-Value="_cfg.IconoGrillaAlto" Label="Alto icono (px)"
+                                 Variant="Variant.Outlined" Min="12" Max="64" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+            </div>
+            @* Punto 4: tamaño de las imágenes (campos IMG_) en las grillas *@
+            <MudText Typo="Typo.subtitle2" Class="mono mb-2">Imágenes en grilla (foto, firma, etc.)</MudText>
+            <div class="d-flex gap-2 mb-3">
+                <MudNumericField @bind-Value="_cfg.ImagenGrillaAncho" Label="Ancho imagen (px)"
+                                 Variant="Variant.Outlined" Min="16" Max="200" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                <MudNumericField @bind-Value="_cfg.ImagenGrillaAlto" Label="Alto imagen (px)"
+                                 Variant="Variant.Outlined" Min="16" Max="200" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+            </div>
+            <MudNumericField @bind-Value="_cfg.ImagenMaxMB" Label="Tamaño máx. de imágenes (MB)"
+                             Variant="Variant.Outlined" Min="1" Max="50" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+
+            @* Punto 10: filas por página *@
+            <MudText Typo="Typo.subtitle2" Class="mono mt-4 mb-2">Filas por página</MudText>
+            <div class="d-flex gap-2">
+                <MudNumericField @bind-Value="_cfg.FilasPorPaginaUnica" Label="Grillas únicas"
+                                 Variant="Variant.Outlined" Min="5" Max="100" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                <MudNumericField @bind-Value="_cfg.FilasPorPaginaPadre" Label="Grilla padre"
+                                 Variant="Variant.Outlined" Min="5" Max="100" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                <MudNumericField @bind-Value="_cfg.FilasPorPaginaHijo" Label="Grilla hijo"
+                                 Variant="Variant.Outlined" Min="5" Max="100" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+            </div>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Fila con foco / seleccionada</MudText>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">
+                Color y fuente de la fila resaltada al seleccionarla o navegar con el teclado.
+            </MudText>
+            <div class="d-flex gap-2 mb-3">
+                <ColorConSwatch @bind-Text="_cfg.FocoFondo" Label="Fondo del foco" />
+                <ColorConSwatch @bind-Text="_cfg.FocoTexto" Label="Texto del foco" />
+            </div>
+            <MudSelect T="string" @bind-Value="_cfg.FocoFuente" Label="Fuente del foco" Variant="Variant.Outlined">
+                @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+            </MudSelect>
+
+
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Fuente de las filas</MudText>
+            <MudSelect T="string" @bind-Value="_cfg.GrillaFilaFuente" Label="Fuente (todas las filas)" Variant="Variant.Outlined" Class="mb-3">
+                @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+            </MudSelect>
+            <div class="d-flex gap-2">
+                <MudSelect T="string" @bind-Value="_cfg.GrillaFilaParFuente" Label="Fuente fila par" Variant="Variant.Outlined">
+                    @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                </MudSelect>
+                <MudSelect T="string" @bind-Value="_cfg.GrillaFilaImparFuente" Label="Fuente fila impar" Variant="Variant.Outlined">
+                    @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                </MudSelect>
+            </div>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Modo de color</MudText>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">
+                Cambia automáticamente la paleta de colores de las pantallas.
+            </MudText>
+            <AriaCombo TItem="ComboboxItem" Items="_opcionesEntorno"
+                       TextFunc="@(o => o.Texto)" ValueFunc="@(o => o.Id)"
+                       Value="_cfg.ModoColor" ValueChanged="@(v => OnModoColorChanged(v ?? "claro"))"
+                       Label="Entorno" />
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="6">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Texto de los campos</MudText>
+            <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">
+                Define cómo se escribe el texto en los campos de captura.
+            </MudText>
+            <AriaCombo TItem="ComboboxItem" Items="_opcionesModoTexto"
+                       TextFunc="@(o => o.Texto)" ValueFunc="@(o => o.Id)"
+                       @bind-Value="_cfg.ModoTexto" Label="Modo de texto" />
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Colores de la grilla</MudText>
+            <MudGrid>
+                <MudItem xs="12" sm="6" md="4">
+                    <ColorConSwatch @bind-Text="_cfg.GrillaCabeceraFondo" Label="Cabecera · fondo" />
+                </MudItem>
+                <MudItem xs="12" sm="6" md="4">
+                    <ColorConSwatch @bind-Text="_cfg.GrillaCabeceraTexto" Label="Cabecera · texto" />
+                </MudItem>
+                <MudItem xs="12" sm="6" md="4">
+                    <ColorConSwatch @bind-Text="_cfg.GrillaTexto" Label="Filas · texto" />
+                </MudItem>
+                <MudItem xs="12" sm="6" md="4">
+                    <ColorConSwatch @bind-Text="_cfg.GrillaFilaPar" Label="Fila par (even)" />
+                </MudItem>
+                <MudItem xs="12" sm="6" md="4">
+                    <ColorConSwatch @bind-Text="_cfg.GrillaFilaImpar" Label="Fila impar (odd)" />
+                </MudItem>
+                <MudItem xs="12" sm="6" md="4">
+                    <ColorConSwatch @bind-Text="_cfg.GrillaLineas" Label="Líneas / bordes" />
+                </MudItem>
+            </MudGrid>
+
+            @* v3: Fuente de las filas dentro de Colores de la grilla *@
+            <MudText Typo="Typo.subtitle2" Class="mono mt-3 mb-2">Fuente de las filas</MudText>
+            <MudSelect T="string" @bind-Value="_cfg.GrillaFilaFuente" Label="Fuente de las filas" Variant="Variant.Outlined">
+                @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+            </MudSelect>
+
+            @* Vista previa de la grilla en vivo: refleja los colores configurados arriba *@
+            <MudText Typo="Typo.subtitle2" Class="mt-4 mb-2">Vista previa de la grilla:</MudText>
+            <div style="@($"border:1px solid {_cfg.GrillaLineas};border-radius:6px;overflow:hidden;")">
+                <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <thead>
+                        <tr style="@($"background:{_cfg.GrillaCabeceraFondo};color:{_cfg.GrillaCabeceraTexto};")">
+                            <th style="@($"padding:8px 12px;text-align:left;border-bottom:1px solid {_cfg.GrillaLineas};")">Código</th>
+                            <th style="@($"padding:8px 12px;text-align:left;border-bottom:1px solid {_cfg.GrillaLineas};")">Descripción</th>
+                            <th style="@($"padding:8px 12px;text-align:left;border-bottom:1px solid {_cfg.GrillaLineas};")">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr style="@($"background:{_cfg.GrillaFilaPar};color:{_cfg.GrillaTexto};")">
+                            <td style="@($"padding:8px 12px;border-bottom:1px solid {_cfg.GrillaLineas};")">001</td>
+                            <td style="@($"padding:8px 12px;border-bottom:1px solid {_cfg.GrillaLineas};")">Primer registro</td>
+                            <td style="@($"padding:8px 12px;border-bottom:1px solid {_cfg.GrillaLineas};")">Activo</td>
+                        </tr>
+                        <tr style="@($"background:{_cfg.GrillaFilaImpar};color:{_cfg.GrillaTexto};")">
+                            <td style="@($"padding:8px 12px;border-bottom:1px solid {_cfg.GrillaLineas};")">002</td>
+                            <td style="@($"padding:8px 12px;border-bottom:1px solid {_cfg.GrillaLineas};")">Segundo registro</td>
+                            <td style="@($"padding:8px 12px;border-bottom:1px solid {_cfg.GrillaLineas};")">Activo</td>
+                        </tr>
+                        <tr style="@($"background:{_cfg.GrillaFilaPar};color:{_cfg.GrillaTexto};")">
+                            <td style="padding:8px 12px;">003</td>
+                            <td style="padding:8px 12px;">Tercer registro</td>
+                            <td style="padding:8px 12px;">Inactivo</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Importar configuración desde XML</MudText>
+            <MudFileUpload T="IBrowserFile" Accept=".xml" FilesChanged="ImportarXml">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Upload">Seleccionar XML</MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    // Recibidos siempre por AbrirTabOpcion (MainLayout) para pantallas con botones
+    // dinámicos vía AccionesBotones — esta pantalla no los usa, pero debe aceptarlos
+    // para no romper al abrirse desde el menú.
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private AppConfig _cfg = new();
+    private readonly string[] _fuentes = { "Archivo", "Spline Sans Mono", "Arial", "Roboto", "Georgia", "Courier New", "Verdana", "Times New Roman" };
+
+    private readonly List<ComboboxItem> _opcionesEntorno = new()
+    {
+        new ComboboxItem { Id = "claro",  Texto = "Claro" },
+        new ComboboxItem { Id = "oscuro", Texto = "Oscuro" }
+    };
+    private readonly List<ComboboxItem> _opcionesModoTexto = new()
+    {
+        new ComboboxItem { Id = "normal", Texto = "Normal (como se escribe)" },
+        new ComboboxItem { Id = "upper",  Texto = "MAYÚSCULAS" },
+        new ComboboxItem { Id = "lower",  Texto = "minúsculas" }
+    };
+
+    // El ImagePicker trabaja con byte[]; el logo se guarda como base64 en la config.
+    private byte[]? LogoBytes
+        => string.IsNullOrWhiteSpace(_cfg.LogoApp) ? null : Convert.FromBase64String(_cfg.LogoApp);
+    private void OnLogoChanged(byte[]? bytes)
+        => _cfg.LogoApp = bytes is { Length: > 0 } ? Convert.ToBase64String(bytes) : null;
+
+    private byte[]? LogoEmpresaBytes
+        => string.IsNullOrWhiteSpace(_cfg.LogoEmpresa) ? null : Convert.FromBase64String(_cfg.LogoEmpresa);
+    private void OnLogoEmpresaChanged(byte[]? bytes)
+        => _cfg.LogoEmpresa = bytes is { Length: > 0 } ? Convert.ToBase64String(bytes) : null;
+
+    /// <summary>
+    /// Aplica un set de colores predefinido según el modo (claro/oscuro).
+    /// Cambia los colores generales y los de la grilla a la paleta correspondiente.
+    /// </summary>
+    private void OnModoColorChanged(string modo)
+    {
+        _cfg.ModoColor = modo;
+        if (modo == "oscuro")
+        {
+            // Paleta OSCURA
+            _cfg.ColorPrimario = "#d4623f"; _cfg.ColorFondo = "#1c1917";
+            _cfg.ColorTexto = "#ece7e0";    _cfg.ColorSecundario = "#9c948a";
+            _cfg.GrillaCabeceraFondo = "#0f0d0b"; _cfg.GrillaCabeceraTexto = "#ffffff";
+            _cfg.GrillaFilaPar = "#26211d";  _cfg.GrillaFilaImpar = "#2e2823";
+            _cfg.GrillaTexto = "#ece7e0";    _cfg.GrillaLineas = "#3a332d";
+        }
+        else
+        {
+            // Paleta CLARA (valores por defecto)
+            _cfg.ColorPrimario = "#b8472d"; _cfg.ColorFondo = "#efe9df";
+            _cfg.ColorTexto = "#16130f";    _cfg.ColorSecundario = "#6b6358";
+            _cfg.GrillaCabeceraFondo = "#2b2622"; _cfg.GrillaCabeceraTexto = "#ffffff";
+            _cfg.GrillaFilaPar = "#ffffff";  _cfg.GrillaFilaImpar = "#f5f1ea";
+            _cfg.GrillaTexto = "#16130f";    _cfg.GrillaLineas = "#d9d2c5";
+        }
+        StateHasChanged();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Config.LoadAsync();
+        _cfg = Clonar(Config.Current);
+    }
+
+    private async Task Guardar()
+    {
+        await Config.SaveAsync(_cfg);
+        await Config.AplicarAsync();   // Aplica colores, iconos y tema en caliente
+        // Aplicar el refresco automático en caliente
+        if (_cfg.RefrescoAutomatico && _cfg.ControlCambiosActivo) Cambios.Iniciar(_cfg.RefrescoIntervaloSegs);
+        else Cambios.Detener();
+        Snackbar.Add("Configuración guardada y aplicada.", Severity.Success);
+    }
+
+    private async Task ExportarXml()
+    {
+        var xml = Config.ExportarXml();
+        var bytes = System.Text.Encoding.UTF8.GetBytes(xml);
+        var b64 = Convert.ToBase64String(bytes);
+        await JS.InvokeVoidAsync("appConfig.download", "configuracion.xml", b64);
+    }
+
+    private async Task ImportarXml(IBrowserFile? file)
+    {
+        if (file is null) return;
+        using var stream = file.OpenReadStream(1024 * 1024);
+        using var reader = new StreamReader(stream);
+        var xml = await reader.ReadToEndAsync();
+        var ok = await Config.ImportarXmlAsync(xml);
+        if (ok) { _cfg = Clonar(Config.Current); Snackbar.Add("Configuración importada.", Severity.Success); }
+        else await ErrorDialogHelper.MostrarMensajeAsync("El XML no es válido.", DialogService, nameof(Configuracion));
+    }
+
+    private static AppConfig Clonar(AppConfig s) => new()
+    {
+        ColorPrimario = s.ColorPrimario, ColorFondo = s.ColorFondo, ColorTexto = s.ColorTexto, ColorSecundario = s.ColorSecundario,
+        TituloFuente = s.TituloFuente, TituloTamano = s.TituloTamano,
+        SubtituloFuente = s.SubtituloFuente, SubtituloTamano = s.SubtituloTamano,
+        ControlFuente = s.ControlFuente, ControlTamano = s.ControlTamano,
+        RefrescoAutomatico = s.RefrescoAutomatico, RefrescoIntervaloSegs = s.RefrescoIntervaloSegs,
+        NombreApp = s.NombreApp, LogoApp = s.LogoApp, ModoTexto = s.ModoTexto,
+        IconoGrillaAncho = s.IconoGrillaAncho, IconoGrillaAlto = s.IconoGrillaAlto,
+        ImagenGrillaAncho = s.ImagenGrillaAncho, ImagenGrillaAlto = s.ImagenGrillaAlto,
+        ImagenMaxMB = s.ImagenMaxMB, ModoColor = s.ModoColor,
+        GrillaCabeceraFondo = s.GrillaCabeceraFondo, GrillaCabeceraTexto = s.GrillaCabeceraTexto,
+        GrillaFilaPar = s.GrillaFilaPar, GrillaFilaImpar = s.GrillaFilaImpar,
+        GrillaTexto = s.GrillaTexto, GrillaLineas = s.GrillaLineas,
+        FilasPorPaginaUnica = s.FilasPorPaginaUnica, FilasPorPaginaPadre = s.FilasPorPaginaPadre,
+        FilasPorPaginaHijo = s.FilasPorPaginaHijo,
+        TituloColor = s.TituloColor, SubtituloColor = s.SubtituloColor, ControlColor = s.ControlColor,
+        FocoFondo = s.FocoFondo, FocoTexto = s.FocoTexto, FocoFuente = s.FocoFuente,
+        GrillaFilaFuente = s.GrillaFilaFuente, FilaSinFocoFondo = s.FilaSinFocoFondo,
+        FilaSinFocoTexto = s.FilaSinFocoTexto, GrillaFilaParFuente = s.GrillaFilaParFuente,
+        GrillaFilaImparFuente = s.GrillaFilaImparFuente, ObligatorioBackColor = s.ObligatorioBackColor,
+        BloqueoActivo = s.BloqueoActivo, BloqueoMinutos = s.BloqueoMinutos,
+        FaceTimeoutSegundos = s.FaceTimeoutSegundos,
+        UsarReconocimientoFacialEnBloqueo = s.UsarReconocimientoFacialEnBloqueo,
+        NombreEmpresa = s.NombreEmpresa, LogoEmpresa = s.LogoEmpresa
+    };
+}

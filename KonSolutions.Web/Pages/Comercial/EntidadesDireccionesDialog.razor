@@ -1,0 +1,225 @@
+@using DireccionModel = KONSolutions.Shared.Models.Comercial.EntidadesDirecciones
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using EstandarRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@using RrhhRoute = KONSolutions.Web.Services.ApiRoutes.Rrhh
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(760px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@_model.DES_DIRECCION" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <div style="max-height:64vh;overflow-y:auto;padding-right:4px;">
+            <MudGrid Spacing="2">
+                <MudItem xs="12" md="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposDireccion"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               Value="@(_model.COD_TIPO_DIRECCION?.ToString())"
+                               ValueChanged="@(v => _model.COD_TIPO_DIRECCION = int.TryParse(v, out var n) ? n : null)"
+                               Label="Tipo de dirección" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <AriaCombo TItem="ComboboxItem" Items="Enumerable.Empty<ComboboxItem>()"
+                               TextFunc="@(x => $"{x.Id} – {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               Value="@_model.COD_UBIGEO" ValueChanged="@(v => _model.COD_UBIGEO = v)"
+                               SearchFunc="BuscarUbigeoAsync" MinCharacters="2"
+                               TextoInicial="@(_model.DES_UBIGEO)"
+                               Label="Ubigeo" Obligatorio="true" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposZona"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_ZONA"
+                               Label="Tipo de zona" Obligatorio="true" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <CampoTexto Tabla="COMERCIAL.ENTIDADES_DIRECCIONES" Columna="DES_NOMBRE_ZONA"
+                                @bind-Value="_model.DES_NOMBRE_ZONA" Obligatorio="true" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposVia"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_VIA"
+                               Label="Tipo de vía" Obligatorio="true" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <CampoTexto Tabla="COMERCIAL.ENTIDADES_DIRECCIONES" Columna="DES_NOMBRE_VIA"
+                                @bind-Value="_model.DES_NOMBRE_VIA" Obligatorio="true" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="6" md="3">
+                    <CampoTexto Tabla="COMERCIAL.ENTIDADES_DIRECCIONES" Columna="DES_NUMERACION"
+                                @bind-Value="_model.DES_NUMERACION" Obligatorio="true" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="6" md="3">
+                    <CampoTexto Tabla="COMERCIAL.ENTIDADES_DIRECCIONES" Columna="DES_KILOMETRO"
+                                @bind-Value="_model.DES_KILOMETRO" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="6" md="3">
+                    <CampoTexto Tabla="COMERCIAL.ENTIDADES_DIRECCIONES" Columna="DES_MANZANA"
+                                @bind-Value="_model.DES_MANZANA" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="6" md="3">
+                    <CampoTexto Tabla="COMERCIAL.ENTIDADES_DIRECCIONES" Columna="DES_LOTE"
+                                @bind-Value="_model.DES_LOTE" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <CampoTexto Tabla="COMERCIAL.ENTIDADES_DIRECCIONES" Columna="DES_INTERIOR"
+                                @bind-Value="_model.DES_INTERIOR" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12">
+                    <CampoTexto Tabla="COMERCIAL.ENTIDADES_DIRECCIONES" Columna="DES_DIRECCION"
+                                @bind-Value="_model.DES_DIRECCION" Obligatorio="true" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12">
+                    <CampoTexto Tabla="COMERCIAL.ENTIDADES_DIRECCIONES" Columna="DES_REFERENCIA"
+                                @bind-Value="_model.DES_REFERENCIA" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudText Typo="Typo.caption" Class="mono mb-1"
+                             Style="opacity:.6;font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">
+                        Ubicación en el mapa
+                    </MudText>
+                    <MapaUbicacion @bind-Latitud="_model.VAL_LATITUD" @bind-Longitud="_model.VAL_LONGITUD" Disabled="_readonly" />
+                </MudItem>
+            </MudGrid>
+
+            <EstadoCombo DesTabla="COMERCIAL.ENTIDADES_DIRECCIONES"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3 mt-3" />
+            </div>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public DireccionModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public decimal CodEntidad { get; set; }
+
+    private DireccionModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _tiposDireccion = new();
+    private List<ComboboxItem> _tiposZona = new();
+    private List<ComboboxItem> _tiposVia = new();
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        else _model.COD_ENTIDAD = CodEntidad;
+    }
+
+    private void MapearDesdeModelo(DireccionModel m)
+    {
+        _model = new DireccionModel
+        {
+            COD_ENTIDAD        = m.COD_ENTIDAD,
+            NUM_SECUENCIA      = m.NUM_SECUENCIA,
+            COD_TIPO_DIRECCION = m.COD_TIPO_DIRECCION,
+            COD_UBIGEO         = m.COD_UBIGEO,
+            DES_UBIGEO         = m.DES_UBIGEO,
+            COD_TIPO_ZONA      = m.COD_TIPO_ZONA,
+            DES_NOMBRE_ZONA    = m.DES_NOMBRE_ZONA,
+            COD_TIPO_VIA       = m.COD_TIPO_VIA,
+            DES_NOMBRE_VIA     = m.DES_NOMBRE_VIA,
+            DES_NUMERACION     = m.DES_NUMERACION,
+            DES_KILOMETRO      = m.DES_KILOMETRO,
+            DES_MANZANA        = m.DES_MANZANA,
+            DES_LOTE           = m.DES_LOTE,
+            DES_INTERIOR       = m.DES_INTERIOR,
+            DES_DIRECCION      = m.DES_DIRECCION,
+            DES_REFERENCIA     = m.DES_REFERENCIA,
+            VAL_LATITUD        = m.VAL_LATITUD,
+            VAL_LONGITUD       = m.VAL_LONGITUD,
+            COD_TIPO_ESTADO    = m.COD_TIPO_ESTADO,
+            COD_ESTADO         = m.COD_ESTADO,
+        };
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<DireccionModel>(
+            $"{ComercialRoute.EntidadesDirecciones}/{_model.COD_ENTIDAD}/{_model.NUM_SECUENCIA}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        var tTiposDireccion = Http.SafeGetAsync<List<ComboboxItem>>(ComercialRoute.TiposDireccionCombobox);
+        var tTiposZona      = Http.SafeGetAsync<List<ComboboxItem>>(RrhhRoute.TiposZonaCombobox);
+        var tTiposVia       = Http.SafeGetAsync<List<ComboboxItem>>(EstandarRoute.TiposViaCombobox);
+        await Task.WhenAll(tTiposDireccion, tTiposZona, tTiposVia);
+        _tiposDireccion = (await tTiposDireccion) ?? new();
+        _tiposZona      = (await tTiposZona) ?? new();
+        _tiposVia       = (await tTiposVia) ?? new();
+    }
+
+    private async Task<IEnumerable<ComboboxItem>> BuscarUbigeoAsync(string texto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(texto) || texto.Length < 2) return [];
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(
+                $"{EstandarRoute.UbigeosCombobox}?search={Uri.EscapeDataString(texto)}", ct);
+            return r?.Data ?? [];
+        }
+        catch { return []; }
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ComercialRoute.EntidadesDirecciones;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_ENTIDAD}/{_model.NUM_SECUENCIA}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(EntidadesDireccionesDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new
+        {
+            _model.COD_ENTIDAD, _model.NUM_SECUENCIA, _model.COD_TIPO_DIRECCION,
+            _model.COD_UBIGEO, _model.COD_TIPO_ZONA, _model.DES_NOMBRE_ZONA,
+            _model.COD_TIPO_VIA, _model.DES_NOMBRE_VIA, _model.DES_NUMERACION,
+            DES_KILOMETRO = NullSiVacio(_model.DES_KILOMETRO),
+            DES_MANZANA = NullSiVacio(_model.DES_MANZANA),
+            DES_LOTE = NullSiVacio(_model.DES_LOTE),
+            DES_INTERIOR = NullSiVacio(_model.DES_INTERIOR),
+            _model.DES_DIRECCION,
+            DES_REFERENCIA = NullSiVacio(_model.DES_REFERENCIA),
+            _model.VAL_LATITUD, _model.VAL_LONGITUD,
+            _model.COD_TIPO_ESTADO, _model.COD_ESTADO
+        };
+        // PROC_COMERCIAL_ENTIDADES_DIRECCIONES_INSERT es upsert — siempre POST. Para
+        // filas nuevas, NUM_SECUENCIA va null (el SP calcula MAX(NUM_SECUENCIA)+1 solo).
+        var resp = await Http.GuardarAsync(ruta, dto, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EntidadesDireccionesDialog), nameof(Submit));
+    }
+
+    static string? NullSiVacio(string? v) => string.IsNullOrWhiteSpace(v) ? null : v;
+}

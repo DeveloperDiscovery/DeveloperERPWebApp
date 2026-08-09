@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cargando...</title>
+    <base href="/" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
+    <!-- Leaflet (mapa de ubicación en EntidadesDireccionesDialog): librería libre, sin API
+         key — a diferencia del SDK de Google Maps JavaScript, que exige una cuenta de
+         facturación configurada que no tenemos. Tiles de OpenStreetMap. Mismo CDN
+         (jsdelivr) que ya usa face-api.js más abajo — sin integrity/crossorigin: esos
+         hashes había que inventarlos sin poder verificarlos contra el archivo real, y si
+         no calzan exacto el navegador bloquea el recurso sin avisar en el error. -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="css/app.css?v=2026080805" rel="stylesheet" />
+    <style>
+        /* Indicador de carga global: anillo dorado + logo redondo revelándose en abanico
+           en sincronía — se usa al seleccionar una opción del menú y al abrir acciones
+           (diálogos/procesos). Mismo contrato cursorBusy.show/hide/setIcono de siempre. */
+        #cursor-spinner {
+            position: fixed; inset: 0; display: none;
+            align-items: center; justify-content: center;
+            pointer-events: none; z-index: 99999;
+            background: transparent;
+        }
+        #cursor-spinner .cb-badge { position: relative; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; }
+        #cursor-spinner .cb-ring { position: absolute; inset: 0; }
+        #cursor-spinner .cb-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+        #cursor-spinner .cb-ring circle { fill: none; stroke-width: 5; }
+        #cursor-spinner .cb-ring .cb-bg { stroke: rgba(0,0,0,.12); }
+        #cursor-spinner .cb-ring .cb-fg {
+            stroke: var(--gold-accent, #e2b93c); stroke-linecap: round;
+            stroke-dasharray: 163; stroke-dashoffset: 163;
+            animation: cb-ring-fill 1.4s cubic-bezier(.4,0,.2,1) infinite;
+        }
+        @keyframes cb-ring-fill { 0%{stroke-dashoffset:163;} 70%{stroke-dashoffset:0;} 100%{stroke-dashoffset:0;opacity:0;} }
+        @property --cb-reveal-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+        #cursor-spinner .cb-logo-wrap {
+            width: 40px; height: 40px; border-radius: 50%; overflow: hidden;
+            background: var(--navy-accent, #181233);
+            display: flex; align-items: center; justify-content: center;
+            animation: cb-reveal 1.4s cubic-bezier(.4,0,.2,1) infinite;
+            -webkit-mask-image: conic-gradient(#000 var(--cb-reveal-angle, 0deg), transparent var(--cb-reveal-angle, 0deg));
+            mask-image: conic-gradient(#000 var(--cb-reveal-angle, 0deg), transparent var(--cb-reveal-angle, 0deg));
+        }
+        @keyframes cb-reveal { 0%{--cb-reveal-angle:0deg;opacity:.85;} 70%{--cb-reveal-angle:360deg;opacity:1;} 100%{--cb-reveal-angle:360deg;opacity:0;} }
+        #cursor-spinner .cb-icon-img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+        #cursor-spinner .cb-icon { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--gold-accent, #e2b93c); font-weight: 800; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="boot">
+            <div class="boot-grid"></div>
+            <div class="boot-text" id="boot-text"></div>
+        </div>
+    </div>
+    <script>
+        // Nombre de la app en el título y en la pantalla de arranque: NUNCA hardcodeado —
+        // se lee de la Configuración General ya cacheada en localStorage (mismo XML que usa
+        // ConfigService.cs) para que se vea de inmediato, antes de que Blazor termine de
+        // arrancar. Si todavía no hay caché (primerísima carga en el navegador), usa un
+        // valor neutro genérico en vez de un nombre de producto fijo.
+        (function () {
+            var nombre = "Cargando";
+            try {
+                var xml = localStorage.getItem('app_config_xml');
+                if (xml) {
+                    var doc = new DOMParser().parseFromString(xml, 'text/xml');
+                    var nodo = doc.querySelector('NombreApp');
+                    if (nodo && nodo.textContent.trim()) nombre = nodo.textContent.trim();
+                }
+            } catch (e) { }
+            document.title = nombre;
+            var el = document.getElementById('boot-text');
+            if (el) {
+                var partes = nombre.split(' ');
+                if (partes.length > 1) {
+                    var ultima = partes.pop();
+                    el.textContent = partes.join(' ') + ' ';
+                    var span = document.createElement('span');
+                    span.textContent = ultima;
+                    el.appendChild(span);
+                } else {
+                    el.textContent = nombre;
+                }
+            }
+        })();
+    </script>
+    <!-- Fuera de #app a propósito: #app tiene transform:scale() para el zoom propio de la
+         app (ver appZoom.js), y un ancestro con transform se vuelve el "containing block"
+         de los descendientes position:fixed (spec CSS). Los popovers de MudBlazor (combos,
+         menús contextuales, tooltips) usan position:fixed calculado en coordenadas reales
+         de viewport — si quedaran dentro de #app, el zoom los desplazaría lejos de su
+         origen. Por eso viven en su propio root component, montado aquí como hermano de
+         #app y nunca escalado. -->
+    <div id="mud-popover-host"></div>
+    <div id="blazor-error-ui">
+        Ocurrió un error. <a href="" class="reload">Recargar</a> <a class="dismiss">🗙</a>
+    </div>
+    <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+    <script src="_framework/blazor.webassembly.js"></script>
+    <script>
+        // Menú contextual nativo desactivado donde usamos el propio
+        window.konSolutions = {
+            preventContext: (el) => el && el.addEventListener('contextmenu', e => e.preventDefault())
+        };
+    </script>
+    <script>
+        // Helper para copiar/pegar imágenes desde el portapapeles
+        window.imageClipboard = {
+            copy: async function (base64Png) {
+                try {
+                    const res = await fetch('data:image/png;base64,' + base64Png);
+                    const blob = await res.blob();
+                    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                    return true;
+                } catch (e) { console.error('copy image', e); return false; }
+            },
+            paste: async function () {
+                try {
+                    const items = await navigator.clipboard.read();
+                    for (const item of items) {
+                        for (const type of item.types) {
+                            if (type.startsWith('image/')) {
+                                const blob = await item.getType(type);
+                                const buf = await blob.arrayBuffer();
+                                const bytes = new Uint8Array(buf);
+                                let binary = '';
+                                for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+                                return btoa(binary);
+                            }
+                        }
+                    }
+                    return '';
+                } catch (e) { console.error('paste image', e); return ''; }
+            },
+            // Elimina el fondo de una imagen PNG (base64) usando el color de la esquina como referencia.
+            // threshold: 0-255, cuánta tolerancia de color se acepta (default 30).
+            removeBackground: function (base64Png, threshold) {
+                return new Promise(function (resolve) {
+                    threshold = threshold || 30;
+                    const img = new Image();
+                    img.onload = function () {
+                        const canvas = document.createElement('canvas');
+                        canvas.width  = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const px = data.data;
+                        // Color de referencia: esquina superior izquierda
+                        const rRef = px[0], gRef = px[1], bRef = px[2];
+                        for (let i = 0; i < px.length; i += 4) {
+                            const dr = Math.abs(px[i]   - rRef);
+                            const dg = Math.abs(px[i+1] - gRef);
+                            const db = Math.abs(px[i+2] - bRef);
+                            if (dr + dg + db < threshold * 3) px[i+3] = 0; // transparente
+                        }
+                        ctx.putImageData(data, 0, 0);
+                        // Devuelve solo la parte base64 (sin el prefijo data:...)
+                        const dataUrl = canvas.toDataURL('image/png');
+                        resolve(dataUrl.split(',')[1]);
+                    };
+                    img.onerror = function () { resolve(base64Png); }; // si falla, devuelve original
+                    img.src = 'data:image/png;base64,' + base64Png;
+                });
+            }
+        };
+    </script>
+    <script>
+        // Reproduce la animación de cierre del diálogo activo (inversa a la de apertura)
+        // ANTES de que Blazor lo quite del DOM al llamar MudDialog.Close()/Cancel().
+        // Se invoca desde C# justo antes del cierre real; espera a que termine para
+        // dar tiempo de ver la animación completa.
+        window.dialogAnim = {
+            cerrar: function () {
+                var dlgs = document.querySelectorAll('.mud-dialog');
+                var dlg = dlgs.length ? dlgs[dlgs.length - 1] : null; // el más reciente (por si hay varios apilados)
+                var overlays = document.querySelectorAll('.mud-overlay');
+                var overlay = overlays.length ? overlays[overlays.length - 1] : null;
+                if (dlg) dlg.classList.add('mud-dialog-closing');
+                if (overlay) overlay.classList.add('mud-overlay-closing');
+                return new Promise(function (resolve) { setTimeout(resolve, 200); });
+            },
+            // Deshace la animación de cierre si, tras invocar la acción, el diálogo
+            // sigue en pantalla (ej. falló la validación y no llegó a cerrarse).
+            deshacer: function () {
+                document.querySelectorAll('.mud-dialog-closing').forEach(function (el) { el.classList.remove('mud-dialog-closing'); });
+                document.querySelectorAll('.mud-overlay-closing').forEach(function (el) { el.classList.remove('mud-overlay-closing'); });
+            }
+        };
+    </script>
+    <script>
+        // Permite arrastrar cualquier MudDialog tomándolo por su cabecera (título).
+        // Delegación a nivel document: funciona para diálogos abiertos en cualquier
+        // momento, sin necesidad de JS interop por diálogo.
+        (function () {
+            var dragging = null, offsetX = 0, offsetY = 0, startLeft = 0, startTop = 0;
+            document.addEventListener('mousedown', function (e) {
+                var handle = e.target.closest('.mud-dialog-title');
+                if (!handle) return;
+                var dlg = handle.closest('.mud-dialog');
+                if (!dlg) return;
+                var rect = dlg.getBoundingClientRect();
+                dragging = dlg;
+                offsetX = e.clientX; offsetY = e.clientY;
+                startLeft = rect.left; startTop = rect.top;
+                dlg.style.position = 'fixed';
+                dlg.style.margin = '0';
+                dlg.style.left = rect.left + 'px';
+                dlg.style.top = rect.top + 'px';
+                dlg.classList.add('mud-dialog-dragging');
+            });
+            function soltar() {
+                if (dragging) dragging.classList.remove('mud-dialog-dragging');
+                dragging = null;
+            }
+            document.addEventListener('mousemove', function (e) {
+                if (!dragging) return;
+                // Salvaguarda: si el botón del mouse ya no está presionado (se soltó fuera
+                // de la ventana y el evento mouseup no llegó a dispararse aquí), corta el
+                // arrastre en vez de seguir moviendo el diálogo indefinidamente.
+                if (e.buttons === 0) { soltar(); return; }
+                dragging.style.left = (startLeft + (e.clientX - offsetX)) + 'px';
+                dragging.style.top  = (startTop  + (e.clientY - offsetY)) + 'px';
+            });
+            document.addEventListener('mouseup', soltar);
+            document.addEventListener('mouseleave', soltar);
+            window.addEventListener('blur', soltar);
+        })();
+    </script>
+    <script>
+        // Aplica variables CSS de configuración al :root
+        window.appConfig = {
+            apply: function (cssVars) {
+                let el = document.getElementById("app-config-style");
+                if (!el) { el = document.createElement("style"); el.id = "app-config-style"; document.head.appendChild(el); }
+                el.innerHTML = ":root{" + cssVars + "}";
+            },
+            download: function (filename, b64) {
+                const link = document.createElement("a");
+                link.href = "data:application/xml;base64," + b64;
+                link.download = filename;
+                link.click();
+            }
+        };
+    </script>
+    <script>
+        window.gridExport = {
+            print: function (html) {
+                const w = window.open("", "_blank");
+                w.document.write(html);
+                w.document.close();
+                w.focus();
+                setTimeout(function(){ w.print(); }, 250);
+            },
+            downloadCsv: function (filename, b64) {
+                const link = document.createElement("a");
+                link.href = "data:text/csv;base64," + b64;
+                link.download = filename;
+                link.click();
+            }
+        };
+    </script>
+    <script>
+        (function () {
+            const sp = document.createElement("div");
+            sp.id = "cursor-spinner";
+            sp.innerHTML =
+                '<div class="cb-badge">' +
+                    '<div class="cb-ring"><svg viewBox="0 0 64 64">' +
+                        '<circle class="cb-bg" cx="32" cy="32" r="26"></circle>' +
+                        '<circle class="cb-fg" cx="32" cy="32" r="26"></circle>' +
+                    '</svg></div>' +
+                    '<div class="cb-logo-wrap"></div>' +
+                '</div>';
+            document.body.appendChild(sp);
+            const wrap = sp.querySelector(".cb-logo-wrap");
+            window.cursorBusy = {
+                show: function () { sp.style.display = "flex"; },
+                hide: function () { sp.style.display = "none"; },
+                // Llamado desde Blazor (MainLayout) apenas se conoce el logo real de la
+                // app (IMG_LOGO_APLICACION en base64) — reemplaza la "K" de respaldo.
+                setIcono: function (base64) {
+                    if (!base64) return;
+                    wrap.innerHTML = '<img class="cb-icon-img" src="data:image/png;base64,' + base64 + '" alt="" />';
+                }
+            };
+        })();
+    </script>
+    <script>
+        // Punto 3: navegación por filas con flechas ↑ ↓ en las grillas (MudDataGrid).
+        // Al presionar las flechas, mueve la selección visual a la fila anterior/siguiente
+        // simulando un click en ella (respeta el RowClick de la grilla) Y ADEMÁS le da el
+        // foco real del DOM (antes solo hacía .click(), así que cualquier handler colgado
+        // de @onfocus/@onfocusin en la fila —o el estilo :focus del navegador— nunca se
+        // disparaba con teclado, solo con mouse). Las filas de MudTable/MudDataGrid no traen
+        // tabindex por defecto (un <tr> no es enfocable), así que se le agrega uno la primera
+        // vez que hace falta.
+        // Apaga el resaltado por :hover mientras se navega con el teclado.
+        //
+        // El navegador deja :hover puesto en la fila donde quedó el puntero hasta que el
+        // mouse se mueva de verdad; no alcanza con que el foco se vaya a otra fila. Sin
+        // esto, pasar el mouse por una fila y seguir con las flechas dejaba DOS filas
+        // resaltadas. La clase se saca al primer movimiento real del mouse, así que el
+        // hover vuelve solo apenas el usuario suelta el teclado.
+        //
+        // Se hace acá y no en cada página porque el hover es una regla global de app.css.
+        const navTeclado = {
+            teclas: ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Tab"],
+            activar: function () {
+                if (document.body.classList.contains("nav-teclado")) return;
+                document.body.classList.add("nav-teclado");
+                // 'once' para no dejar un listener de mousemove vivo todo el tiempo:
+                // mousemove dispara muchísimo y es de los pocos eventos que conviene
+                // cuidar por rendimiento.
+                document.addEventListener("mousemove", navTeclado.desactivar, { once: true });
+            },
+            desactivar: function () { document.body.classList.remove("nav-teclado"); }
+        };
+        document.addEventListener("keydown", function (e) {
+            if (navTeclado.teclas.includes(e.key)) navTeclado.activar();
+        }, true);
+
+        document.addEventListener("keydown", function (e) {
+            if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+
+            // Buscar la grilla bajo el puntero o que contenga el foco
+            const grid = document.activeElement?.closest(".mud-table-container")
+                      || document.querySelector(".mud-table-container:hover");
+            if (!grid) return;
+
+            const rows = Array.from(grid.querySelectorAll("tbody tr.mud-table-row"));
+            if (rows.length === 0) return;
+
+            // Fila actualmente resaltada (foco o seleccionada) — también se reconoce por
+            // tener el foco real del DOM, no solo por la clase CSS.
+            let idx = rows.findIndex(r => r.classList.contains("fila-foco")
+                                       || r.classList.contains("fila-seleccionada")
+                                       || r === document.activeElement);
+            if (idx < 0) idx = 0;
+            else idx = e.key === "ArrowDown" ? Math.min(idx + 1, rows.length - 1)
+                                             : Math.max(idx - 1, 0);
+
+            e.preventDefault();
+            const fila = rows[idx];
+            fila.click();
+            if (!fila.hasAttribute("tabindex")) fila.setAttribute("tabindex", "-1");
+            fila.focus({ preventScroll: true });
+            fila.scrollIntoView({ block: "nearest" });
+        });
+    </script>
+    <script>
+        // Punto 15: detector de inactividad. Llama a .NET cuando pasan N minutos sin
+        // actividad del usuario (mouse, teclado, scroll, touch).
+        window.inactividad = {
+            timer: null,
+            tickTimer: null,
+            minutos: 0,
+            deadline: 0,
+            dotnetRef: null,
+            iniciar: function (dotnetRef, minutos) {
+                this.dotnetRef = dotnetRef;
+                this.minutos = minutos;
+                const reset = () => this.reiniciar();
+                ["mousemove", "mousedown", "keydown", "scroll", "touchstart"].forEach(
+                    ev => document.addEventListener(ev, reset, true));
+                this.reiniciar();
+                if (!this.tickTimer) this.tickTimer = setInterval(() => this.tick(), 1000);
+            },
+            reiniciar: function () {
+                if (this.timer) clearTimeout(this.timer);
+                if (!this.minutos || this.minutos <= 0) { this.deadline = 0; this.tick(); return; }
+                this.deadline = Date.now() + this.minutos * 60 * 1000;
+                this.timer = setTimeout(() => {
+                    if (this.dotnetRef) this.dotnetRef.invokeMethodAsync("OnInactividad");
+                }, this.minutos * 60 * 1000);
+            },
+            tick: function () {
+                var box = document.getElementById('reloj-inactividad');
+                if (!box) return;
+                if (!this.deadline) { box.style.display = 'none'; return; }
+                var restanteSeg = Math.max(0, Math.round((this.deadline - Date.now()) / 1000));
+                var m = Math.floor(restanteSeg / 60);
+                var s = restanteSeg % 60;
+                var texto = m + ':' + (s < 10 ? '0' : '') + s;
+                var span = box.querySelector('span');
+                if (span) span.textContent = texto;
+                box.style.display = 'flex';
+            },
+            detener: function () {
+                if (this.timer) clearTimeout(this.timer);
+                if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = null; }
+                this.minutos = 0;
+                this.deadline = 0;
+                this.tick();
+            }
+        };
+    </script>
+    <script>
+        // Reloj de cuenta regresiva del token JWT (junto al de bloqueo por inactividad) —
+        // igual que inactividad.tick, escribe directo el texto sin round-trips a Blazor
+        // cada segundo. deadlineEpochMs viene de JwtAuthStateProvider.GetExpiracionTokenAsync().
+        window.sesionToken = {
+            tickTimer: null,
+            deadline: 0,
+            iniciar: function (deadlineEpochMs) {
+                this.deadline = deadlineEpochMs;
+                this.tick();
+                if (!this.tickTimer) this.tickTimer = setInterval(() => this.tick(), 1000);
+            },
+            tick: function () {
+                var box = document.getElementById('reloj-token');
+                if (!box) return;
+                if (!this.deadline) { box.style.display = 'none'; return; }
+                var restanteSeg = Math.max(0, Math.round((this.deadline - Date.now()) / 1000));
+                var h = Math.floor(restanteSeg / 3600);
+                var m = Math.floor((restanteSeg % 3600) / 60);
+                var s = restanteSeg % 60;
+                var texto = h > 0
+                    ? h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s
+                    : m + ':' + (s < 10 ? '0' : '') + s;
+                var span = box.querySelector('span');
+                if (span) span.textContent = texto;
+                box.style.display = 'flex';
+            },
+            detener: function () {
+                if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = null; }
+                this.deadline = 0;
+                this.tick();
+            }
+        };
+    </script>
+    <script>
+        // Redimensionado de grillas arrastrando el borde inferior.
+        // Detecta automáticamente cualquier div[data-resizable-grid] que aparezca en el DOM.
+        window.gridResize = {
+            _initialized: new WeakSet(),
+            setup: function (container) {
+                if (this._initialized.has(container)) return;
+                this._initialized.add(container);
+                var handle = container.querySelector('.grid-resize-handle');
+                if (!handle) return;
+                var key = container.getAttribute('data-resizable-grid');
+                var defAttr = container.getAttribute('data-default-height');
+                var def = defAttr ? parseInt(defAttr) : 0;
+                var hasSaved = false;
+                try { var s = localStorage.getItem('grid-h-' + key); if (s) { def = parseInt(s); hasSaved = true; } } catch (e) { }
+
+                var applyToGroup = function (h) {
+                    document.querySelectorAll('[data-resizable-grid="' + key + '"]').forEach(function (el) {
+                        el.style.height = h + 'px';
+                    });
+                };
+
+                if (hasSaved || defAttr) {
+                    applyToGroup(def);
+                } else {
+                    // Sin preferencia ni valor por defecto: llenar el espacio restante
+                    var fillHeight = function () {
+                        // Si el contenedor está oculto (pestaña precargándose en segundo plano,
+                        // display:none en un ancestro mientras gira el menú circular), no hay
+                        // layout real todavía: getBoundingClientRect daría ceros. Reintentar en
+                        // el próximo frame hasta que la pestaña se active y sea visible.
+                        if (container.offsetParent === null) {
+                            requestAnimationFrame(fillHeight);
+                            return;
+                        }
+                        var rect = container.getBoundingClientRect();
+                        var avail = window.innerHeight - rect.top - 68; // 28px footer + 40px margen
+                        // getBoundingClientRect/innerHeight ya están en px reales (finales); pero
+                        // el valor que asignamos a style.height se re-escala por el transform:scale
+                        // del zoom propio de la app (ver appZoom.js), así que hay que compensar.
+                        var scale = (window.appZoom && window.appZoom.currentScale) || 1;
+                        container.style.height = Math.max(150, avail / scale) + 'px';
+                    };
+                    requestAnimationFrame(fillHeight);
+                    window.addEventListener('resize', fillHeight);
+                }
+
+                var dragging = false, startY = 0, startH = 0;
+                handle.addEventListener('mousedown', function (e) {
+                    dragging = true; startY = e.clientY; startH = container.offsetHeight;
+                    document.body.style.userSelect = 'none';
+                    handle.classList.add('arrastrando');
+                    e.preventDefault();
+                });
+                document.addEventListener('mousemove', function (e) {
+                    if (!dragging) return;
+                    // e.clientY es real (pantalla); startH es pre-escala (offsetHeight). Con el
+                    // zoom propio de la app activo, hay que convertir el delta real a pre-escala.
+                    var scale = (window.appZoom && window.appZoom.currentScale) || 1;
+                    var delta = (e.clientY - startY) / scale;
+                    applyToGroup(Math.max(120, Math.min(1800, startH + delta)));
+                });
+                document.addEventListener('mouseup', function (e) {
+                    if (!dragging) return;
+                    dragging = false;
+                    document.body.style.userSelect = '';
+                    handle.classList.remove('arrastrando');
+                    var scale = (window.appZoom && window.appZoom.currentScale) || 1;
+                    var delta = (e.clientY - startY) / scale;
+                    var h = Math.max(120, Math.min(1800, startH + delta));
+                    try { localStorage.setItem('grid-h-' + key, h); } catch (e2) { }
+                });
+            },
+            init: function () {
+                var self = this;
+                document.querySelectorAll('[data-resizable-grid]').forEach(function (el) { self.setup(el); });
+                var obs = new MutationObserver(function () {
+                    document.querySelectorAll('[data-resizable-grid]').forEach(function (el) { self.setup(el); });
+                });
+                obs.observe(document.body, { childList: true, subtree: true });
+            }
+        };
+    </script>
+    <script>
+        // Navegación con Enter: al presionar Enter en input/textarea/select pasa al siguiente control.
+        // Excluye botones de tipo submit para no disparar el guardado accidentalmente.
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter') return;
+            const tag = e.target.tagName.toLowerCase();
+            if (tag !== 'input' && tag !== 'textarea' && tag !== 'select') return;
+            // No interceptar en textarea (Enter = salto de línea)
+            if (tag === 'textarea') return;
+            // No interceptar en campos de contraseña (ej. desbloqueo de pantalla): ahí Enter
+            // debe solo confirmar/enviar, no robar el foco hacia otro campo de la pantalla.
+            if (tag === 'input' && (e.target.type || '').toLowerCase() === 'password') return;
+            e.preventDefault();
+            const focusable = Array.from(document.querySelectorAll(
+                'input:not([disabled]):not([type="hidden"]), ' +
+                'select:not([disabled]), ' +
+                'textarea:not([disabled]), ' +
+                'button:not([disabled])[type="submit"]'
+            )).filter(el => el.offsetParent !== null);
+            const idx = focusable.indexOf(e.target);
+            if (idx >= 0 && idx < focusable.length - 1) {
+                focusable[idx + 1].focus();
+            }
+        });
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <script src="js/faceRecognition.js"></script>
+    <script src="js/wsSplit.js"></script>
+    <script src="js/appZoom.js?v=20260705"></script>
+    <script src="js/shortcuts.js?v=20260707"></script>
+    <script src="js/postits.js?v=20260709"></script>
+    <script src="js/blobViewer.js?v=20260709"></script>
+    <script src="js/virtualKeyboard.js?v=20260808d"></script>
+    <script src="js/ariaCombo.js?v=20260716a"></script>
+    <script src="js/dictadoVoz.js?v=20260804a"></script>
+    <script src="js/filtroExcelColumna.js?v=20260716e"></script>
+    <script src="js/gridColumnas.js?v=20260807f"></script>
+    <script src="js/workspaceTabHost.js?v=20260716c"></script>
+    <script src="js/workspaceDialogScope.js?v=20260716b"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="js/mapaUbicacion.js?v=20260728b"></script>
+
+</body>
+</html>

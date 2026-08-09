@@ -1,0 +1,395 @@
+@page "/ingenieria/clases-desarrollo"
+@attribute [Authorize]
+@using ClaseDesarrolloModel = KONSolutions.Shared.Models.Ingenieria.ClaseDesarrollo
+@using TipoDesarrolloModel = KONSolutions.Shared.Models.Ingenieria.TipoDesarrollo
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject ShortcutService ShortcutSvc
+@inject MenuService MenuSvc
+@implements IDisposable
+
+<PageTitle>Clases de Desarrollo · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Clases de Desarrollo" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema INGENIERIA · @_clasesVisibles.Count de @_clases.Count registros</MudText>
+    </div>
+    @* Búsqueda en cliente: INGENIERIA.CLASES_DESARROLLO no tiene SP SEARCH, y el
+       catálogo es pequeño, así que se filtra sobre el listado ya cargado. *@
+    <BarraBusqueda @bind-Value="_searchClase" OnSearch="@(() => Task.CompletedTask)" Placeholder="Buscar clase de desarrollo..." DebounceInterval="300" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltrosClases" HasFilters="@(_filtrosClases.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="LoadClases" />
+        <AccionesBotones CodAplicacion="@_codApClases" CodOpcionAplicacion="@_codOpClases"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderClase" />
+    </div>
+</div>
+
+@* ── Grilla maestra: Clases de Desarrollo ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);margin-bottom:16px;">
+    <div data-resizable-grid="clases-desarrollo" data-default-height="280" style="position:relative;">
+    <MudDataGrid T="ClaseDesarrolloModel" Items="_clasesVisibles" Dense="true" Hover="true" Striped="true"
+                 RowClick="OnClaseRowClick"
+                 RowClassFunc="@((c, i) => c.COD_CLASE_DESARROLLO == _claseSel?.COD_CLASE_DESARROLLO ? "fila-seleccionada" : "")"
+                 RowStyleFunc="@((c, i) => "cursor:pointer;")"
+                 FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre">
+        <Columns>
+            <TemplateColumn Title="Código" Sortable="false" Width="120">
+                <HeaderTemplate>
+                    @* Texto explícito: el Diccionario de Etiquetas todavía no tiene rótulo para
+                       estas columnas nuevas y EncabezadoOrdenable dejaba la cabecera en blanco. *@
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Código" Activo="@(_ordenColumnaClases == 0)" Ascendente="_ordenAscendenteClases" OnClick="@(() => ToggleOrdenClases(0))" />
+                        <FiltroExcelColumna T="ClaseDesarrolloModel" ItemsBase="@BaseClases(0)" ValorDe="@(x=>x.COD_CLASE_DESARROLLO)"
+                                            ValoresActivos="_filtrosClases.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroClase(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_CLASE_DESARROLLO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Descripción" Sortable="false">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Descripción" Activo="@(_ordenColumnaClases == 1)" Ascendente="_ordenAscendenteClases" OnClick="@(() => ToggleOrdenClases(1))" />
+                        <FiltroExcelColumna T="ClaseDesarrolloModel" ItemsBase="@BaseClases(1)" ValorDe="@(x=>x.DES_CLASE_DESARROLLO)"
+                                            ValoresActivos="_filtrosClases.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroClase(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_CLASE_DESARROLLO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false" Width="140">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@_codApClases" CodOpcionAplicacion="@_codOpClases"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaClase(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText>
+        </NoRecordsContent>
+        <PagerContent><MudDataGridPager T="ClaseDesarrolloModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@* ── Grilla detalle: Tipos de Desarrollo de la clase seleccionada ── *@
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div class="d-flex align-center gap-3 pa-3 grid-header-compacto">
+        <div class="grid-header-titulo">
+            <MudText Typo="Typo.h6">Tipos de Desarrollo</MudText>
+            <MudText Class="mono" Style="opacity:.6;font-size:.78rem;">
+                @(_claseSel is null ? "Ninguna clase seleccionada" : $"Clase: {_claseSel.COD_CLASE_DESARROLLO} – {_claseSel.DES_CLASE_DESARROLLO}")
+            </MudText>
+        </div>
+        <BarraBusqueda @bind-Value="_searchTipo" OnSearch="@(() => Task.CompletedTask)" Placeholder="Buscar tipo de desarrollo..." DebounceInterval="300" MaxWidth="719px" Class="grid-header-search" />
+        <GridClearFiltersButton OnClear="LimpiarFiltrosTipos" HasFilters="@(_filtrosTipos.Any(f=>f.Value is not null))" />
+        @if (_claseSel is not null)
+        {
+            <div class="grid-header-divider"></div>
+            <AccionesBotones CodAplicacion="@_codApTipos" CodOpcionAplicacion="@_codOpTipos"
+                             Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderTipo" />
+        }
+    </div>
+    <div data-resizable-grid="tipos-desarrollo" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="TipoDesarrolloModel" Items="_tiposVisibles" Dense="true" Hover="true" Striped="true"
+                 FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+        <Columns>
+            <TemplateColumn Title="Código" Sortable="false" Width="120">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Código" Activo="@(_ordenColumnaTipos == 0)" Ascendente="_ordenAscendenteTipos" OnClick="@(() => ToggleOrdenTipos(0))" />
+                        <FiltroExcelColumna T="TipoDesarrolloModel" ItemsBase="@BaseTipos(0)" ValorDe="@(x=>x.COD_TIPO_DESARROLLO)"
+                                            ValoresActivos="_filtrosTipos.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroTipo(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_DESARROLLO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Descripción" Sortable="false">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Descripción" Activo="@(_ordenColumnaTipos == 1)" Ascendente="_ordenAscendenteTipos" OnClick="@(() => ToggleOrdenTipos(1))" />
+                        <FiltroExcelColumna T="TipoDesarrolloModel" ItemsBase="@BaseTipos(1)" ValorDe="@(x=>x.DES_TIPO_DESARROLLO)"
+                                            ValoresActivos="_filtrosTipos.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroTipo(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_DESARROLLO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false" Width="140">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@_codApTipos" CodOpcionAplicacion="@_codOpTipos"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaTipo(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-6 mono" Style="opacity:.5;">
+                @(_claseSel is null ? "Seleccione una clase de desarrollo en la grilla de arriba." : "Sin tipos de desarrollo para esta clase.")
+            </MudText>
+        </NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TipoDesarrolloModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambioClases;
+    private Func<Task>? _onCambioTipos;
+
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    // Los códigos que llegan por parámetro son SOLO los del nodo por el que se abrió la
+    // pestaña (Clases de Desarrollo). Los de la grilla hija se resuelven acá a partir del
+    // DES_FORMULARIO del sub módulo — clave estable que no cambia si la opción se mueve
+    // de carpeta (COD_OPCION_APLICACION sí se renumera al mover).
+    private string _codApClases = "", _codOpClases = "";
+    private string _codApTipos  = "", _codOpTipos  = "";
+
+    private void ResolverCodigosPorSeccion()
+    {
+        (_codApClases, _codOpClases) = ResolverCod("Ingenieria/ClasesDesarrollo.razor");
+        (_codApTipos,  _codOpTipos)  = ResolverCod("Ingenieria/TiposDesarrollo.razor");
+    }
+
+    private (string App, string Opcion) ResolverCod(string formulario)
+    {
+        var r = MenuSvc.BuscarCodigosPorFormulario(formulario);
+        return r is null ? (CodAplicacion, CodOpcionAplicacion) : (r.Value.CodAplicacion, r.Value.CodOpcionAplicacion);
+    }
+
+    private List<ClaseDesarrolloModel> _clases = new();
+    private List<TipoDesarrolloModel>  _tipos  = new();
+    private ClaseDesarrolloModel?      _claseSel;
+
+    // ───────────────────────── Clases (maestro) ─────────────────────────
+    private string _searchClase = "";
+
+    private List<ClaseDesarrolloModel> _busquedaClases =>
+        string.IsNullOrWhiteSpace(_searchClase) ? _clases
+        : _clases.Where(c => (c.COD_CLASE_DESARROLLO?.Contains(_searchClase, StringComparison.OrdinalIgnoreCase) ?? false)
+                          || (c.DES_CLASE_DESARROLLO?.Contains(_searchClase, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosClases = new();
+    private int? _ordenColumnaClases;
+    private bool _ordenAscendenteClases = true;
+
+    private void ToggleOrdenClases(int columna)
+    {
+        if (_ordenColumnaClases == columna) _ordenAscendenteClases = !_ordenAscendenteClases;
+        else { _ordenColumnaClases = columna; _ordenAscendenteClases = true; }
+        StateHasChanged();
+    }
+
+    private List<ClaseDesarrolloModel> OrdenarClases(List<ClaseDesarrolloModel> items) => _ordenColumnaClases switch
+    {
+        0 => _ordenAscendenteClases ? items.OrderBy(x => x.COD_CLASE_DESARROLLO).ToList() : items.OrderByDescending(x => x.COD_CLASE_DESARROLLO).ToList(),
+        1 => _ordenAscendenteClases ? items.OrderBy(x => x.DES_CLASE_DESARROLLO).ToList() : items.OrderByDescending(x => x.DES_CLASE_DESARROLLO).ToList(),
+        _ => items
+    };
+
+    private List<ClaseDesarrolloModel> _clasesVisibles => OrdenarClases(AplicarClases(_busquedaClases, -1));
+    private List<ClaseDesarrolloModel> BaseClases(int col) => AplicarClases(_busquedaClases, col);
+
+    private List<ClaseDesarrolloModel> AplicarClases(List<ClaseDesarrolloModel> src, int ex)
+    {
+        IEnumerable<ClaseDesarrolloModel> q = src;
+        foreach (var (c, v) in _filtrosClases)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_CLASE_DESARROLLO)),
+                1 => q.Where(x => v.Contains(x.DES_CLASE_DESARROLLO)),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void FiltroClase(int c, HashSet<string>? v) { _filtrosClases[c] = v; StateHasChanged(); }
+    private void LimpiarFiltrosClases() { foreach (var k in _filtrosClases.Keys.ToList()) _filtrosClases[k] = null; StateHasChanged(); }
+
+    // ───────────────────────── Tipos (detalle) ─────────────────────────
+    private string _searchTipo = "";
+
+    private List<TipoDesarrolloModel> _busquedaTipos =>
+        string.IsNullOrWhiteSpace(_searchTipo) ? _tipos
+        : _tipos.Where(t => (t.COD_TIPO_DESARROLLO?.Contains(_searchTipo, StringComparison.OrdinalIgnoreCase) ?? false)
+                         || (t.DES_TIPO_DESARROLLO?.Contains(_searchTipo, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosTipos = new();
+    private int? _ordenColumnaTipos;
+    private bool _ordenAscendenteTipos = true;
+
+    private void ToggleOrdenTipos(int columna)
+    {
+        if (_ordenColumnaTipos == columna) _ordenAscendenteTipos = !_ordenAscendenteTipos;
+        else { _ordenColumnaTipos = columna; _ordenAscendenteTipos = true; }
+        StateHasChanged();
+    }
+
+    private List<TipoDesarrolloModel> OrdenarTipos(List<TipoDesarrolloModel> items) => _ordenColumnaTipos switch
+    {
+        0 => _ordenAscendenteTipos ? items.OrderBy(x => x.COD_TIPO_DESARROLLO).ToList() : items.OrderByDescending(x => x.COD_TIPO_DESARROLLO).ToList(),
+        1 => _ordenAscendenteTipos ? items.OrderBy(x => x.DES_TIPO_DESARROLLO).ToList() : items.OrderByDescending(x => x.DES_TIPO_DESARROLLO).ToList(),
+        _ => items
+    };
+
+    private List<TipoDesarrolloModel> _tiposVisibles => OrdenarTipos(AplicarTipos(_busquedaTipos, -1));
+    private List<TipoDesarrolloModel> BaseTipos(int col) => AplicarTipos(_busquedaTipos, col);
+
+    private List<TipoDesarrolloModel> AplicarTipos(List<TipoDesarrolloModel> src, int ex)
+    {
+        IEnumerable<TipoDesarrolloModel> q = src;
+        foreach (var (c, v) in _filtrosTipos)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_TIPO_DESARROLLO)),
+                1 => q.Where(x => v.Contains(x.DES_TIPO_DESARROLLO)),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void FiltroTipo(int c, HashSet<string>? v) { _filtrosTipos[c] = v; StateHasChanged(); }
+    private void LimpiarFiltrosTipos() { foreach (var k in _filtrosTipos.Keys.ToList()) _filtrosTipos[k] = null; StateHasChanged(); }
+
+    // ───────────────────────── Ciclo de vida ─────────────────────────
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("INGENIERIA", "ClasesDesarrollo");
+        ResolverCodigosPorSeccion();
+        await LoadClases();
+
+        // Al entrar se selecciona la primera clase para que la grilla hija no arranque vacía.
+        _claseSel = _clases.FirstOrDefault();
+        if (_claseSel is not null) await LoadTipos();
+
+        _onCambioClases = async () => await InvokeAsync(async () => { await LoadClases(); StateHasChanged(); });
+        _onCambioTipos  = async () => await InvokeAsync(async () => { await LoadTipos();  StateHasChanged(); });
+        Cambios.Suscribir("INGENIERIA.CLASES_DESARROLLO", _onCambioClases);
+        Cambios.Suscribir("INGENIERIA.TIPOS_DESARROLLO",  _onCambioTipos);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => AbrirClase(null, CrudModo.Create));
+
+    private async Task LoadClases()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ClaseDesarrolloModel>>>(
+                ApiRoutes.Ingenieria.ClasesDesarrollo);
+            _clases = r?.Data ?? new();
+        }
+        catch { _clases = new(); }
+
+        // Si la clase seleccionada desapareció (la eliminaron), se limpia el detalle.
+        if (_claseSel is not null && _clases.All(c => c.COD_CLASE_DESARROLLO != _claseSel.COD_CLASE_DESARROLLO))
+        {
+            _claseSel = null;
+            _tipos = new();
+        }
+    }
+
+    private async Task LoadTipos()
+    {
+        if (_claseSel is null) { _tipos = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TipoDesarrolloModel>>>(
+                $"{ApiRoutes.Ingenieria.TiposDesarrollo}?codClaseDesarrollo={Uri.EscapeDataString(_claseSel.COD_CLASE_DESARROLLO)}");
+            _tipos = r?.Data ?? new();
+        }
+        catch { _tipos = new(); }
+    }
+
+    private async Task OnClaseRowClick(DataGridRowClickEventArgs<ClaseDesarrolloModel> args)
+    {
+        _claseSel = args.Item;
+        LimpiarFiltrosTipos();
+        await LoadTipos();
+    }
+
+    // ───────────────────────── Acciones ─────────────────────────
+    private Task OnAccionHeaderClase(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirClase(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaClase(ClaseDesarrolloModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirClase(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirClase(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirClase(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirClase(ClaseDesarrolloModel? item, CrudModo modo)
+    {
+        var dlg = await DialogService.ShowAsync<ClaseDesarrolloDialog>(
+            modo switch
+            {
+                CrudModo.Create => "Nueva clase de desarrollo",
+                CrudModo.Delete => $"Eliminar · {item?.DES_CLASE_DESARROLLO}",
+                CrudModo.Read   => $"Consultar · {item?.DES_CLASE_DESARROLLO}",
+                _               => $"Editar · {item?.DES_CLASE_DESARROLLO}"
+            },
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) { await LoadClases(); await LoadTipos(); }
+    }
+
+    private Task OnAccionHeaderTipo(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirTipo(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaTipo(TipoDesarrolloModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirTipo(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirTipo(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirTipo(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirTipo(TipoDesarrolloModel? item, CrudModo modo)
+    {
+        if (_claseSel is null) { Snackbar.Add("Seleccione primero una clase de desarrollo.", Severity.Info); return; }
+        var dlg = await DialogService.ShowAsync<TipoDesarrolloDialog>(
+            modo switch
+            {
+                CrudModo.Create => "Nuevo tipo de desarrollo",
+                CrudModo.Delete => $"Eliminar · {item?.DES_TIPO_DESARROLLO}",
+                CrudModo.Read   => $"Consultar · {item?.DES_TIPO_DESARROLLO}",
+                _               => $"Editar · {item?.DES_TIPO_DESARROLLO}"
+            },
+            new DialogParameters
+            {
+                ["Item"] = item,
+                ["Modo"] = modo,
+                ["CodClaseDesarrollo"] = _claseSel.COD_CLASE_DESARROLLO,
+                ["DesClaseDesarrollo"] = _claseSel.DES_CLASE_DESARROLLO
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadTipos();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("INGENIERIA.CLASES_DESARROLLO", _onCambioClases ?? (() => Task.CompletedTask));
+        Cambios.Desuscribir("INGENIERIA.TIPOS_DESARROLLO",  _onCambioTipos  ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

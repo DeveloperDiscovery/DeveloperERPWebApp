@@ -1,0 +1,65 @@
+@inject CatalogoService<TipoMotivo, TipoMotivoDto> Service
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(820px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="@(_isEdit ? CrudModo.Update : CrudModo.Create)"
+                         Descripcion="@Item?.DES_TIPO_MOTIVO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <div style="display:flex;gap:16px;align-items:flex-start;">
+                <div style="flex:1;min-width:0;">
+                    <CampoTexto Tabla="ESTANDAR.TIPOS_MOTIVOS" Columna="DES_TIPO_MOTIVO"
+                                @bind-Value="_model.DES_TIPO_MOTIVO" />
+                </div>
+                <div style="flex-shrink:0;padding-left:8px;border-left:1px solid rgba(0,0,0,.1);">
+                    <ImagePicker Image="_model.IMG_PICTURE" ImageChanged="@(v => _model.IMG_PICTURE = v)" Label="Imagen del tipo" />
+                </div>
+            </div>
+
+            <CrudDialogActions Modo="@(_isEdit ? CrudModo.Update : CrudModo.Create)" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TipoMotivo? Item { get; set; }
+
+    private TipoMotivoDto _model = new();
+    private bool _isEdit, _saving;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Item is not null;
+        if (_isEdit && Item is not null)
+            _model = new TipoMotivoDto
+            {
+                COD_TIPO_MOTIVO = Item.COD_TIPO_MOTIVO,
+                DES_TIPO_MOTIVO = Item.DES_TIPO_MOTIVO ?? "",
+                IMG_PICTURE = Item.IMG_PICTURE
+            };
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var (ok, msg) = await Service.GuardarAsync(_model, !_isEdit);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Tipo actualizado." : "Tipo creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(TipoMotivoDialog));
+    }
+}

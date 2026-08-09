@@ -1,0 +1,50 @@
+@* Diálogo de solo lectura que muestra los campos de cualquier registro.
+   Recibe una lista de pares (etiqueta, valor). Si un valor es byte[], lo muestra como imagen.
+   Uso:
+   var campos = new List<(string,object?)> { ("Código", item.COD), ("Imagen", item.IMG) };
+   DialogService.ShowAsync<VerRegistroDialog>("Detalle", new DialogParameters {["Campos"]=campos}); *@
+@inject IJSRuntime JS
+
+<MudDialog>
+    <DialogContent>
+        <MudSimpleTable Dense="true" Hover="false" Bordered="false" Striped="true" Style="background:transparent;">
+            <tbody>
+                @foreach (var (etiqueta, valor) in Campos)
+                {
+                    <tr>
+                        <td class="mono" style="opacity:.6;font-size:.8rem;vertical-align:top;white-space:nowrap;padding-right:1rem;">
+                            @etiqueta
+                        </td>
+                        <td style="width:100%;">
+                            @if (valor is byte[] img && img.Length > 0)
+                            {
+                                <MudImage Src="@($"data:image/png;base64,{Convert.ToBase64String(img)}")"
+                                          Width="80" Height="80" ObjectFit="ObjectFit.Contain"
+                                          Style="border:1px solid var(--line);border-radius:6px;" />
+                            }
+                            else if (valor is bool b)
+                            {
+                                <MudIcon Icon="@(b ? Icons.Material.Filled.Check : Icons.Material.Filled.Close)"
+                                         Color="@(b ? Color.Success : Color.Error)" Size="Size.Small" />
+                            }
+                            else
+                            {
+                                <MudText Typo="Typo.body2">@(valor?.ToString() ?? "—")</MudText>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(async () => { try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { } MudDialog.Cancel(); })" Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.ArrowBack"
+                   Style="font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">Regresar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public List<(string Etiqueta, object? Valor)> Campos { get; set; } = new();
+}

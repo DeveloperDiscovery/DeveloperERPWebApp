@@ -1,0 +1,524 @@
+@page "/"
+@attribute [Authorize]
+@inject FavoritoService FavoritoService
+@inject IAuthService AuthService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject WorkspaceTabService TabService
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject ConfigService ConfigSvc
+@inject MenuService MenuSvc
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>Workspace · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-1">
+    <MudText Typo="Typo.h4">Workspace</MudText>
+    <div class="d-flex align-center gap-2 ws-header-actions" style="color:var(--subtitulo-color,#6b6358);">
+        <span class="mono" style="opacity:.5;font-size:.82rem;">@_total favoritos</span>
+        <MudTooltip Text="@(_vistaCircular ? "Vista tiles" : "Vista circular")">
+            <MudIconButton Icon="@(_vistaCircular ? Icons.Material.Filled.GridView : Icons.Material.Filled.DonutLarge)"
+                           Size="Size.Small" OnClick="@(() => _vistaCircular = !_vistaCircular)" />
+        </MudTooltip>
+        @if (_vistaCircular)
+        {
+            <MudTooltip Text="@(_modoResumen ? "Vista por app (burbujas)" : "Vista detallada (anillos con opciones)")">
+                <MudSwitch T="bool" Value="_modoResumen" ValueChanged="@((bool v) => _modoResumen = v)"
+                           Color="Color.Primary" Class="ml-2" Label="Por aplicación" LabelPlacement="Placement.Start" />
+            </MudTooltip>
+            <MudTooltip Text="Reducir">
+                <MudIconButton Icon="@Icons.Material.Filled.ZoomOut" Size="Size.Small"
+                               OnClick="@(() => AjustarZoom(-0.1))" Disabled="_escala <= 0.3" />
+            </MudTooltip>
+            <span class="mono" style="opacity:.6;font-size:.82rem;min-width:36px;text-align:center;">@((_escala * 100).ToString("F0"))%</span>
+            <MudTooltip Text="Ampliar">
+                <MudIconButton Icon="@Icons.Material.Filled.ZoomIn" Size="Size.Small"
+                               OnClick="@(() => AjustarZoom(0.1))" Disabled="_escala >= 2.5" />
+            </MudTooltip>
+        }
+        @if (!_vistaCircular)
+        {
+            <MudTooltip Text="@(_layoutHorizontal ? "Cambiar a vertical" : "Cambiar a horizontal")">
+                <MudIconButton Icon="@(_layoutHorizontal ? Icons.Material.Filled.ViewStream : Icons.Material.Filled.ViewModule)"
+                               Size="Size.Small" OnClick="@(() => _layoutHorizontal = !_layoutHorizontal)" />
+            </MudTooltip>
+        }
+    </div>
+</div>
+<MudText Class="mono mb-6" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+    Clic derecho sobre una opción del menú para agregarla a favoritos · arrastra los tiles para reordenarlos
+</MudText>
+
+@if (_cargando)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+}
+else if (!_grupos.Any())
+{
+    <div class="ws-empty">
+        <MudIcon Icon="@Icons.Material.Outlined.Star" Style="font-size:3rem;opacity:.3;" />
+        <MudText Class="mt-2" Style="opacity:.5;">
+            Aún no tienes favoritos. Clic derecho sobre una opción del menú lateral para agregarla.
+        </MudText>
+    </div>
+}
+else if (_vistaCircular)
+{
+    <WorkspaceMenuCircular Grupos="@_gruposCircular"
+                           Escala="@_escala"
+                           ModoResumen="@_modoResumen"
+                           OnTileClick="@(t => AbrirTileCircular(t))"
+                           OnTileContext="@(args => MostrarMenuCircular(args.Item1, args.Item2))" />
+}
+else
+{
+    <div class="@(_layoutHorizontal ? "ws-grupos ws-grupos--h" : "ws-grupos")"
+         @oncontextmenu="@(() => { })" @oncontextmenu:preventDefault="true">
+        @foreach (var grupo in _grupos)
+        {
+            <div class="ws-app-card">
+                @* ── Header de aplicación ── *@
+                <div class="ws-app-header" style="@EstiloGrupo(grupo.BackColor, grupo.ForeColor)">
+                    @if (grupo.IconoApp is not null)
+                    {
+                        <img src="data:image/png;base64,@grupo.IconoApp" class="ws-app-ico" alt="@grupo.NombreApp" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Apps" Class="ws-app-ico-mud" />
+                    }
+                    <span class="ws-app-nombre">@grupo.NombreApp</span>
+                </div>
+                @* ── Tiles de opciones ── *@
+                <div class="ws-tiles"
+                     @ondragover:preventDefault="true"
+                     @ondrop="@(() => Drop(grupo))">
+                    @foreach (var tile in grupo.Tiles)
+                    {
+                        <div class="ws-tile @(_dragging == tile ? "ws-tile--dragging" : "") @(_spinning == tile ? "ws-tile-spin" : "")"
+                             draggable="true"
+                             @onclick="@(() => AbrirTile(tile))"
+                             @ondragstart="@(() => DragStart(tile, grupo))"
+                             @ondragenter="@(() => DragEnter(tile, grupo))"
+                             @oncontextmenu="@(e => MostrarMenu(e, tile))"
+                             @oncontextmenu:preventDefault="true"
+                             style="@EstiloTile(tile.BackColor, tile.ForeColor)">
+                            @if (tile.IconoOpcion is not null)
+                            {
+                                <img src="data:image/png;base64,@tile.IconoOpcion" class="ws-tile-ico" alt="@tile.Nombre" />
+                            }
+                            else
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Dashboard" Class="ws-tile-ico-mud" />
+                            }
+                            <div class="ws-tile-lbl">@tile.Nombre</div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@* ── Menú contextual ── *@
+@if (_ctxVisible)
+{
+    <div style="position:fixed;inset:0;z-index:2999;" @onclick="CerrarMenu"
+         @oncontextmenu="CerrarMenu" @oncontextmenu:preventDefault="true"></div>
+    <div class="ctx-menu" style="@($"top:{_ctxY}px;left:{_ctxX}px;")">
+        <div class="ctx-item" @onclick="QuitarFavorito">
+            <MudIcon Icon="@Icons.Material.Filled.StarBorder" Size="Size.Small" /> Quitar de favoritos
+        </div>
+        <div class="ctx-item" @onclick="@(() => AbrirTile(_ctxTile!))">
+            <MudIcon Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" /> Abrir
+        </div>
+    </div>
+}
+
+@code {
+    // ─── Modelos internos ───
+    private class TileVm
+    {
+        public string  CodApp       { get; set; } = "";
+        public string  CodOpcion    { get; set; } = "";
+        public string  Nombre       { get; set; } = "";
+        public string? Ruta         { get; set; }
+        public string? IconoOpcion  { get; set; }  // base64
+        public int     Orden        { get; set; }
+        public string  BackColor    { get; set; } = "";
+        public string  ForeColor    { get; set; } = "";
+    }
+    private class GrupoVm
+    {
+        public string  CodApp       { get; set; } = "";
+        public string  NombreApp    { get; set; } = "";
+        public string? IconoApp     { get; set; }  // base64
+        public string  BackColor    { get; set; } = "";
+        public string  ForeColor    { get; set; } = "";
+        public List<TileVm> Tiles   { get; set; } = new();
+    }
+
+    // ─── Estado ───
+    private List<GrupoVm> _grupos          = new();
+    private bool          _cargando        = true;
+    private bool          _layoutHorizontal = false;
+    private bool          _vistaCircular    = false;
+    private bool          _modoResumen      = false;
+    private double        _escala           = 1.0;
+    private int           _total           => _grupos.Sum(g => g.Tiles.Count);
+
+    private void AjustarZoom(double delta) =>
+        _escala = Math.Round(Math.Clamp(_escala + delta, 0.3, 2.5), 1);
+
+    // Proyección para el componente circular
+    private List<WorkspaceMenuCircular.GrupoVm> _gruposCircular =>
+        _grupos.Select(g => new WorkspaceMenuCircular.GrupoVm
+        {
+            CodApp    = g.CodApp,
+            NombreApp = g.NombreApp,
+            IconoApp  = g.IconoApp,
+            BackColor = g.BackColor,
+            ForeColor = g.ForeColor,
+            Tiles     = g.Tiles.Select(t => new WorkspaceMenuCircular.TileVm
+            {
+                CodApp      = t.CodApp,
+                CodOpcion   = t.CodOpcion,
+                Nombre      = t.Nombre,
+                Ruta        = t.Ruta,
+                IconoOpcion = t.IconoOpcion,
+                BackColor   = t.BackColor,
+                ForeColor   = t.ForeColor,
+                Orden       = t.Orden
+            }).ToList()
+        }).ToList();
+
+    // drag & drop
+    private TileVm?  _dragging;
+    private GrupoVm? _draggingGrupo;
+    // menú contextual
+    private bool    _ctxVisible;
+    private double  _ctxX, _ctxY;
+    private TileVm? _ctxTile;
+
+    // Experimento: items de texto (sin íconos) mantenidos en memoria para poder reconstruir
+    // _grupos cuando lleguen los íconos en segundo plano (CargarLogosAsync).
+    private List<FavoritoWorkspace> _itemsActuales = new();
+
+    // ─── Init ───
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("WORKSPACE", "Inicio");
+        FavoritoService.OnCambio += RefrescarPorCambio;
+        await Cargar();
+    }
+
+    // Al agregar/quitar un favorito la caché queda desactualizada — se fuerza refresco real
+    // (no basta con re-mostrar lo cacheado), igual que hace CambiarRolAsync en MenuService.
+    private void RefrescarPorCambio() => InvokeAsync(async () => { await Cargar(forzarFresco: true); StateHasChanged(); });
+
+    private static readonly TimeSpan _cacheTtl = TimeSpan.FromMinutes(60);
+
+    /// <summary>
+    /// Stale-while-revalidate — mismo patrón que MenuService.CargarBotonesAsync para el menú
+    /// principal: si hay caché (aunque esté vencida) se muestra de inmediato para que el
+    /// Workspace no se quede en blanco esperando la API, y se refresca en segundo plano.
+    /// </summary>
+    private async Task Cargar(bool forzarFresco = false)
+    {
+        var sesion = await AuthService.GetSesionAsync();
+        var codUsuario = sesion?.COD_USUARIO ?? "";
+        if (string.IsNullOrWhiteSpace(codUsuario)) { _cargando = false; return; }
+
+        var cacheKey = $"workspaceFavoritos_{codUsuario}";
+        var tsKey    = $"{cacheKey}_ts";
+
+        if (!forzarFresco)
+        {
+            List<FavoritoWorkspace>? cached = null;
+            bool cacheVencida = true;
+            try
+            {
+                var ts = await LocalStorage.GetItemAsync<DateTime?>(tsKey);
+                cached = await LocalStorage.GetItemAsync<List<FavoritoWorkspace>>(cacheKey);
+                cacheVencida = !ts.HasValue || DateTime.Now - ts.Value >= _cacheTtl;
+            }
+            catch { }
+
+            if (cached is { Count: > 0 })
+            {
+                _itemsActuales = cached;
+                _grupos = ArmarGrupos(cached);
+                _cargando = false;
+                StateHasChanged();
+                if (cacheVencida)
+                    _ = FetchAsync(codUsuario, cacheKey, tsKey);
+                else
+                    _ = CargarLogosAsync(codUsuario);
+                return;
+            }
+        }
+
+        _cargando = _grupos.Count == 0; // si ya había algo en pantalla, no lo tapes con el spinner
+        await FetchAsync(codUsuario, cacheKey, tsKey);
+    }
+
+    private async Task FetchAsync(string codUsuario, string cacheKey, string tsKey)
+    {
+        var items = await FavoritoService.GetWorkspaceAsync(codUsuario);
+
+        // Experimento: el primer render sale sin íconos (texto ya alcanza para pintar el
+        // Workspace); los íconos llegan aparte y sin bloquear, vía CargarLogosAsync — también
+        // evita guardar bytes de imagen en localStorage (mismo problema que causó el
+        // QuotaExceededError resuelto antes para IMG_LOGO_DEPENDENCIA).
+        foreach (var it in items) { it.IMG_ICONO_OPCION = null; it.IMG_ICONO_APLICACION = null; }
+
+        _itemsActuales = items;
+        _grupos = ArmarGrupos(items);
+        _cargando = false;
+        try
+        {
+            await LocalStorage.SetItemAsync(cacheKey, items);
+            await LocalStorage.SetItemAsync(tsKey, DateTime.Now);
+        }
+        catch { }
+        await InvokeAsync(StateHasChanged);
+
+        _ = CargarLogosAsync(codUsuario);
+    }
+
+    /// <summary>Experimento: pide los íconos de los favoritos del Workspace en un endpoint
+    /// aparte del texto (SHOWALLLOGOS) — no bloquea el primer render, ya pintado solo con
+    /// texto/colores. Al llegar, fusiona los íconos en _itemsActuales y reconstruye _grupos.</summary>
+    private async Task CargarLogosAsync(string codUsuario)
+    {
+        var t0 = DateTime.Now;
+        Console.WriteLine($"[TRACE] {t0:HH:mm:ss.fff} — CARGA DE ICONOS - Workspace: inicio FavoritosWorkspaceLogos");
+        var logos = await FavoritoService.GetWorkspaceLogosAsync(codUsuario);
+        Console.WriteLine($"[TRACE] {DateTime.Now:HH:mm:ss.fff} — CARGA DE ICONOS - Workspace: fin FavoritosWorkspaceLogos (+{(DateTime.Now - t0).TotalMilliseconds:0}ms, items={logos.Count})");
+        if (logos.Count == 0) return;
+
+        var mapa = logos.ToDictionary(l => (l.COD_APLICACION, l.COD_OPCION_APLICACION));
+        foreach (var it in _itemsActuales)
+            if (mapa.TryGetValue((it.COD_APLICACION, it.COD_OPCION_APLICACION), out var logo))
+            {
+                it.IMG_ICONO_OPCION = logo.IMG_ICONO_OPCION;
+                it.IMG_ICONO_APLICACION = logo.IMG_ICONO_APLICACION;
+            }
+
+        _grupos = ArmarGrupos(_itemsActuales);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static List<GrupoVm> ArmarGrupos(List<FavoritoWorkspace> items) =>
+        items
+            .GroupBy(x => x.COD_APLICACION)
+            .Select((g, gi) => new GrupoVm
+            {
+                CodApp    = g.Key,
+                NombreApp = g.First().DES_APLICACION ?? g.Key,
+                IconoApp  = g.First().IMG_ICONO_APLICACION is { Length: > 0 } b
+                              ? Convert.ToBase64String(b) : null,
+                BackColor = g.First().DES_BACKCOLOR_APLICACION,
+                ForeColor = g.First().DES_FORECOLOR_APLICACION,
+                Tiles = g.Select((x, i) => new TileVm
+                {
+                    CodApp      = x.COD_APLICACION,
+                    CodOpcion   = x.COD_OPCION_APLICACION,
+                    Nombre      = x.DES_OPCION_APLICACION ?? x.COD_OPCION_APLICACION,
+                    Ruta        = x.DES_FORMULARIO ?? "",
+                    IconoOpcion = x.IMG_ICONO_OPCION is { Length: > 0 } bi
+                                    ? Convert.ToBase64String(bi) : null,
+                    BackColor   = x.DES_BACKCOLOR_OPCION,
+                    ForeColor   = x.DES_FORECOLOR_OPCION,
+                    Orden       = i
+                }).ToList()
+            }).ToList();
+
+    // ─── Drag & Drop ───
+    private void DragStart(TileVm tile, GrupoVm grupo)
+    {
+        _dragging      = tile;
+        _draggingGrupo = grupo;
+    }
+
+    private void DragEnter(TileVm tile, GrupoVm grupo)
+    {
+        if (_dragging is null || _dragging == tile || _draggingGrupo != grupo) return;
+        var tiles = grupo.Tiles;
+        var fromIdx = tiles.IndexOf(_dragging);
+        var toIdx   = tiles.IndexOf(tile);
+        if (fromIdx < 0 || toIdx < 0) return;
+        tiles.RemoveAt(fromIdx);
+        tiles.Insert(toIdx, _dragging);
+    }
+
+    private void Drop(GrupoVm grupo)
+    {
+        _dragging      = null;
+        _draggingGrupo = null;
+        StateHasChanged();
+    }
+
+    // Gira el hexágono clicado 5 vueltas mientras "carga" la opción (efecto visual —
+    // mismo tipo de feedback que usa el anillo del Menú Circular al hacer clic en un gajo).
+    private TileVm? _spinning;
+
+    // ─── Navegación ───
+    private async Task AbrirTile(TileVm tile)
+    {
+        _ctxVisible = false;
+
+        if (MenuSvc.ExigePasswordOpcion(tile.CodApp, tile.CodOpcion) == true)
+        {
+            var ok = await KONSolutions.Web.Services.AccesoOpcionHelper.ConfirmarAccesoAsync(DialogService, AuthService, ConfigSvc);
+            if (!ok) return;
+        }
+
+        if (_spinning is null)
+        {
+            _spinning = tile;
+            StateHasChanged();
+            await Task.Delay(1000); // 1 vuelta x .5s cada medio giro (ver @keyframes ws-tile-spin en app.css)
+            _spinning = null;
+        }
+
+        await AccessLog.LogEventoAsync("WORKSPACE", "Inicio", "ABRIR_FAVORITO",
+            new { tile.CodOpcion, tile.Nombre });
+        var info = WorkspaceRegistry.PorRuta(tile.Ruta ?? "");
+        if (info is not null)
+            TabService.Abrir(info.Titulo, info.Icono, info.ComponentType, info.Ruta,
+                new Dictionary<string, object>
+                {
+                    ["CodAplicacion"]       = (object)tile.CodApp,
+                    ["CodOpcionAplicacion"] = (object)tile.CodOpcion
+                }, iconoImagenBase64: tile.IconoOpcion);
+        else
+            AbrirSinPantalla(tile.Nombre, tile.CodApp, tile.CodOpcion, tile.Ruta);
+    }
+
+    /// <summary>
+    /// DES_FORMULARIO vacío → "Página en construcción" (opción sin pantalla asignada aún).
+    /// DES_FORMULARIO con dato pero que no resuelve a ninguna pantalla registrada →
+    /// "Página de error" (configuración inválida).
+    /// </summary>
+    private void AbrirSinPantalla(string titulo, string codApp, string codOpcion, string? ruta, bool activar = true)
+    {
+        if (string.IsNullOrWhiteSpace(ruta))
+            TabService.Abrir(titulo, Icons.Material.Filled.Construction,
+                typeof(KONSolutions.Web.Pages.Shared.PaginaEnConstruccion), $"/en-construccion/{codApp}/{codOpcion}",
+                new Dictionary<string, object>
+                {
+                    ["Titulo"] = titulo,
+                    ["CodAplicacion"] = codApp,
+                    ["CodOpcionAplicacion"] = codOpcion
+                }, activar: activar);
+        else
+            TabService.Abrir(titulo, Icons.Material.Filled.ErrorOutline,
+                typeof(KONSolutions.Web.Pages.Shared.PaginaError), $"/error-pantalla/{codApp}/{codOpcion}",
+                new Dictionary<string, object>
+                {
+                    ["Titulo"] = titulo,
+                    ["Ruta"] = ruta,
+                    ["CodAplicacion"] = codApp,
+                    ["CodOpcionAplicacion"] = codOpcion
+                }, activar: activar);
+    }
+
+    // ─── Vista circular ───
+
+    /// <summary>Ruta bajo la que queda registrado el tab de esta opción — usado para
+    /// activarlo (mostrarlo) recién cuando termina el giro del menú circular.</summary>
+    private string RutaTabCircular(WorkspaceMenuCircular.TileVm t)
+    {
+        var info = WorkspaceRegistry.PorRuta(t.Ruta ?? "");
+        if (info is not null) return info.Ruta;
+        if (string.IsNullOrWhiteSpace(t.Ruta)) return $"/en-construccion/{t.CodApp}/{t.CodOpcion}";
+        return $"/error-pantalla/{t.CodApp}/{t.CodOpcion}";
+    }
+
+    private async Task AbrirTileCircular(WorkspaceMenuCircular.TileVm t, bool activar = true)
+    {
+        _ctxVisible = false;
+
+        if (activar && MenuSvc.ExigePasswordOpcion(t.CodApp, t.CodOpcion) == true)
+        {
+            var ok = await KONSolutions.Web.Services.AccesoOpcionHelper.ConfirmarAccesoAsync(DialogService, AuthService, ConfigSvc);
+            if (!ok) return;
+        }
+
+        await AccessLog.LogEventoAsync("WORKSPACE", "Inicio", "ABRIR_FAVORITO", new { t.CodOpcion, t.Nombre });
+        var info = WorkspaceRegistry.PorRuta(t.Ruta ?? "");
+        if (info is not null)
+            TabService.Abrir(info.Titulo, info.Icono, info.ComponentType, info.Ruta,
+                new Dictionary<string, object>
+                {
+                    ["CodAplicacion"]       = (object)t.CodApp,
+                    ["CodOpcionAplicacion"] = (object)t.CodOpcion
+                }, iconoImagenBase64: t.IconoOpcion, activar: activar);
+        else
+            AbrirSinPantalla(t.Nombre, t.CodApp, t.CodOpcion, t.Ruta, activar: activar);
+    }
+
+    private void MostrarMenuCircular(MouseEventArgs e, WorkspaceMenuCircular.TileVm t)
+    {
+        var scale = ObtenerEscalaZoom();
+        _ctxX = e.ClientX / scale; _ctxY = e.ClientY / scale;
+        _ctxTile = _grupos.SelectMany(g => g.Tiles).FirstOrDefault(x => x.CodOpcion == t.CodOpcion);
+        _ctxVisible = true;
+    }
+
+    // ─── Menú contextual ───
+    private void MostrarMenu(MouseEventArgs e, TileVm tile)
+    {
+        // #app tiene un transform:scale (appZoom.js) que lo vuelve el "containing block" de
+        // los descendientes position:fixed — hay que dividir las coordenadas reales entre el
+        // factor de zoom para que el menú aparezca justo sobre el tile clickeado.
+        // Se usa interop SÍNCRONO (IJSInProcessRuntime) para que el menú aparezca sin demora
+        // — con InvokeAsync había un salto perceptible antes de mostrarse.
+        var scale = ObtenerEscalaZoom();
+        _ctxX = e.ClientX / scale; _ctxY = e.ClientY / scale;
+        _ctxTile = tile;
+        _ctxVisible = true;
+    }
+
+    private double ObtenerEscalaZoom()
+    {
+        double scale = 1;
+        try { scale = ((IJSInProcessRuntime)JS).Invoke<double>("appZoom.getScale"); } catch { }
+        return scale <= 0 ? 1 : scale;
+    }
+
+    private void CerrarMenu() => _ctxVisible = false;
+
+    private async Task QuitarFavorito()
+    {
+        if (_ctxTile is null) return;
+        _ctxVisible = false;
+        var sesion = await AuthService.GetSesionAsync();
+        var codUsuario = sesion?.COD_USUARIO ?? "";
+        var ok = await FavoritoService.QuitarAsync(codUsuario, _ctxTile.CodApp, _ctxTile.CodOpcion);
+        if (ok) Snackbar.Add("Quitado de favoritos.", Severity.Info);
+        else await ErrorDialogHelper.MostrarMensajeAsync("Error al quitar.", DialogService, nameof(Workspace));
+        await Cargar();
+    }
+
+    private static string EstiloGrupo(string back, string fore)
+    {
+        var s = "";
+        if (!string.IsNullOrWhiteSpace(back)) s += $"background:{back};";
+        if (!string.IsNullOrWhiteSpace(fore)) s += $"color:{fore};";
+        return s;
+    }
+
+    private static string EstiloTile(string back, string fore)
+    {
+        var s = "";
+        if (!string.IsNullOrWhiteSpace(back)) s += $"background:{back};border-color:{back};";
+        if (!string.IsNullOrWhiteSpace(fore)) s += $"color:{fore};";
+        return s;
+    }
+
+    public void Dispose() => FavoritoService.OnCambio -= RefrescarPorCambio;
+}

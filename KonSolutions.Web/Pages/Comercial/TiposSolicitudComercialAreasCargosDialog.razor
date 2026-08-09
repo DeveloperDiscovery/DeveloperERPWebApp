@@ -1,0 +1,116 @@
+@using CargosModel = KONSolutions.Shared.Models.Comercial.TiposSolicitudComercialAreasCargos
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using KONSolutions.Shared.Common
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@(_esNuevo ? "" : (DesCargoActual ?? ""))" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <MudTextField Value="@DesArea" Label="Área" Variant="Variant.Outlined" Disabled="true" Class="mb-3" />
+            <AriaCombo TItem="ComboboxItem" Items="_cargosDisponibles"
+                       TextFunc="@(c => $"{c.Id} - {c.Texto}")" ValueFunc="@(c => c.Id)"
+                       @bind-Value="_codCargoTexto"
+                       Label="Cargo" Disabled="@(!_esNuevo || _readonly)" />
+            <MudNumericField @bind-Value="_model.NUM_NIVEL_FLUJO" Label="Nivel de flujo" Variant="Variant.Outlined"
+                              Disabled="_readonly" Class="mb-3" Min="0" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+            <div class="d-flex align-center justify-space-between py-1 mb-2">
+                <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Style="opacity:.6;" /><MudText Typo="Typo.body2">Aprobador</MudText></div>
+                <MudSwitch T="bool?" @bind-Value="_model.FLG_APROBADOR" Color="Color.Primary" Disabled="_readonly" />
+            </div>
+            <div class="d-flex align-center justify-space-between py-1 mb-2">
+                <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Size="Size.Small" Style="opacity:.6;" /><MudText Typo="Typo.body2">Notificador</MudText></div>
+                <MudSwitch T="bool?" @bind-Value="_model.FLG_NOTIFICADOR" Color="Color.Primary" Disabled="_readonly" />
+            </div>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public CargosModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter, EditorRequired] public string CodTipoSolicitudComercial { get; set; } = "";
+    [Parameter, EditorRequired] public int CodArea { get; set; }
+    [Parameter] public string DesArea { get; set; } = "";
+    [Parameter] public List<ComboboxItem> CargosDisponibles { get; set; } = new();
+    [Parameter] public List<CargosModel> CargosYaAsignados { get; set; } = new();
+    // La grilla padre ya resuelve la descripción del cargo contra el combobox completo
+    // (item.DES_CARGO no viene poblado por el SP de listado) — se reutiliza ese texto ya
+    // calculado en vez de duplicar la búsqueda acá.
+    [Parameter] public string? DesCargoActual { get; set; }
+
+    private KONSolutions.Shared.Models.Comercial.TiposSolicitudComercialAreasCargosDto _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private string _codCargoTexto
+    {
+        get => _model.COD_CARGO?.ToString() ?? "";
+        set { _model.COD_CARGO = int.TryParse(value, out var n) ? n : null; }
+    }
+    // Al editar, "CargosDisponibles" (los que el padre pasa) son los NO asignados todavía —
+    // el cargo de ESTE registro ya está asignado (es el que se está editando), así que no
+    // viene en esa lista y el combo no encontraba con qué mostrar su texto. Se agrega acá
+    // el cargo actual (con su descripción, tomada de Item) para que el combo lo resuelva.
+    private List<ComboboxItem> _cargosDisponibles
+    {
+        get
+        {
+            if (_esNuevo)
+                return CargosDisponibles.Where(c => !CargosYaAsignados.Select(x => x.COD_CARGO?.ToString() ?? "").Contains(c.Id)).ToList();
+
+            var lista = CargosDisponibles.ToList();
+            if (Item?.COD_CARGO is not null && !lista.Any(c => c.Id == _codCargoTexto))
+                lista.Add(new ComboboxItem { Id = _codCargoTexto, Texto = DesCargoActual ?? _codCargoTexto });
+            return lista;
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        _model.COD_TIPO_SOLICITUD_COMERICAL = CodTipoSolicitudComercial;
+        _model.COD_AREA = CodArea;
+        if (Item is not null)
+        {
+            _model.COD_CARGO = Item.COD_CARGO;
+            _model.NUM_NIVEL_FLUJO = Item.NUM_NIVEL_FLUJO;
+            _model.FLG_APROBADOR = Item.FLG_APROBADOR;
+            _model.FLG_NOTIFICADOR = Item.FLG_NOTIFICADOR;
+        }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync(
+                $"{ComercialRoute.TiposSolicitudComercialAreasCargos}/{Uri.EscapeDataString(CodTipoSolicitudComercial)}/{CodArea}/{_model.COD_CARGO}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Cargo quitado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposSolicitudComercialAreasCargosDialog), nameof(Submit), "No se pudo quitar el cargo");
+            return;
+        }
+        var resp = await Http.PostAsJsonAsync(ComercialRoute.TiposSolicitudComercialAreasCargos, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Cargo agregado." : "Cargo modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposSolicitudComercialAreasCargosDialog), nameof(Submit));
+    }
+}

@@ -1,0 +1,158 @@
+@using TreeListModel = KONSolutions.Shared.Models.Ingenieria.GruposFamiliasSubFamiliasEspecificacionTecnicaTreeList
+@using InsertDto = KONSolutions.Shared.Models.Ingenieria.GruposFamiliasSubFamiliasEspecificacionTecnicaInsertDto
+@using AsignacionModel = KONSolutions.Shared.Models.Ingenieria.GruposFamiliasSubFamiliasEspecificacionTecnica
+@using IngenieriaRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(EsNuevo ? "Asignar" : "Editar") — @Nodo?.DES_KEY</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div @ref="_formRoot">
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="INGENIERIA.GRUPOS_FAMILIAS_SUB_FAMILIAS_ESPECIFICACION_TECNICA" Columna="VAL_ESPECIFICACION_TENICA"
+                        @bind-Value="_model.VAL_ESPECIFICACION_TENICA" />
+            <MudNumericField T="decimal?" @bind-Value="_model.VAL_MINIMO" Label="Mínimo"
+                              Variant="Variant.Outlined" Class="mb-3" Format="N6" />
+            <MudNumericField T="decimal?" @bind-Value="_model.VAL_MAXIMO" Label="Máximo"
+                              Variant="Variant.Outlined" Class="mb-3" Format="N6" />
+            <MudNumericField T="int?" @bind-Value="_model.NUM_ORDEN_PRESENTACION" Label="Orden de Presentación"
+                              Variant="Variant.Outlined" Class="mb-3" />
+            <div class="d-flex align-center justify-space-between py-1">
+                <MudText Typo="Typo.body2">Incluir en Descripción</MudText>
+                <MudSwitch T="bool?" @bind-Value="_model.FLG_INCLUIR_DESCRIPCION" Color="Color.Primary" />
+            </div>
+            <div class="d-flex align-center justify-space-between py-1">
+                <MudText Typo="Typo.body2">Registro Comercial</MudText>
+                <MudSwitch T="bool?" @bind-Value="_model.FLG_REGISTRO_COMERCIAL" Color="Color.Primary" />
+            </div>
+            <div class="d-flex align-center justify-space-between py-1">
+                <MudText Typo="Typo.body2">Ficha Técnica</MudText>
+                <MudSwitch T="bool?" @bind-Value="_model.FLG_FICHA_TECNICA" Color="Color.Primary" />
+            </div>
+            <div class="d-flex align-center justify-space-between py-1">
+                <MudText Typo="Typo.body2">Control de Calidad</MudText>
+                <MudSwitch T="bool?" @bind-Value="_model.FLG_CONTROL_CALIDAD" Color="Color.Primary" />
+            </div>
+            <AriaCombo TItem="ComboboxItem" Items="_tiposRegistroDatos"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       Value="@_model.COD_TIPO_REGISTRO_DATOS" ValueChanged="@(v => _model.COD_TIPO_REGISTRO_DATOS = v)"
+                       Label="Tipo de Registro de Datos" Class="mb-3" />
+            <AriaCombo TItem="ComboboxItem" Items="_gruposEspecificacion"
+                       TextFunc="@(g => $"{g.Id} - {g.Texto}")" ValueFunc="@(g => g.Id)"
+                       Value="@(_model.COD_GRUPO_ESPECIFICACION_TECNICA?.ToString())"
+                       ValueChanged="@(v => _model.COD_GRUPO_ESPECIFICACION_TECNICA = int.TryParse(v, out var n) ? n : null)"
+                       Label="Grupo de Especificación Técnica" Class="mb-3" />
+            <EstadoCombo DesTabla="INGENIERIA.GRUPOS_FAMILIAS_SUB_FAMILIAS_ESPECIFICACION_TECNICA"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)" />
+            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mt-4" Spacing="2">
+                <PanelAuditoria CodUsuarioRegistro="@_asignacion?.COD_USUARIO_REGISTRO"
+                                CodEstacionRegistro="@_asignacion?.COD_ESTACION_REGISTRO"
+                                FecRegistro="@_asignacion?.FEC_REGISTRO"
+                                CodUsuarioActualizacion="@_asignacion?.COD_USUARIO_ACTUALIZACION"
+                                CodEstacionActualizacion="@_asignacion?.COD_ESTACION_ACTUALIZACION"
+                                FecActualizacion="@_asignacion?.FEC_ACTUALIZACION"
+                                Class="" />
+                <MudStack Row="true" Spacing="2">
+                    <MudButton OnClick="@(() => MudDialog.Cancel())">Cancelar</MudButton>
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" Disabled="_saving">
+                        @(_saving ? "Guardando..." : "Guardar")
+                    </MudButton>
+                </MudStack>
+            </MudStack>
+        </EditForm>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string CodGrupoProducto { get; set; } = "";
+    [Parameter] public string CodFamiliaProducto { get; set; } = "";
+    [Parameter] public string CodSubFamiliaProducto { get; set; } = "";
+    [Parameter] public TreeListModel? Nodo { get; set; }
+    [Parameter] public bool EsNuevo { get; set; }
+
+    private InsertDto _model = new();
+    private AsignacionModel? _asignacion;
+    private List<ComboboxItem> _tiposRegistroDatos = new();
+    private List<ComboboxItem> _gruposEspecificacion = new();
+    private bool _saving;
+    private ElementReference _formRoot;
+
+    private async Task OnInvalidSubmit(EditContext ctx) =>
+        await JS.InvokeVoidAsync("validationFocus.focusFirstInvalid", _formRoot);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _model.COD_GRUPO_PRODUCTO = CodGrupoProducto;
+        _model.COD_FAMILIA_PRODUCTO = CodFamiliaProducto;
+        _model.COD_SUB_FAMILIA_PRODUCTO = CodSubFamiliaProducto;
+        _model.COD_ESPECIFICACION_TECNICA = Nodo?.COD_KEY ?? "";
+
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(IngenieriaRoute.TiposRegistroDatosCombobox);
+            _tiposRegistroDatos = r?.Data ?? new();
+        }
+        catch { _tiposRegistroDatos = new(); }
+
+        try
+        {
+            var rg = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(IngenieriaRoute.GruposEspecificacionTecnicaGruposCombobox);
+            _gruposEspecificacion = rg?.Data ?? new();
+        }
+        catch { _gruposEspecificacion = new(); }
+
+        if (!EsNuevo && Nodo is not null)
+        {
+            _model.VAL_ESPECIFICACION_TENICA = Nodo.VAL_ESPECIFICACION_TENICA;
+            _model.VAL_MINIMO = Nodo.VAL_MINIMO;
+            _model.VAL_MAXIMO = Nodo.VAL_MAXIMO;
+            _model.NUM_ORDEN_PRESENTACION = Nodo.NUM_ORDEN_PRESENTACION;
+            _model.COD_TIPO_ESTADO = Nodo.COD_TIPO_ESTADO;
+            _model.COD_ESTADO = Nodo.COD_ESTADO;
+            // El TREELIST ya trae COD_TIPO_REGISTRO_DATOS (agregado por Pedro al SP) — no hace
+            // falta un GET aparte, se toma directo del Nodo.
+            _model.COD_TIPO_REGISTRO_DATOS = Nodo.COD_TIPO_REGISTRO_DATOS;
+
+            // El TREELIST no expone FLG_INCLUIR_DESCRIPCION — se busca con un GetById aparte.
+            try
+            {
+                var url = $"{IngenieriaRoute.GruposEspecificacionTecnica}/{CodGrupoProducto}/{CodFamiliaProducto}/{CodSubFamiliaProducto}/{_model.COD_ESPECIFICACION_TECNICA}";
+                var rr = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<AsignacionModel>>(url);
+                _asignacion = rr?.Data;
+                _model.FLG_INCLUIR_DESCRIPCION = rr?.Data?.FLG_INCLUIR_DESCRIPCION;
+                _model.COD_GRUPO_ESPECIFICACION_TECNICA = rr?.Data?.COD_GRUPO_ESPECIFICACION_TECNICA;
+                _model.FLG_REGISTRO_COMERCIAL = rr?.Data?.FLG_REGISTRO_COMERCIAL;
+                _model.FLG_FICHA_TECNICA = rr?.Data?.FLG_FICHA_TECNICA;
+                _model.FLG_CONTROL_CALIDAD = rr?.Data?.FLG_CONTROL_CALIDAD;
+            }
+            catch { }
+        }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var resp = await Http.PostAsJsonAsync(IngenieriaRoute.GruposEspecificacionTecnica, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode)
+        {
+            Snackbar.Add(EsNuevo ? "Asignado." : "Modificado.", Severity.Success);
+            // Se devuelve el propio _model (no solo "true") para que la pantalla pueda copiar
+            // estos mismos flags (Reg. Comercial / Ficha Técnica / Control de Calidad / Grupo)
+            // a los hijos que se auto-asignan junto con este nodo padre.
+            MudDialog.Close(DialogResult.Ok(_model));
+        }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(GruposEspecificacionTecnicaDialog), nameof(Submit));
+    }
+}

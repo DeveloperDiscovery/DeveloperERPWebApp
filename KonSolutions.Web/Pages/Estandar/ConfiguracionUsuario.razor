@@ -1,0 +1,205 @@
+@page "/estandar/configuracion-usuario"
+@attribute [Authorize]
+@inject ConfiguracionUsuarioService CfgSvc
+@inject CatalogoService<TipoMenuOpciones, TipoMenuOpcionesDto> TiposMenuSvc
+@inject ConfigService Config
+@inject IAuthService AuthService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@using SharedCfg = KONSolutions.Shared.Models.Estandar.ConfiguracionUsuario
+
+<PageTitle>Configuración de Usuario · @Config.Current.NombreApp</PageTitle>
+
+<div class="cfg-page-labels-paper">
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <TituloPagina Fallback="Configuración de Usuario" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+            Preferencias propias de <strong>@_cfg.COD_USUARIO</strong> — no afectan a otros usuarios
+        </MudText>
+    </div>
+    <div class="d-flex align-center gap-2">
+        <PanelAuditoria CodUsuarioRegistro="@_cfg.COD_USUARIO_REGISTRO"
+                        CodEstacionRegistro="@_cfg.COD_ESTACION_REGISTRO"
+                        FecRegistro="@_cfg.FEC_REGISTRO"
+                        CodUsuarioActualizacion="@_cfg.COD_USUARIO_ACTUALIZACION"
+                        CodEstacionActualizacion="@_cfg.COD_ESTACION_ACTUALIZACION"
+                        FecActualizacion="@_cfg.FEC_ACTUALIZACION" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="Guardar" Disabled="_saving"
+                   Style="font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">
+            @(_saving ? "Guardando…" : "Guardar")
+        </MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+}
+else
+{
+<MudGrid>
+    @* ── Zoom web ── *@
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Zoom de pantalla</MudText>
+            <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;">
+                Nivel de zoom con el que se abre la aplicación en este usuario. Vacío o 100 = tamaño normal.
+            </MudText>
+            <MudNumericField T="int?" @bind-Value="_cfg.TAS_ZOOM_WEB" Label="Zoom (%)"
+                              Variant="Variant.Outlined" Min="30" Max="300"
+                              Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+        </MudPaper>
+    </MudItem>
+
+    @* ── Filas por página ── *@
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Filas por página</MudText>
+            <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;">
+                Cantidad de filas que se muestran por página en las grillas. Prevalece sobre
+                la Configuración General. Vacío = usa el valor general.
+            </MudText>
+            <MudNumericField T="int?" @bind-Value="_cfg.NUM_ROWS_PAGE" Label="Filas por página"
+                              Variant="Variant.Outlined" Min="5" Max="500"
+                              Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+        </MudPaper>
+    </MudItem>
+
+    @* ── Bloqueo de pantalla ── *@
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Bloqueo por inactividad</MudText>
+            <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;">
+                Minutos de inactividad antes de bloquear la pantalla para este usuario.
+                Este valor <strong>prevalece</strong> sobre el de Configuración General. Vacío = usa el valor general.
+            </MudText>
+            <MudNumericField T="int?" @bind-Value="_cfg.NUM_MINUTOS_LOCKOUT_SCREEN" Label="Minutos de inactividad"
+                              Variant="Variant.Outlined" Min="1" Max="120"
+                              Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+        </MudPaper>
+    </MudItem>
+
+    @* ── Fondo del workspace ── *@
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Fondo del workspace</MudText>
+            <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;">
+                Imagen de fondo detrás de todas las pestañas abiertas.
+            </MudText>
+            @if (_cfg.IMG_FONDO_WORKSPACE is { Length: > 0 })
+            {
+                <div class="d-flex justify-center mb-2 pa-2" style="border:1px dashed var(--line);border-radius:8px;background:#fff;">
+                    <MudImage Src="@($"data:image/png;base64,{Convert.ToBase64String(_cfg.IMG_FONDO_WORKSPACE)}")"
+                              Height="80" Style="object-fit:contain;max-width:100%;" />
+                </div>
+            }
+            <ImagePicker Image="_cfg.IMG_FONDO_WORKSPACE" ImageChanged="@(b => _cfg.IMG_FONDO_WORKSPACE = b)" Label="Fondo del workspace" />
+        </MudPaper>
+    </MudItem>
+
+    @* ── Notificaciones ── *@
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Notificaciones</MudText>
+            <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;">
+                Activa o desactiva las notificaciones para este usuario.
+            </MudText>
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.Notifications" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch T="bool" Value="@(_cfg.FLG_NOTIFICACION_ACTIVA ?? false)"
+                           ValueChanged="@(v => _cfg.FLG_NOTIFICACION_ACTIVA = v)"
+                           Color="Color.Primary" Label="Notificaciones activas" />
+            </div>
+        </MudPaper>
+    </MudItem>
+
+    @* ── Usuario zurdo ── *@
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Ergonomía</MudText>
+            <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;">
+                Si eres zurdo, el menú lateral se ubica a la derecha para facilitar el uso con el mouse en tu mano dominante.
+            </MudText>
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.BackHand" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch T="bool" Value="@(_cfg.FLG_USUARIO_SURDO ?? false)"
+                           ValueChanged="@(v => _cfg.FLG_USUARIO_SURDO = v)"
+                           Color="Color.Primary" Label="Soy zurdo" />
+            </div>
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.subtitle2" Class="mb-1">Teclado virtual</MudText>
+            <MudText Typo="Typo.caption" Class="mono mb-2" Style="opacity:.6;">
+                Muestra un teclado en pantalla al enfocar los campos. Requiere que también esté activo en Configuración General y en la opción.
+            </MudText>
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.Keyboard" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch T="bool" Value="@(_cfg.FLG_TECLADO_VIRTUAL ?? false)"
+                           ValueChanged="@(v => _cfg.FLG_TECLADO_VIRTUAL = v)"
+                           Color="Color.Primary" Label="Usar teclado virtual" />
+            </div>
+        </MudPaper>
+    </MudItem>
+
+    @* ── Tipo de menú de opciones ── *@
+    <MudItem xs="12" md="4">
+        <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+            <MudText Typo="Typo.h6" Class="mb-3">Tipo de menú de opciones</MudText>
+            <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;">
+                Estilo de menú preferido por este usuario.
+            </MudText>
+            <AriaCombo TItem="TipoMenuOpciones"
+                         Items="_tiposMenu"
+                         TextFunc="@(t => t.DES_TIPO_MENU_OPCIONES ?? t.COD_TIPO_MENU_OPCIONES)"
+                         ValueFunc="@(t => t.COD_TIPO_MENU_OPCIONES)"
+                         @bind-Value="_cfg.COD_TIPO_MENU_OPCIONES"
+                         Label="Tipo de menú" />
+        </MudPaper>
+    </MudItem>
+
+</MudGrid>
+}
+</div>
+
+@code {
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private SharedCfg _cfg = new();
+    private bool _loading = true;
+    private bool _saving  = false;
+    private List<TipoMenuOpciones> _tiposMenu = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var sesion = await AuthService.GetSesionAsync();
+        var codUsuario = sesion?.COD_USUARIO ?? "";
+
+        var tData = CfgSvc.GetMiConfiguracionAsync();
+        var tTipos = TiposMenuSvc.GetAllAsync();
+        await Task.WhenAll(tData, tTipos);
+
+        _tiposMenu = tTipos.Result;
+        var data = tData.Result;
+        _cfg = data ?? new SharedCfg { COD_USUARIO = codUsuario };
+        if (string.IsNullOrWhiteSpace(_cfg.COD_USUARIO)) _cfg.COD_USUARIO = codUsuario;
+        _loading = false;
+    }
+
+    private async Task Guardar()
+    {
+        _saving = true;
+        var (ok, msg) = await CfgSvc.SaveAsync(_cfg);
+        if (ok)
+        {
+            await Config.AplicarUsuarioAsync(_cfg);
+            Snackbar.Add("Configuración de usuario guardada y aplicada.", Severity.Success);
+        }
+        else
+        {
+            await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(ConfiguracionUsuario));
+        }
+        _saving = false;
+    }
+}

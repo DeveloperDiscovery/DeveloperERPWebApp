@@ -1,0 +1,60 @@
+@using KONSolutions.Shared.Common
+@using MudBlazor
+@inject IJSRuntime JS
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@Origen?.COD_SIMBOLO → @Destino?.COD_SIMBOLO</MudText>
+        <MudText Typo="Typo.caption" Style="opacity:.6;">@Origen?.DES_UNIDAD_MEDIDA → @Destino?.DES_UNIDAD_MEDIDA</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudNumericField @bind-Value="_valor" Label="Factor de conversión"
+                         Format="G10" HideSpinButtons="true" Variant="Variant.Outlined"
+                         HelperText="@($"1 {Origen?.COD_SIMBOLO} = ? {Destino?.COD_SIMBOLO}")"
+                         Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+        <MudSwitch @bind-Value="_autoReciproco"
+                     Label="@($"Guardar también el recíproco ({Destino?.COD_SIMBOLO} → {Origen?.COD_SIMBOLO})")"
+                     Color="Color.Primary" Class="mt-2" />
+    </DialogContent>
+    <DialogActions>
+        @if (ValorActual.HasValue)
+        {
+            <MudButton Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteForever" OnClick="Eliminar">Eliminar</MudButton>
+        }
+        <MudSpacer />
+        <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel" OnClick="Cancelar"
+                   Style="background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Save" OnClick="Guardar"
+                   Style="background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public EquivalenciaDlgItem? Origen     { get; set; }
+    [Parameter] public EquivalenciaDlgItem? Destino    { get; set; }
+    [Parameter] public decimal?             ValorActual { get; set; }
+
+    private decimal? _valor;
+    private bool     _autoReciproco = true;
+
+    protected override void OnParametersSet() => _valor = ValorActual;
+
+    private async Task Cancelar()
+    {
+        try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { }
+        MudDialog.Cancel();
+    }
+
+    private void Guardar()
+    {
+        if (_valor is null) return;
+        MudDialog.Close(DialogResult.Ok(new EquivalenciaResult(_valor.Value, _autoReciproco, false)));
+    }
+
+    private void Eliminar() => MudDialog.Close(DialogResult.Ok(new EquivalenciaResult(0, false, true)));
+
+    public record EquivalenciaDlgItem(string COD_UNIDAD_MEDIDA, string DES_UNIDAD_MEDIDA, string COD_SIMBOLO);
+    public record EquivalenciaResult(decimal Factor, bool AutoReciproco, bool Eliminar);
+}

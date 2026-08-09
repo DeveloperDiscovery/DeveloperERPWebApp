@@ -1,0 +1,120 @@
+@using TiposPedidoComercialModel = KONSolutions.Shared.Models.Comercial.TiposPedidoComercial
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_PEDIDO_COMERCIAL" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            @if (!_esNuevo)
+            {
+                <CampoTexto Tabla="COMERCIAL.TIPOS_PEDIDO_COMERCIAL" Columna="COD_TIPO_PEDIDO_COMERCIAL"
+                            @bind-Value="_codigoStr" Disabled="true" />
+            }
+            <CampoTexto Tabla="COMERCIAL.TIPOS_PEDIDO_COMERCIAL" Columna="DES_TIPO_PEDIDO_COMERCIAL"
+                        @bind-Value="_model.DES_TIPO_PEDIDO_COMERCIAL"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            <AriaCombo Items="_tiposEntidad" TextFunc="@(t => $"{t.Texto} ({t.Id})")" ValueFunc="@(t => t.Id)"
+                         @bind-Value="_model.COD_TIPO_ENTIDAD" Label="Tipo de entidad (compradora)"
+                         Disabled="_readonly" Class="mb-3" />
+
+            <AriaCombo Items="_tiposEntidad" TextFunc="@(t => $"{t.Texto} ({t.Id})")" ValueFunc="@(t => t.Id)"
+                         @bind-Value="_model.COD_TIPO_ENTIDAD_VENDEDORA" Label="Tipo de entidad vendedora"
+                         Disabled="_readonly" Class="mb-3" />
+
+            <AriaCombo Items="_tiposComprobantePago" TextFunc="@(t => $"{t.Texto} ({t.Id})")" ValueFunc="@(t => t.Id)"
+                         @bind-Value="_model.COD_TIPO_COMPROBANTE_PAGO_INTERNO" Label="Tipo de comprobante de pago interno"
+                         Disabled="_readonly" Class="mb-3" />
+
+            <MudGrid Class="mt-1">
+                <MudItem xs="6">
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Gavel" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_PEDIDO_FORMAL" Label="Pedido formal" Disabled="_readonly" /></div>
+                </MudItem>
+                <MudItem xs="6">
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_BIENES" Label="Bienes" Disabled="_readonly" /></div>
+                </MudItem>
+            </MudGrid>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposPedidoComercialModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposPedidoComercialModel _model = new();
+    private string? _codigoStr;
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _tiposEntidad = new();
+    private List<ComboboxItem> _tiposComprobantePago = new();
+
+    private void MapearDesdeModelo(TiposPedidoComercialModel m)
+    {
+        _model.COD_TIPO_PEDIDO_COMERCIAL  = m.COD_TIPO_PEDIDO_COMERCIAL;
+        _model.DES_TIPO_PEDIDO_COMERCIAL  = m.DES_TIPO_PEDIDO_COMERCIAL;
+        _model.COD_TIPO_ENTIDAD           = m.COD_TIPO_ENTIDAD;
+        _model.COD_TIPO_ENTIDAD_VENDEDORA = m.COD_TIPO_ENTIDAD_VENDEDORA;
+        _model.FLG_PEDIDO_FORMAL          = m.FLG_PEDIDO_FORMAL;
+        _model.FLG_BIENES                 = m.FLG_BIENES;
+        _model.COD_TIPO_COMPROBANTE_PAGO_INTERNO = m.COD_TIPO_COMPROBANTE_PAGO_INTERNO;
+        _codigoStr = _model.COD_TIPO_PEDIDO_COMERCIAL?.ToString();
+    }
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposPedidoComercialModel>($"{ApiRoutes.Comercial.TiposPedidoComercial}/{_model.COD_TIPO_PEDIDO_COMERCIAL}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        try
+        {
+            var re = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>(ApiRoutes.Estandar.TiposEntidadesCombobox);
+            _tiposEntidad = re?.Data ?? new();
+        }
+        catch { }
+        try
+        {
+            var rc = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>(ApiRoutes.Estandar.TiposComprobantesPagoCombobox);
+            _tiposComprobantePago = rc?.Data ?? new();
+        }
+        catch { }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Comercial.TiposPedidoComercial;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_TIPO_PEDIDO_COMERCIAL}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposPedidoComercialDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposPedidoComercialDialog), nameof(Submit));
+    }
+}

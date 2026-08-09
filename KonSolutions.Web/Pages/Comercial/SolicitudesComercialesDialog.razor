@@ -1,0 +1,339 @@
+@using SolicitudModel = KONSolutions.Shared.Models.Comercial.SolicitudesComerciales
+@using EstandarRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using KONSolutions.Shared.Models.Entorno
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+@* .mud-dialog-content trae su propio padding (24px) por defecto en MudBlazor. Si no lo
+   anulamos, el ancho declarado en nuestro div interno se SUMA a ese padding y termina
+   saliéndose de la tarjeta blanca del diálogo hacia el fondo — exactamente el mismo truco
+   que ya usa NotificacionAprobacionDialog (clase .notif-aprob-dlg) para su panel de PDF. *@
+<style>
+    .solicitud-com-dlg .mud-dialog-content { padding: 0 !important; }
+</style>
+
+<MudDialog Class="solicitud-com-dlg" Style="max-width:96vw;max-height:92vh;">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_SOLICITUD_COMERCIAL" />
+    </TitleContent>
+    <DialogContent>
+        @* Igual patrón que NotificacionAprobacionDialog: TODO el formulario (desde N° Solicitud
+           hasta Cancelar/Modificar) queda como una columna de ancho fijo a la izquierda, y el
+           visor de documentos aparece como panel a la derecha ocupando la MISMA altura — no
+           solo al lado de la grilla de Documentos. El ancho total crece cuando se abre el
+           visor. El padding que antes ponía .mud-dialog-content ahora lo ponemos acá
+           manualmente, porque lo anulamos arriba. *@
+        @* height:80vh (definido, no solo max-height) — igual que NotificacionAprobacionDialog
+           ("height:88vh;max-height:1093px") — es necesario para que el visor (height:100%)
+           y el scroll interno de la columna izquierda tengan una altura real contra la cual
+           calcular, no solo un tope. *@
+        @* Anchos: la columna del formulario mide 736px (15% más que los 640px anteriores) y el
+           ancho total le SUMA los 48px de padding horizontal — antes no se sumaban y, con
+           box-sizing:border-box, el área útil quedaba en 592px contra una columna de 640px:
+           de ahí el scroll horizontal. Cerrado: 736+48=784. Abierto: 736+16 de separación+759
+           del visor+48 = 1559. *@
+        <div style="@($"display:flex;gap:16px;align-items:stretch;width:{(_previewDocAbierto ? "min(1560px, 96vw)" : "min(784px, 94vw)")};max-width:96vw;height:80vh;max-height:900px;box-sizing:border-box;padding:16px 24px 24px 24px;transition:width .32s cubic-bezier(.4,0,.2,1);")">
+            <div style="width:736px;max-width:100%;height:100%;flex-shrink:0;overflow-y:auto;overflow-x:hidden;">
+                <EditForm Model="_model" OnValidSubmit="Submit">
+                    <DataAnnotationsValidator />
+                    <MudGrid Class="align-end">
+                        @if (!_esNuevo)
+                        {
+                            <MudItem xs="12" sm="4">
+                                <CampoTexto Tabla="COMERCIAL.SOLICITUDES_COMERCIALES" Columna="NUM_SOLICITUD_COMERCIAL"
+                                            Value="@_model.NUM_SOLICITUD_COMERCIAL.ToString()" Disabled="true" />
+                            </MudItem>
+                        }
+                        <MudItem xs="12" sm="@(_esNuevo ? 12 : 8)">
+                            <CampoTexto Tabla="COMERCIAL.SOLICITUDES_COMERCIALES" Columna="DES_SOLICITUD_COMERCIAL"
+                                        @bind-Value="_model.DES_SOLICITUD_COMERCIAL" Disabled="_readonly" Obligatorio="true" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposSolicitud"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_SOLICITUD_COMERCIAL"
+                               Label="Tipo de Solicitud Comercial" Disabled="_readonly" />
+
+                    @* Combo + acceso directo a la ficha del cliente (solo consulta). El ícono
+                       va fuera del AriaCombo — envolverlo adentro rompería su listbox
+                       (position:absolute). align-items:flex-start + margen para que quede a
+                       la altura del recuadro del combo, no de su label flotante. *@
+                    <div class="d-flex align-start gap-1">
+                        <div style="flex:1;min-width:0;">
+                            <AriaCombo TItem="ComboboxItem" Items="_entidadesClientes"
+                                       TextFunc="@(e => $"{e.Id} - {e.Texto}")" ValueFunc="@(e => e.Id)"
+                                       Value="@(_model.COD_ENTIDAD_CLIENTE == 0 ? null : _model.COD_ENTIDAD_CLIENTE.ToString())"
+                                       ValueChanged="@(v => OnEntidadClienteChanged(v))"
+                                       Label="Entidad Cliente" Disabled="@(_readonly || CodEntidadClienteFijo is not null)" Obligatorio="true" />
+                        </div>
+                        <MudTooltip Text="Consultar ficha del cliente">
+                            <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" Color="Color.Primary"
+                                           Style="margin-top:18px;" Disabled="@(_model.COD_ENTIDAD_CLIENTE == 0 || _abriendoFichaCliente)"
+                                           OnClick="VerFichaClienteAsync" />
+                        </MudTooltip>
+                    </div>
+
+                    <AriaCombo TItem="ComboboxItem" Items="_entidades"
+                               TextFunc="@(e => $"{e.Id} - {e.Texto}")" ValueFunc="@(e => e.Id)"
+                               Value="@(_model.COD_ENTIDAD_RESPONSABLE?.ToString())"
+                               ValueChanged="@(v => _model.COD_ENTIDAD_RESPONSABLE = decimal.TryParse(v, out var dr) ? dr : null)"
+                               Label="Entidad Responsable" Disabled="true" />
+
+                    <MudGrid Class="align-end">
+                        <MudItem xs="12" sm="6">
+                            <AriaCombo TItem="ComboboxItem" Items="_temporadas"
+                                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                                       Value="@(_model.NUM_TEMPORADA?.ToString())" ValueChanged="@(v => OnTemporadaChanged(v))"
+                                       Label="Temporada" Disabled="@(_readonly || _model.COD_ENTIDAD_CLIENTE == 0)" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <AriaCombo TItem="ComboboxItem" Items="_colecciones"
+                                       TextFunc="@(c => $"{c.Id} - {c.Texto}")" ValueFunc="@(c => c.Id)"
+                                       Value="@(_model.NUM_COLECCION?.ToString())" ValueChanged="@(v => _model.NUM_COLECCION = int.TryParse(v, out var dc) ? dc : null)"
+                                       Label="Colección" Disabled="@(_readonly || _model.NUM_TEMPORADA is null)" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudGrid Class="align-end">
+                        <MudItem xs="12" sm="6">
+                            <MudDatePicker @bind-Date="_model.FEC_SOLICITUD_COMERCIAL" Label="Fecha Solicitud"
+                                           Variant="Variant.Outlined" ReadOnly="_readonly" Class="mb-3" DateFormat="dd/MM/yyyy" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudDatePicker @bind-Date="_model.FEC_REQUERIDA_ATENCION" Label="Fecha Requerida de Atención"
+                                           Variant="Variant.Outlined" ReadOnly="_readonly" Class="mb-3" DateFormat="dd/MM/yyyy" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudGrid Class="align-end">
+                        <MudItem xs="12" sm="6">
+                            <!-- La fija el sistema cuando se asigna un responsable (otro diálogo); no es editable aquí. -->
+                            <MudDatePicker @bind-Date="_model.FEC_ASIGNACION_EFECTUADA" Label="Fecha de Asignación"
+                                           Variant="Variant.Outlined" ReadOnly="true" Disabled="true" Class="mb-3" DateFormat="dd/MM/yyyy" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <!-- La fija el sistema al efectuar la atención; no es editable aquí. -->
+                            <MudDatePicker @bind-Date="_model.FEC_ATENCION_EFECTUADA" Label="Fecha de Atención"
+                                           Variant="Variant.Outlined" ReadOnly="true" Disabled="true" Class="mb-3" DateFormat="dd/MM/yyyy" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <CampoTextoEstable @bind-Value="_model.DES_OBSERVACIONES" Label="Observaciones" Lines="3"
+                                  Variant="Variant.Outlined" ReadOnly="_readonly" Class="mb-3" />
+
+                    @if (!_esNuevo)
+                    {
+                        <DocumentosCarpetaPanel @ref="_docsPanelRef"
+                                                CodKeyPathfile="KEY_PATH_FILE_SOLICITUDES_DOCUMENTOS"
+                                                Identificador="@_model.NUM_SOLICITUD_COMERCIAL.ToString()" ReadOnly="_readonly"
+                                                @bind-PreviewAbierto="_previewDocAbierto"
+                                                @bind-DocSeleccionado="_docSeleccionado"
+                                                @bind-BlobUrl="_blobUrl"
+                                                @bind-PreviewCargando="_previewCargando" />
+                    }
+
+                    <EstadoCombo DesTabla="COMERCIAL.SOLICITUDES_COMERCIALES" @bind-Value="_model.COD_ESTADO"
+                                 CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                                 Disabled="true" Class="mb-3" />
+
+                    <CrudDialogActions Modo="Modo" Saving="_saving"
+                                       OnCancel="@(() => MudDialog.Cancel())">
+                        <LeftContent>
+                            <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                            CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                            FecRegistro="@Item?.FEC_REGISTRO"
+                                            CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                            CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                            FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                        </LeftContent>
+                    </CrudDialogActions>
+                </EditForm>
+            </div>
+
+            @if (_previewDocAbierto)
+            {
+                @* BlobUrl va con @: es un parámetro de tipo string y sin la arroba Razor lo
+                   toma como el texto literal "_blobUrl" en vez de evaluar la variable. Eso
+                   dejaba src="_blobUrl" en el <iframe>, el navegador lo resolvía contra la
+                   propia aplicación y el visor mostraba el ERP (o su página "404 — Página no
+                   encontrada", que era el router de Blazor intentando enrutar /_blobUrl).
+                   Mismo caso que ya se corrigió en los combos con Value="...". *@
+                <VisorArchivoPanel Documento="_docSeleccionado" BlobUrl="@_blobUrl" Cargando="_previewCargando"
+                                   Ancho="clamp(320px, 42vw, 759px)"
+                                   OnCerrar="@(() => _docsPanelRef!.CerrarPreviewAsync())" />
+            }
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public SolicitudModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    /// <summary>Cuando se abre "Nueva" desde una pantalla que ya sabe para qué entidad es la
+    /// solicitud (ej. Comercial/SolicitudesComercialesDependencia.razor, con
+    /// sesion.COD_ENTIDAD_DEPENDENCIA), precarga y deshabilita Entidad Cliente — el usuario
+    /// no debe poder cambiarla a otra entidad.</summary>
+    [Parameter] public decimal? CodEntidadClienteFijo { get; set; }
+
+    private KONSolutions.Shared.Models.Comercial.SolicitudesComercialesDto _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    // Estado del visor de documentos, compartido con DocumentosCarpetaPanel (@bind-Xxx) y
+    // dibujado acá mismo con VisorArchivoPanel, para que quede al lado de TODO el formulario
+    // (igual que NotificacionAprobacionDialog), no solo al lado de la grilla de Documentos.
+    private DocumentosCarpetaPanel? _docsPanelRef;
+    private bool _previewDocAbierto;
+    private DocumentoCarpetaDto? _docSeleccionado;
+    private string? _blobUrl;
+    private bool _previewCargando;
+
+    private List<ComboboxItem> _entidades   = new();
+    private List<ComboboxItem> _entidadesClientes = new();
+    private List<ComboboxItem> _temporadas  = new();
+    private List<ComboboxItem> _colecciones = new();
+    private List<ComboboxItem> _tiposSolicitud = new();
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        // Corre ANTES de OnInitializedAsync: la carga de temporadas ahí abajo ya evalúa
+        // _model.COD_ENTIDAD_CLIENTE, así que con esto seteado a tiempo las temporadas de la
+        // entidad fija se cargan solas, sin esperar a que el usuario elija en el combo.
+        if (_esNuevo && CodEntidadClienteFijo is not null)
+            _model.COD_ENTIDAD_CLIENTE = CodEntidadClienteFijo.Value;
+    }
+
+    private void MapearDesdeModelo(SolicitudModel m)
+    {
+        _model = new KONSolutions.Shared.Models.Comercial.SolicitudesComercialesDto
+        {
+            NUM_SOLICITUD_COMERCIAL = m.NUM_SOLICITUD_COMERCIAL,
+            DES_SOLICITUD_COMERCIAL = m.DES_SOLICITUD_COMERCIAL,
+            FEC_SOLICITUD_COMERCIAL = m.FEC_SOLICITUD_COMERCIAL,
+            FEC_REQUERIDA_ATENCION = m.FEC_REQUERIDA_ATENCION,
+            FEC_ASIGNACION_EFECTUADA = m.FEC_ASIGNACION_EFECTUADA,
+            FEC_ATENCION_EFECTUADA = m.FEC_ATENCION_EFECTUADA,
+            COD_TIPO_SOLICITUD_COMERCIAL = m.COD_TIPO_SOLICITUD_COMERCIAL,
+            COD_ENTIDAD_CLIENTE = m.COD_ENTIDAD_CLIENTE,
+            NUM_TEMPORADA = m.NUM_TEMPORADA,
+            NUM_COLECCION = m.NUM_COLECCION,
+            COD_ENTIDAD_RESPONSABLE = m.COD_ENTIDAD_RESPONSABLE,
+            DES_OBSERVACIONES = m.DES_OBSERVACIONES,
+            COD_TIPO_ESTADO = m.COD_TIPO_ESTADO,
+            COD_ESTADO = m.COD_ESTADO,
+        };
+    }
+
+    /// <summary>Trae la Solicitud fresca desde SHOWBYID — evita mostrar datos desactualizados
+    /// de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<SolicitudModel>($"{ComercialRoute.SolicitudesComerciales}/{_model.NUM_SOLICITUD_COMERCIAL}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        // /loadcombos (PROC_COMERCIAL_SOLICITUDES_LOADCOMBOS) trae en un solo roundtrip los
+        // Tipos de Solicitud y los clientes ('CLI'); Entidades (todas) queda aparte porque
+        // el SP no las incluye.
+        var tEntidades = Http.SafeGetAsync<List<ComboboxItem>>(EstandarRoute.EntidadesCombobox);
+        var tLoadcombos = Http.SafeGetAsync<KONSolutions.Shared.Models.Comercial.SolicitudesComercialesLoadCombosResult>(ComercialRoute.SolicitudesComercialesLoadcombos);
+        var tTemporadas = _model.COD_ENTIDAD_CLIENTE == 0
+            ? Task.FromResult<List<ComboboxItem>?>(null) : CargarTemporadas(_model.COD_ENTIDAD_CLIENTE);
+        var tColecciones = (_model.COD_ENTIDAD_CLIENTE == 0 || _model.NUM_TEMPORADA is null)
+            ? Task.FromResult<List<ComboboxItem>?>(null) : CargarColecciones(_model.COD_ENTIDAD_CLIENTE, _model.NUM_TEMPORADA.Value);
+
+        await Task.WhenAll(tEntidades, tLoadcombos, tTemporadas, tColecciones);
+
+        _entidades = (await tEntidades) ?? new();
+        var combos = await tLoadcombos;
+        _entidadesClientes = combos?.Clientes ?? new();
+        _tiposSolicitud = combos?.TiposSolicitud ?? new();
+        _temporadas = (await tTemporadas) ?? new();
+        _colecciones = (await tColecciones) ?? new();
+    }
+
+    private Task<List<ComboboxItem>?> CargarTemporadas(decimal codEntidad) =>
+        Http.SafeGetAsync<List<ComboboxItem>>($"{ComercialRoute.EntidadesTemporadas}/combobox?codEntidad={codEntidad}");
+
+    private Task<List<ComboboxItem>?> CargarColecciones(decimal codEntidad, int numTemporada) =>
+        Http.SafeGetAsync<List<ComboboxItem>>($"{ComercialRoute.EntidadesTemporadasColecciones}/combobox?codEntidad={codEntidad}&numTemporada={numTemporada}");
+
+    private async Task OnEntidadClienteChanged(string? val)
+    {
+        _model.COD_ENTIDAD_CLIENTE = decimal.TryParse(val, out var d) ? d : 0;
+        _model.NUM_TEMPORADA = null;
+        _model.NUM_COLECCION = null;
+        _colecciones = new();
+        _temporadas = _model.COD_ENTIDAD_CLIENTE == 0 ? new() : (await CargarTemporadas(_model.COD_ENTIDAD_CLIENTE)) ?? new();
+    }
+
+    // Abre la ficha del cliente seleccionado (ESTANDAR/EntidadesDialog) en modo consulta.
+    // EntidadesDialog recibe la Entidad completa, no el código — así que primero se trae
+    // con el SHOWBYID de Entidades.
+    private bool _abriendoFichaCliente;
+
+    private async Task VerFichaClienteAsync()
+    {
+        if (_model.COD_ENTIDAD_CLIENTE == 0) return;
+        _abriendoFichaCliente = true;
+        try
+        {
+            var entidad = await Http.SafeGetAsync<Entidad>($"{EstandarRoute.Entidades}/{_model.COD_ENTIDAD_CLIENTE}");
+            if (entidad is null)
+            {
+                Snackbar.Add("No se pudo obtener la ficha del cliente.", Severity.Warning);
+                return;
+            }
+
+            await DialogService.ShowAsync<KONSolutions.Web.Pages.Estandar.EntidadesDialog>(
+                $"Consultar · {entidad.DES_NOMBRE_COMPLETO}",
+                new DialogParameters { ["Item"] = entidad, ["Modo"] = CrudModo.Read },
+                new DialogOptions { MaxWidth = MaxWidth.False, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(SolicitudesComercialesDialog), nameof(VerFichaClienteAsync));
+            Snackbar.Add("No se pudo abrir la ficha del cliente. Ver detalle en el log de errores.", Severity.Error);
+        }
+        finally { _abriendoFichaCliente = false; }
+    }
+
+    private async Task OnTemporadaChanged(string? val)
+    {
+        _model.NUM_TEMPORADA = int.TryParse(val, out var t) ? t : null;
+        _model.NUM_COLECCION = null;
+        _colecciones = (_model.COD_ENTIDAD_CLIENTE == 0 || _model.NUM_TEMPORADA is null)
+            ? new() : (await CargarColecciones(_model.COD_ENTIDAD_CLIENTE, _model.NUM_TEMPORADA.Value)) ?? new();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ComercialRoute.SolicitudesComerciales}/{_model.NUM_SOLICITUD_COMERCIAL}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(SolicitudesComercialesDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // PROC_COMERCIAL_SOLICITUDES_COMERCIALES_INSERT es upsert (inserta o actualiza según exista el código) —
+        // el Controller nunca tuvo un endpoint PUT, siempre se llama al mismo POST.
+        var resp = await Http.PostAsJsonAsync(ComercialRoute.SolicitudesComerciales, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(SolicitudesComercialesDialog), nameof(Submit));
+    }
+}

@@ -1,0 +1,173 @@
+@using GruposProductoModel = KONSolutions.Shared.Models.Estandar.GruposProducto
+@using GruposProductoRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_GRUPO_PRODUCTO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="ESTANDAR.GRUPOS_PRODUCTO" Columna="COD_GRUPO_PRODUCTO_ALIAS"
+                        @bind-Value="_model.COD_GRUPO_PRODUCTO_ALIAS"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            @if (!_esNuevo)
+            {
+                <CampoTexto Tabla="ESTANDAR.GRUPOS_PRODUCTO" Columna="COD_GRUPO_PRODUCTO"
+                            @bind-Value="_model.COD_GRUPO_PRODUCTO"
+                            Disabled="true" />
+            }
+            <CampoTexto Tabla="ESTANDAR.GRUPOS_PRODUCTO" Columna="DES_GRUPO_PRODUCTO"
+                        @bind-Value="_model.DES_GRUPO_PRODUCTO"
+                        Disabled="_readonly" Obligatorio="true" />
+            <AriaCombo TItem="ComboboxItem" Items="_cubso"
+                       TextFunc="@(c => $"{c.Id} - {c.Texto}")" ValueFunc="@(c => c.Id)"
+                       @bind-Value="_model.COD_CUBSO"
+                       Label="Código UNSPSC (CUBSO)" Disabled="_readonly" />
+            <CampoTexto Tabla="ESTANDAR.GRUPOS_PRODUCTO" Columna="COD_PARTIDA_ARANCELARIA"
+                        @bind-Value="_model.COD_PARTIDA_ARANCELARIA"
+                        Disabled="_readonly" />
+            <AriaCombo TItem="ComboboxItem" Items="_tiposValorCalculo"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       @bind-Value="_model.COD_TIPO_VALOR_CALCULO"
+                       Label="Tipo de Valor de Cálculo" Disabled="_readonly" />
+            <AriaCombo TItem="ComboboxItem" Items="_unidadesMedida"
+                       TextFunc="@(u => $"{u.Id} - {u.Texto}")" ValueFunc="@(u => u.Id)"
+                       @bind-Value="_model.COD_UNIDAD_MEDIDA"
+                       Label="Unidad de Medida" Disabled="_readonly" />
+            <AriaCombo TItem="ComboboxItem" Items="_unidadesMedida"
+                       TextFunc="@(u => $"{u.Id} - {u.Texto}")" ValueFunc="@(u => u.Id)"
+                       @bind-Value="_model.COD_UNIDAD_MEDIDA_SECUNDARIA"
+                       Label="Unidad de Medida Secundaria" Disabled="_readonly" />
+            <div class="d-flex align-center justify-space-between py-1 mb-2">
+                <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.Inventory2" Size="Size.Small" Style="opacity:.6;" /><MudText Typo="Typo.body2">Bien</MudText></div>
+                <MudSwitch T="bool?" @bind-Value="_model.FLG_BIEN" Color="Color.Primary" Disabled="_readonly" />
+            </div>
+            <EstadoCombo DesTabla="ESTANDAR.GRUPOS_PRODUCTO" @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _codTipoEstado = v ?? 0)" Disabled="_readonly" Class="mb-3" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public GruposProductoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private GruposProductoModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<EstadoItem>   _estados          = new();
+    private List<ComboboxItem> _cubso            = new();
+    private List<ComboboxItem> _tiposValorCalculo= new();
+    private List<ComboboxItem> _unidadesMedida   = new();
+    private int                _codTipoEstado;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(GruposProductoModel m)
+    {
+        _model = new GruposProductoModel
+        {
+            COD_GRUPO_PRODUCTO       = m.COD_GRUPO_PRODUCTO,
+            COD_GRUPO_PRODUCTO_ALIAS = m.COD_GRUPO_PRODUCTO_ALIAS,
+            DES_GRUPO_PRODUCTO       = m.DES_GRUPO_PRODUCTO,
+            COD_CUBSO                = m.COD_CUBSO?.Trim(),
+            FLG_BIEN                 = m.FLG_BIEN,
+            COD_PARTIDA_ARANCELARIA  = m.COD_PARTIDA_ARANCELARIA,
+            COD_TIPO_VALOR_CALCULO   = m.COD_TIPO_VALOR_CALCULO,
+            COD_UNIDAD_MEDIDA        = m.COD_UNIDAD_MEDIDA,
+            COD_UNIDAD_MEDIDA_SECUNDARIA = m.COD_UNIDAD_MEDIDA_SECUNDARIA,
+            COD_TIPO_ESTADO          = m.COD_TIPO_ESTADO,
+            COD_ESTADO               = m.COD_ESTADO,
+        };
+    }
+    /// <summary>Trae el Grupo de Producto fresco desde SHOWBYID — evita mostrar datos
+    /// desactualizados de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<GruposProductoModel>($"{GruposProductoRoute.GruposProducto}/{Uri.EscapeDataString(_model.COD_GRUPO_PRODUCTO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        KONSolutions.Shared.Common.ApiResponse<GruposProductoLoadCombosResult>? r = null;
+        try
+        {
+            r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<GruposProductoLoadCombosResult>>(
+                GruposProductoRoute.GruposProductoLoadcombos);
+        }
+        catch { }
+        if (r?.Data is not null)
+        {
+            _codTipoEstado     = r.Data.CodTipoEstado;
+            _estados           = r.Data.Estados;
+            _unidadesMedida    = r.Data.UnidadesMedida;
+            _tiposValorCalculo = r.Data.TiposValorCalculo;
+            if (_esNuevo && _model.COD_ESTADO is null && _estados.Any())
+            {
+                var def = _estados.FirstOrDefault(e => e.EsDefault) ?? _estados.First();
+                _model.COD_ESTADO      = def.CodEstado;
+                _model.COD_TIPO_ESTADO = _codTipoEstado;
+            }
+        }
+
+        try
+        {
+            var rc = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(
+                KONSolutions.Web.Services.ApiRoutes.Sunat.CubsoSunatCombobox);
+            _cubso = rc?.Data ?? new();
+        }
+        catch { }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = GruposProductoRoute.GruposProducto;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_GRUPO_PRODUCTO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(GruposProductoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        _model.COD_TIPO_ESTADO = _codTipoEstado;
+        // Si es Nuevo, el SP ignora COD_GRUPO_PRODUCTO y genera el código real a partir
+        // del ALIAS (ver PROC_ESTANDAR_GRUPOS_PRODUCTO_INSERT) — se manda vacío porque el
+        // parámetro no admite NULL, no porque haga falta un valor real aquí.
+        var dto = new { COD_GRUPO_PRODUCTO = _esNuevo ? "" : _model.COD_GRUPO_PRODUCTO,
+                        _model.COD_GRUPO_PRODUCTO_ALIAS, _model.DES_GRUPO_PRODUCTO, _model.FLG_BIEN,
+                        _model.COD_CUBSO, _model.COD_PARTIDA_ARANCELARIA,
+                        _model.COD_TIPO_VALOR_CALCULO, _model.COD_UNIDAD_MEDIDA, _model.COD_UNIDAD_MEDIDA_SECUNDARIA,
+                        _model.COD_TIPO_ESTADO, _model.COD_ESTADO };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(GruposProductoDialog), nameof(Submit));
+    }
+}

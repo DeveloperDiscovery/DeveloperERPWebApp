@@ -1,0 +1,650 @@
+@page "/estandar/grupos-producto"
+@attribute [Authorize]
+@using GruposProductoModel = KONSolutions.Shared.Models.Estandar.GruposProducto
+@using FamiliasProductoModel = KONSolutions.Shared.Models.Estandar.FamiliasProducto
+@using SubFamiliasProductoModel = KONSolutions.Shared.Models.Estandar.SubFamiliasProducto
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject ShortcutService ShortcutSvc
+@inject MenuService MenuSvc
+@implements IDisposable
+
+<PageTitle>Grupos de Producto · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Grupos de Producto" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_grupos.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchGrupo" OnSearch="BuscarGrupos" Placeholder="Buscar grupo de producto..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="LoadGrupos" />
+        <AccionesBotones CodAplicacion="@_codApGrupo" CodOpcionAplicacion="@_codOpGrupo"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderGrupo" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);margin-bottom:16px;">
+    <div data-resizable-grid="grupos-producto" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="GruposProductoModel" Items="_gruposVisibles" Dense="true" Hover="true" Striped="true"
+                 RowClick="OnGrupoRowClick"
+                 RowClassFunc="@((g, i) => g.COD_GRUPO_PRODUCTO == _grupoSel?.COD_GRUPO_PRODUCTO ? "fila-seleccionada" : "")"
+                 RowStyleFunc="@((g, i) => "cursor:pointer;")"
+                 FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="100">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_GRUPO_PRODUCTO" Activo="@(_ordenColumnaGrupo == 0)" Ascendente="_ordenAscendenteGrupo" OnClick="@(() => ToggleOrdenGrupo(0))" />
+                        <FiltroExcelColumna T="GruposProductoModel" ItemsBase="@BaseGrupo(0)" ValorDe="@(x=>x.COD_GRUPO_PRODUCTO ?? "")"
+                                            ValoresActivos="_filtrosGrupo.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroGrupo(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_GRUPO_PRODUCTO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_GRUPO_PRODUCTO" Activo="@(_ordenColumnaGrupo == 1)" Ascendente="_ordenAscendenteGrupo" OnClick="@(() => ToggleOrdenGrupo(1))" />
+                        <FiltroExcelColumna T="GruposProductoModel" ItemsBase="@BaseGrupo(1)" ValorDe="@(x=>x.DES_GRUPO_PRODUCTO ?? "")"
+                                            ValoresActivos="_filtrosGrupo.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroGrupo(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_GRUPO_PRODUCTO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Bien" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;" Width="70">
+                <CellTemplate>
+                    <MudTooltip Text="Es un bien">
+                        <MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="@(context.Item.FLG_BIEN == true ? Color.Success : Color.Error)"
+                                 Style="@(context.Item.FLG_BIEN == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                    </MudTooltip>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Partida Arancelaria" Width="140">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_PARTIDA_ARANCELARIA" Activo="@(_ordenColumnaGrupo == 2)" Ascendente="_ordenAscendenteGrupo" OnClick="@(() => ToggleOrdenGrupo(2))" />
+                        <FiltroExcelColumna T="GruposProductoModel" ItemsBase="@BaseGrupo(2)" ValorDe="@(x=>x.COD_PARTIDA_ARANCELARIA ?? "")"
+                                            ValoresActivos="_filtrosGrupo.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>FiltroGrupo(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_PARTIDA_ARANCELARIA</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="CUBSO" Width="260">
+                <CellTemplate>
+                    @if (!string.IsNullOrEmpty(context.Item.COD_CUBSO))
+                    {
+                        @($"{context.Item.COD_CUBSO} - {context.Item.DES_CUBSO_ES ?? context.Item.DES_CUBSO}")
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Estado" Width="110">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumnaGrupo == 3)" Ascendente="_ordenAscendenteGrupo" OnClick="@(() => ToggleOrdenGrupo(3))" />
+                        <FiltroExcelColumna T="GruposProductoModel" ItemsBase="@BaseGrupo(3)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtrosGrupo.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>FiltroGrupo(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrEmpty(context.Item.DES_ESTADO))
+                    {
+                        <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <div @onclick:stopPropagation="true">
+                        <AccionesBotones CodAplicacion="@_codApGrupo" CodOpcionAplicacion="@_codOpGrupo"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="GruposProductoModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+<div class="d-flex gap-4" style="align-items:stretch;">
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);flex:1;min-width:0;">
+        <div class="d-flex align-center gap-3 pa-3 grid-header-compacto">
+            <div class="grid-header-titulo">
+                <MudText Typo="Typo.h6">Familias de Producto</MudText>
+                <MudText Class="mono" Style="opacity:.6;font-size:.78rem;">
+                    @(_grupoSel is null ? "Ningún grupo seleccionado" : $"Grupo: {_grupoSel.COD_GRUPO_PRODUCTO} – {_grupoSel.DES_GRUPO_PRODUCTO}")
+                </MudText>
+            </div>
+            <BarraBusqueda @bind-Value="_searchFamilia" OnSearch="@(() => Task.CompletedTask)" Placeholder="Buscar familia de producto..." DebounceInterval="300" MaxWidth="719px" Class="grid-header-search" />
+            @if (_grupoSel is not null)
+            {
+                <div class="grid-header-divider"></div>
+                <AccionesBotones CodAplicacion="@_codApFamilia" CodOpcionAplicacion="@_codOpFamilia"
+                                 Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderFamilia" />
+            }
+        </div>
+        <div data-resizable-grid="familias-producto" data-default-height="320" style="position:relative;">
+        <MudDataGrid T="FamiliasProductoModel" Items="_familiasFiltradas" Dense="true" Hover="true" Striped="true"
+                     RowClick="OnFamiliaRowClick"
+                     RowClassFunc="@((f, i) => f.COD_FAMILIA_PRODUCTO == _familiaSel?.COD_FAMILIA_PRODUCTO ? "fila-seleccionada" : "")"
+                     RowStyleFunc="@((f, i) => "cursor:pointer;")"
+                     FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+            <Columns>
+                <TemplateColumn Sortable="false" Title="Código" Width="90">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_FAMILIA_PRODUCTO" Activo="@(_ordenColumnaFamilia == 0)" Ascendente="_ordenAscendenteFamilia" OnClick="@(() => ToggleOrdenFamilia(0))" />
+                            <FiltroExcelColumna T="FamiliasProductoModel" ItemsBase="@BaseFamilia(0)" ValorDe="@(x=>x.COD_FAMILIA_PRODUCTO ?? "")"
+                                                ValoresActivos="_filtrosFamilia.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroFamilia(0,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.COD_FAMILIA_PRODUCTO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Descripción">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_FAMILIA_PRODUCTO" Activo="@(_ordenColumnaFamilia == 1)" Ascendente="_ordenAscendenteFamilia" OnClick="@(() => ToggleOrdenFamilia(1))" />
+                            <FiltroExcelColumna T="FamiliasProductoModel" ItemsBase="@BaseFamilia(1)" ValorDe="@(x=>x.DES_FAMILIA_PRODUCTO ?? "")"
+                                                ValoresActivos="_filtrosFamilia.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroFamilia(1,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.DES_FAMILIA_PRODUCTO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Bien" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;" Width="70">
+                    <CellTemplate>
+                        <MudTooltip Text="Es un bien">
+                            <MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="@(context.Item.FLG_BIEN == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_BIEN == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="CUBSO" Width="260">
+                    <CellTemplate>
+                        @if (!string.IsNullOrEmpty(context.Item.COD_CUBSO))
+                        {
+                            @($"{context.Item.COD_CUBSO} - {context.Item.DES_CUBSO_ES ?? context.Item.DES_CUBSO}")
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Estado" Width="100">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumnaFamilia == 2)" Ascendente="_ordenAscendenteFamilia" OnClick="@(() => ToggleOrdenFamilia(2))" />
+                            <FiltroExcelColumna T="FamiliasProductoModel" ItemsBase="@BaseFamilia(2)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                                ValoresActivos="_filtrosFamilia.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>FiltroFamilia(2,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        @if (!string.IsNullOrEmpty(context.Item.DES_ESTADO))
+                        {
+                            <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false">
+                    <CellTemplate>
+                        @{ var item = context.Item; }
+                        <div @onclick:stopPropagation="true">
+                            <AccionesBotones CodAplicacion="@_codApFamilia" CodOpcionAplicacion="@_codOpFamilia"
+                                             Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaFamilia(item,b))" />
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent>
+                <MudText Class="pa-6 mono" Style="opacity:.5;">
+                    @(_grupoSel is null ? "Seleccione un grupo arriba." : "Sin familias para este grupo.")
+                </MudText>
+            </NoRecordsContent>
+            <PagerContent><MudDataGridPager T="FamiliasProductoModel" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    </MudPaper>
+
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);flex:1;min-width:0;">
+        <div class="d-flex align-center gap-3 pa-3 grid-header-compacto">
+            <div class="grid-header-titulo">
+                <MudText Typo="Typo.h6">Sub-Familias de Producto</MudText>
+                <MudText Class="mono" Style="opacity:.6;font-size:.78rem;">
+                    @(_familiaSel is null ? "Ninguna familia seleccionada" : $"Familia: {_familiaSel.COD_FAMILIA_PRODUCTO} – {_familiaSel.DES_FAMILIA_PRODUCTO}")
+                </MudText>
+            </div>
+            <BarraBusqueda @bind-Value="_searchSubFamilia" OnSearch="@(() => Task.CompletedTask)" Placeholder="Buscar sub-familia de producto..." DebounceInterval="300" MaxWidth="719px" Class="grid-header-search" />
+            @if (_familiaSel is not null)
+            {
+                <div class="grid-header-divider"></div>
+                <AccionesBotones CodAplicacion="@_codApSubFamilia" CodOpcionAplicacion="@_codOpSubFamilia"
+                                 Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderSubFamilia" />
+            }
+        </div>
+        <div data-resizable-grid="sub-familias-producto" data-default-height="320" style="position:relative;">
+        <MudDataGrid T="SubFamiliasProductoModel" Items="_subFamiliasFiltradas" Dense="true" Hover="true" Striped="true"
+                     RowClick="OnSubFamiliaRowClick"
+                     RowClassFunc="@((s, i) => s.COD_SUB_FAMILIA_PRODUCTO == _subFamiliaSel?.COD_SUB_FAMILIA_PRODUCTO ? "fila-seleccionada" : "")"
+                     RowStyleFunc="@((s, i) => "cursor:pointer;")"
+                     FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+            <Columns>
+                <TemplateColumn Sortable="false" Title="Código" Width="90">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_SUB_FAMILIA_PRODUCTO" Activo="@(_ordenColumnaSubFamilia == 0)" Ascendente="_ordenAscendenteSubFamilia" OnClick="@(() => ToggleOrdenSubFamilia(0))" />
+                            <FiltroExcelColumna T="SubFamiliasProductoModel" ItemsBase="@BaseSubFamilia(0)" ValorDe="@(x=>x.COD_SUB_FAMILIA_PRODUCTO ?? "")"
+                                                ValoresActivos="_filtrosSubFamilia.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroSubFamilia(0,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.COD_SUB_FAMILIA_PRODUCTO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Descripción">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_SUB_FAMILIA_PRODUCTO" Activo="@(_ordenColumnaSubFamilia == 1)" Ascendente="_ordenAscendenteSubFamilia" OnClick="@(() => ToggleOrdenSubFamilia(1))" />
+                            <FiltroExcelColumna T="SubFamiliasProductoModel" ItemsBase="@BaseSubFamilia(1)" ValorDe="@(x=>x.DES_SUB_FAMILIA_PRODUCTO ?? "")"
+                                                ValoresActivos="_filtrosSubFamilia.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroSubFamilia(1,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.DES_SUB_FAMILIA_PRODUCTO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="CUBSO" Width="260">
+                    <CellTemplate>
+                        @if (!string.IsNullOrEmpty(context.Item.COD_CUBSO))
+                        {
+                            @($"{context.Item.COD_CUBSO} - {context.Item.DES_CUBSO_ES ?? context.Item.DES_CUBSO}")
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Estado" Width="100">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumnaSubFamilia == 2)" Ascendente="_ordenAscendenteSubFamilia" OnClick="@(() => ToggleOrdenSubFamilia(2))" />
+                            <FiltroExcelColumna T="SubFamiliasProductoModel" ItemsBase="@BaseSubFamilia(2)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                                ValoresActivos="_filtrosSubFamilia.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>FiltroSubFamilia(2,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        @if (!string.IsNullOrEmpty(context.Item.DES_ESTADO))
+                        {
+                            <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false">
+                    <CellTemplate>
+                        @{ var item = context.Item; }
+                        <div @onclick:stopPropagation="true">
+                            <AccionesBotones CodAplicacion="@_codApSubFamilia" CodOpcionAplicacion="@_codOpSubFamilia"
+                                             Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaSubFamilia(item,b))" />
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent>
+                <MudText Class="pa-6 mono" Style="opacity:.5;">
+                    @(_familiaSel is null ? "Seleccione una familia a la izquierda." : "Sin sub-familias para esta familia.")
+                </MudText>
+            </NoRecordsContent>
+            <PagerContent><MudDataGridPager T="SubFamiliasProductoModel" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    </MudPaper>
+</div>
+
+@code {
+    private Func<Task>? _onCambio0;
+    private Func<Task>? _onCambio1;
+    private Func<Task>? _onCambio2;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    // ── Códigos de seguridad por nivel ──
+    // Este componente aloja 3 niveles (Grupos → Familias → SubFamilias) que en el árbol de
+    // Opciones de Aplicaciones son 3 nodos DISTINTOS con sus propios botones. Se resuelven
+    // dinámicamente por DES_FORMULARIO (clave estable ante "Mover"), con fallback a los
+    // parámetros raíz si el nodo no se encuentra.
+    private string _codApGrupo = "", _codOpGrupo = "";
+    private string _codApFamilia = "", _codOpFamilia = "";
+    private string _codApSubFamilia = "", _codOpSubFamilia = "";
+
+    private void ResolverCodigosPorSeccion()
+    {
+        (_codApGrupo, _codOpGrupo)           = ResolverCod("Estandar/GruposProducto.razor");
+        (_codApFamilia, _codOpFamilia)       = ResolverCod("Estandar/FamiliasProducto.razor");
+        (_codApSubFamilia, _codOpSubFamilia) = ResolverCod("Estandar/SubFamiliasProducto.razor");
+    }
+
+    private (string App, string Opcion) ResolverCod(string formulario)
+    {
+        var r = MenuSvc.BuscarCodigosPorFormulario(formulario);
+        return r is null ? (CodAplicacion, CodOpcionAplicacion) : (r.Value.CodAplicacion, r.Value.CodOpcionAplicacion);
+    }
+
+    private List<GruposProductoModel>       _grupos      = new();
+    private List<FamiliasProductoModel>     _familias    = new();
+    private List<SubFamiliasProductoModel>  _subFamilias = new();
+
+    private GruposProductoModel?   _grupoSel;
+    private FamiliasProductoModel? _familiaSel;
+    private SubFamiliasProductoModel? _subFamiliaSel;
+    private string _searchGrupo      = "";
+    private string _searchFamilia    = "";
+    private string _searchSubFamilia = "";
+
+    private List<FamiliasProductoModel> _familiasVisibles =>
+        string.IsNullOrWhiteSpace(_searchFamilia) ? _familias
+        : _familias.Where(f => (f.COD_FAMILIA_PRODUCTO?.Contains(_searchFamilia, StringComparison.OrdinalIgnoreCase) ?? false)
+                             || (f.DES_FAMILIA_PRODUCTO?.Contains(_searchFamilia, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+    private List<SubFamiliasProductoModel> _subFamiliasVisibles =>
+        string.IsNullOrWhiteSpace(_searchSubFamilia) ? _subFamilias
+        : _subFamilias.Where(s => (s.COD_SUB_FAMILIA_PRODUCTO?.Contains(_searchSubFamilia, StringComparison.OrdinalIgnoreCase) ?? false)
+                                || (s.DES_SUB_FAMILIA_PRODUCTO?.Contains(_searchSubFamilia, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+    // ── Filtros de columna ──
+    private readonly Dictionary<int, HashSet<string>?> _filtrosGrupo = new();
+    private int? _ordenColumnaGrupo;
+    private bool _ordenAscendenteGrupo = true;
+    private void ToggleOrdenGrupo(int columna)
+    {
+        if (_ordenColumnaGrupo == columna) _ordenAscendenteGrupo = !_ordenAscendenteGrupo;
+        else { _ordenColumnaGrupo = columna; _ordenAscendenteGrupo = true; }
+        StateHasChanged();
+    }
+    private List<GruposProductoModel> OrdenarGrupo(List<GruposProductoModel> items) => _ordenColumnaGrupo switch
+    {
+        0 => _ordenAscendenteGrupo ? items.OrderBy(x => x.COD_GRUPO_PRODUCTO).ToList() : items.OrderByDescending(x => x.COD_GRUPO_PRODUCTO).ToList(),
+        1 => _ordenAscendenteGrupo ? items.OrderBy(x => x.DES_GRUPO_PRODUCTO).ToList() : items.OrderByDescending(x => x.DES_GRUPO_PRODUCTO).ToList(),
+        2 => _ordenAscendenteGrupo ? items.OrderBy(x => x.COD_PARTIDA_ARANCELARIA).ToList() : items.OrderByDescending(x => x.COD_PARTIDA_ARANCELARIA).ToList(),
+        3 => _ordenAscendenteGrupo ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+    private List<GruposProductoModel> _gruposVisibles => OrdenarGrupo(AplicarGrupo(_grupos, -1));
+    private List<GruposProductoModel> BaseGrupo(int col) => AplicarGrupo(_grupos, col);
+    private List<GruposProductoModel> AplicarGrupo(List<GruposProductoModel> src, int ex)
+    {
+        IEnumerable<GruposProductoModel> q = src;
+        foreach (var (c, v) in _filtrosGrupo)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_GRUPO_PRODUCTO ?? "")),
+                1 => q.Where(x => v.Contains(x.DES_GRUPO_PRODUCTO ?? "")),
+                2 => q.Where(x => v.Contains(x.COD_PARTIDA_ARANCELARIA ?? "")),
+                3 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroGrupo(int c, HashSet<string>? v) { _filtrosGrupo[c] = v; StateHasChanged(); }
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosFamilia = new();
+    private int? _ordenColumnaFamilia;
+    private bool _ordenAscendenteFamilia = true;
+    private void ToggleOrdenFamilia(int columna)
+    {
+        if (_ordenColumnaFamilia == columna) _ordenAscendenteFamilia = !_ordenAscendenteFamilia;
+        else { _ordenColumnaFamilia = columna; _ordenAscendenteFamilia = true; }
+        StateHasChanged();
+    }
+    private List<FamiliasProductoModel> OrdenarFamilia(List<FamiliasProductoModel> items) => _ordenColumnaFamilia switch
+    {
+        0 => _ordenAscendenteFamilia ? items.OrderBy(x => x.COD_FAMILIA_PRODUCTO).ToList() : items.OrderByDescending(x => x.COD_FAMILIA_PRODUCTO).ToList(),
+        1 => _ordenAscendenteFamilia ? items.OrderBy(x => x.DES_FAMILIA_PRODUCTO).ToList() : items.OrderByDescending(x => x.DES_FAMILIA_PRODUCTO).ToList(),
+        2 => _ordenAscendenteFamilia ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+    private List<FamiliasProductoModel> _familiasFiltradas => OrdenarFamilia(AplicarFamilia(_familiasVisibles, -1));
+    private List<FamiliasProductoModel> BaseFamilia(int col) => AplicarFamilia(_familiasVisibles, col);
+    private List<FamiliasProductoModel> AplicarFamilia(List<FamiliasProductoModel> src, int ex)
+    {
+        IEnumerable<FamiliasProductoModel> q = src;
+        foreach (var (c, v) in _filtrosFamilia)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_FAMILIA_PRODUCTO ?? "")),
+                1 => q.Where(x => v.Contains(x.DES_FAMILIA_PRODUCTO ?? "")),
+                2 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroFamilia(int c, HashSet<string>? v) { _filtrosFamilia[c] = v; StateHasChanged(); }
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosSubFamilia = new();
+    private int? _ordenColumnaSubFamilia;
+    private bool _ordenAscendenteSubFamilia = true;
+    private void ToggleOrdenSubFamilia(int columna)
+    {
+        if (_ordenColumnaSubFamilia == columna) _ordenAscendenteSubFamilia = !_ordenAscendenteSubFamilia;
+        else { _ordenColumnaSubFamilia = columna; _ordenAscendenteSubFamilia = true; }
+        StateHasChanged();
+    }
+    private List<SubFamiliasProductoModel> OrdenarSubFamilia(List<SubFamiliasProductoModel> items) => _ordenColumnaSubFamilia switch
+    {
+        0 => _ordenAscendenteSubFamilia ? items.OrderBy(x => x.COD_SUB_FAMILIA_PRODUCTO).ToList() : items.OrderByDescending(x => x.COD_SUB_FAMILIA_PRODUCTO).ToList(),
+        1 => _ordenAscendenteSubFamilia ? items.OrderBy(x => x.DES_SUB_FAMILIA_PRODUCTO).ToList() : items.OrderByDescending(x => x.DES_SUB_FAMILIA_PRODUCTO).ToList(),
+        2 => _ordenAscendenteSubFamilia ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+    private List<SubFamiliasProductoModel> _subFamiliasFiltradas => OrdenarSubFamilia(AplicarSubFamilia(_subFamiliasVisibles, -1));
+    private List<SubFamiliasProductoModel> BaseSubFamilia(int col) => AplicarSubFamilia(_subFamiliasVisibles, col);
+    private List<SubFamiliasProductoModel> AplicarSubFamilia(List<SubFamiliasProductoModel> src, int ex)
+    {
+        IEnumerable<SubFamiliasProductoModel> q = src;
+        foreach (var (c, v) in _filtrosSubFamilia)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_SUB_FAMILIA_PRODUCTO ?? "")),
+                1 => q.Where(x => v.Contains(x.DES_SUB_FAMILIA_PRODUCTO ?? "")),
+                2 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroSubFamilia(int c, HashSet<string>? v) { _filtrosSubFamilia[c] = v; StateHasChanged(); }
+
+    protected override async Task OnInitializedAsync()
+    {
+        ResolverCodigosPorSeccion();
+        await AccessLog.LogNavegacionAsync("ESTANDAR", "GruposProducto");
+        await LoadGrupos();
+
+        _grupoSel = _grupos.FirstOrDefault();
+        if (_grupoSel is not null)
+        {
+            await LoadFamiliasDeGrupoSel();
+            _familiaSel = _familias.FirstOrDefault();
+            if (_familiaSel is not null) await LoadSubFamiliasDeFamiliaSel();
+        }
+
+        _onCambio0 = async () => await InvokeAsync(async () => { await LoadGrupos();      StateHasChanged(); });
+        Cambios.Suscribir("ESTANDAR.GRUPOS_PRODUCTO", _onCambio0);
+        _onCambio1 = async () => await InvokeAsync(async () => { await LoadFamiliasDeGrupoSel();    StateHasChanged(); });
+        Cambios.Suscribir("ESTANDAR.FAMILIAS_PRODUCTO", _onCambio1);
+        _onCambio2 = async () => await InvokeAsync(async () => { await LoadSubFamiliasDeFamiliaSel(); StateHasChanged(); });
+        Cambios.Suscribir("ESTANDAR.SUB_FAMILIAS_PRODUCTO", _onCambio2);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task LoadGrupos()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<GruposProductoModel>>>(ApiRoutes.Estandar.GruposProducto);
+            _grupos = r?.Data ?? new();
+        }
+        catch { _grupos = new(); }
+    }
+
+    private async Task LoadFamiliasDeGrupoSel()
+    {
+        if (_grupoSel is null) { _familias = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<FamiliasProductoModel>>>(
+                $"{ApiRoutes.Estandar.FamiliasProducto}?codGrupoProducto={Uri.EscapeDataString(_grupoSel.COD_GRUPO_PRODUCTO)}");
+            _familias = r?.Data ?? new();
+        }
+        catch { _familias = new(); }
+    }
+
+    private async Task LoadSubFamiliasDeFamiliaSel()
+    {
+        if (_familiaSel is null) { _subFamilias = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<SubFamiliasProductoModel>>>(
+                $"{ApiRoutes.Estandar.SubFamiliasProducto}?codGrupoProducto={Uri.EscapeDataString(_familiaSel.COD_GRUPO_PRODUCTO)}&codFamiliaProducto={Uri.EscapeDataString(_familiaSel.COD_FAMILIA_PRODUCTO)}");
+            _subFamilias = r?.Data ?? new();
+        }
+        catch { _subFamilias = new(); }
+    }
+
+    private async Task BuscarGrupos()
+    {
+        if (string.IsNullOrWhiteSpace(_searchGrupo)) { await LoadGrupos(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<GruposProductoModel>>>(
+                $"{ApiRoutes.Estandar.GruposProducto}/search?search={Uri.EscapeDataString(_searchGrupo)}");
+            _grupos = r?.Data ?? new();
+        }
+        catch { _grupos = new(); }
+    }
+
+    private async Task OnGrupoRowClick(DataGridRowClickEventArgs<GruposProductoModel> args)
+    {
+        _grupoSel      = args.Item;
+        _familiaSel    = null;
+        _subFamiliaSel = null;
+        _subFamilias   = new();
+        await LoadFamiliasDeGrupoSel();
+    }
+
+    private async Task OnFamiliaRowClick(DataGridRowClickEventArgs<FamiliasProductoModel> args)
+    {
+        _familiaSel    = args.Item;
+        _subFamiliaSel = null;
+        await LoadSubFamiliasDeFamiliaSel();
+    }
+
+    private Task OnSubFamiliaRowClick(DataGridRowClickEventArgs<SubFamiliasProductoModel> args)
+    {
+        _subFamiliaSel = args.Item;
+        return Task.CompletedTask;
+    }
+
+    // ── Grupos ──
+    private Task OnAccionHeaderGrupo(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(GruposProductoModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(GruposProductoModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo grupo de producto",
+            CrudModo.Delete => $"Eliminar · {item?.DES_GRUPO_PRODUCTO}",
+            CrudModo.Read   => $"Consultar · {item?.DES_GRUPO_PRODUCTO}",
+            _               => $"Editar · {item?.DES_GRUPO_PRODUCTO}"
+        };
+        var dlg = await DialogService.ShowAsync<GruposProductoDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadGrupos();
+    }
+
+    // ── Familias ──
+    private Task OnAccionHeaderFamilia(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirFamilia(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaFamilia(FamiliasProductoModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirFamilia(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirFamilia(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirFamilia(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirFamilia(FamiliasProductoModel? item, CrudModo modo)
+    {
+        if (modo == CrudModo.Create && _grupoSel is not null)
+            item = new FamiliasProductoModel { COD_GRUPO_PRODUCTO = _grupoSel.COD_GRUPO_PRODUCTO };
+
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva familia de producto",
+            CrudModo.Delete => $"Eliminar · {item?.DES_FAMILIA_PRODUCTO}",
+            CrudModo.Read   => $"Consultar · {item?.DES_FAMILIA_PRODUCTO}",
+            _               => $"Editar · {item?.DES_FAMILIA_PRODUCTO}"
+        };
+        var dlg = await DialogService.ShowAsync<FamiliasProductoDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo, ["GruposDisponibles"] = _grupos },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadFamiliasDeGrupoSel();
+    }
+
+    // ── Sub-Familias ──
+    private Task OnAccionHeaderSubFamilia(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirSubFamilia(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaSubFamilia(SubFamiliasProductoModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirSubFamilia(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirSubFamilia(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirSubFamilia(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirSubFamilia(SubFamiliasProductoModel? item, CrudModo modo)
+    {
+        if (modo == CrudModo.Create && _familiaSel is not null)
+            item = new SubFamiliasProductoModel { COD_GRUPO_PRODUCTO = _familiaSel.COD_GRUPO_PRODUCTO, COD_FAMILIA_PRODUCTO = _familiaSel.COD_FAMILIA_PRODUCTO };
+
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva sub-familia de producto",
+            CrudModo.Delete => $"Eliminar · {item?.DES_SUB_FAMILIA_PRODUCTO}",
+            CrudModo.Read   => $"Consultar · {item?.DES_SUB_FAMILIA_PRODUCTO}",
+            _               => $"Editar · {item?.DES_SUB_FAMILIA_PRODUCTO}"
+        };
+        var dlg = await DialogService.ShowAsync<SubFamiliasProductoDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo, ["GruposDisponibles"] = _grupos },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadSubFamiliasDeFamiliaSel();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ESTANDAR.GRUPOS_PRODUCTO", _onCambio0 ?? (() => Task.CompletedTask));
+        Cambios.Desuscribir("ESTANDAR.FAMILIAS_PRODUCTO", _onCambio1 ?? (() => Task.CompletedTask));
+        Cambios.Desuscribir("ESTANDAR.SUB_FAMILIAS_PRODUCTO", _onCambio2 ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

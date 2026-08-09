@@ -1,0 +1,164 @@
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ErrorLogService ErrorLog
+
+@* SEGURIDAD.ROLES_USUARIO_ALMACENES_TIPOS_MOVIMIENTO — hijo de ROLES_USUARIO_ALMACENES.
+   Qué movimientos puede hacer el rol dentro de UN almacén que ya tiene asignado.
+
+   Los disponibles salen de los tipos habilitados en ese almacén
+   (LOGISTICA.ALMACENES_TIPOS_MOVIMIENTO), no del catálogo general: no tendría sentido darle
+   a un rol permiso sobre un movimiento que el almacén no admite. *@
+
+<PanelAsignacionDoble TItem="RolAlmacenTipoMovimiento" @ref="_panel"
+                      Asignados="_asignados" Disponibles="_disponibles"
+                      Clave="ClaveDe"
+                      Codigo="@(t => t.COD_TIPO_MOVIMIENTO)"
+                      Descripcion="@(t => t.DES_TIPO_MOVIMIENTO ?? t.COD_TIPO_MOVIMIENTO)"
+                      Secundaria="DescripcionClase"
+                      TituloColumna="Tipo de movimiento"
+                      EtiquetaPadre="almacén" EtiquetaPlural="tipos de movimiento"
+                      VacioAsignados="El rol no tiene tipos de movimiento en este almacén."
+                      VacioDisponibles="El rol ya tiene todos los tipos habilitados del almacén."
+                      NombreGrilla="rol-almacen-tipos-movimiento"
+                      SoloLectura="SoloLectura" Cargando="_cargando" Procesando="_procesando"
+                      OnAsignar="AsignarAsync" OnDesasignar="DesasignarAsync" />
+
+@code {
+    [Parameter, EditorRequired] public Rol? Rol { get; set; }
+    [Parameter, EditorRequired] public RolAlmacen? Almacen { get; set; }
+    [Parameter] public bool SoloLectura { get; set; }
+
+    private PanelAsignacionDoble<RolAlmacenTipoMovimiento>? _panel;
+    private List<RolAlmacenTipoMovimiento> _asignados = new();
+    private List<RolAlmacenTipoMovimiento> _disponibles = new();
+
+    private bool _cargando, _procesando;
+    private string? _contextoCargado;
+
+    /// <summary>La clave de marcado es el par clase+tipo: el código de tipo solo se repite
+    /// entre clases distintas, y dos filas con la misma clave se marcarían juntas.</summary>
+    private static string ClaveDe(RolAlmacenTipoMovimiento t)
+        => $"{t.COD_CLASE_MOVIMIENTO}|{t.COD_TIPO_MOVIMIENTO}";
+
+    /// <summary>Se muestra la clase debajo del nombre porque la grilla mezcla las clases: sin
+    /// eso, dos movimientos homónimos de clases distintas serían indistinguibles.</summary>
+    private static string? DescripcionClase(RolAlmacenTipoMovimiento t)
+        => string.IsNullOrWhiteSpace(t.DES_CLASE_MOVIMIENTO)
+            ? t.COD_CLASE_MOVIMIENTO
+            : $"{t.COD_CLASE_MOVIMIENTO} · {t.DES_CLASE_MOVIMIENTO}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var ctx = $"{Rol?.COD_ROL_USUARIO}|{Almacen?.COD_ALMACEN}";
+        if (ctx == _contextoCargado) return;
+        _contextoCargado = ctx;
+        await Cargar();
+    }
+
+    private async Task Cargar()
+    {
+        if (Rol is null || Almacen is null) { _asignados = new(); _disponibles = new(); return; }
+
+        _cargando = true;
+        try
+        {
+            var rol = Uri.EscapeDataString(Rol.COD_ROL_USUARIO);
+            var alm = Uri.EscapeDataString(Almacen.COD_ALMACEN);
+
+            var ra = await Http.GetFromJsonAsync<ApiResponse<List<RolAlmacenTipoMovimiento>>>(
+                $"{ApiRoutes.Seguridad.RolesAlmacenesTiposMovimiento}/{rol}/{alm}");
+            _asignados = Ordenar(ra?.Data ?? new());
+
+            var rd = await Http.GetFromJsonAsync<ApiResponse<List<RolAlmacenTipoMovimiento>>>(
+                $"{ApiRoutes.Seguridad.RolesAlmacenesTiposMovimientoDisponibles}/{rol}/{alm}");
+            _disponibles = Ordenar(rd?.Data ?? new());
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(RolAlmacenTiposMovimientoTab), nameof(Cargar));
+            await MostrarErrorAsync("No se pudieron cargar los tipos de movimiento del almacén.");
+            _asignados = new();
+            _disponibles = new();
+        }
+        _cargando = false;
+    }
+
+    /// <summary>Ordena por clase y después por nombre, cayendo al código cuando falta la
+    /// descripción: el SP _DISPONIBLES devuelve sólo los códigos.</summary>
+    private static List<RolAlmacenTipoMovimiento> Ordenar(List<RolAlmacenTipoMovimiento> items)
+        => items.OrderBy(t => t.COD_CLASE_MOVIMIENTO)
+                .ThenBy(t => t.DES_TIPO_MOVIMIENTO ?? t.COD_TIPO_MOVIMIENTO)
+                .ToList();
+
+    private Task AsignarAsync(List<RolAlmacenTipoMovimiento> items)
+        => EnviarLoteAsync(ApiRoutes.Seguridad.RolesAlmacenesTiposMovimientoAsignar, items, "asignar");
+
+    private Task DesasignarAsync(List<RolAlmacenTipoMovimiento> items)
+        => EnviarLoteAsync(ApiRoutes.Seguridad.RolesAlmacenesTiposMovimientoDesasignar, items, "quitar");
+
+    private async Task EnviarLoteAsync(string ruta, List<RolAlmacenTipoMovimiento> items, string verbo)
+    {
+        if (SoloLectura)
+        {
+            await MostrarAvisoAsync("Sólo lectura", "No tiene permiso para modificar los tipos de movimiento de este rol.");
+            return;
+        }
+        if (Rol is null || Almacen is null || items.Count == 0 || _procesando) return;
+
+        _procesando = true;
+        try
+        {
+            var dto = new RolAlmacenTiposMovimientoLote
+            {
+                COD_ROL_USUARIO = Rol.COD_ROL_USUARIO,
+                COD_ALMACEN = Almacen.COD_ALMACEN,
+                Tipos = items.Select(i => new ClaseTipoMovimiento
+                {
+                    COD_CLASE_MOVIMIENTO = i.COD_CLASE_MOVIMIENTO,
+                    COD_TIPO_MOVIMIENTO = i.COD_TIPO_MOVIMIENTO
+                }).ToList()
+            };
+            var resp = await Http.PostAsJsonAsync(ruta, dto);
+            if (!resp.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService,
+                    nameof(RolAlmacenTiposMovimientoTab), nameof(EnviarLoteAsync), $"No se pudo {verbo}");
+                return;
+            }
+
+            var r = await resp.Content.ReadFromJsonAsync<ApiResponse<RolAsignacionLoteResult>>();
+            var res = r?.Data;
+            await Cargar();
+            _panel?.LimpiarMarcas();
+
+            if (res is null) { Snackbar.Add("Operación completada.", Severity.Success); return; }
+
+            if (res.Fallidos.Any())
+            {
+                await MostrarAvisoAsync($"No se pudo {verbo} todo",
+                    $"Se procesaron {res.Procesados}. Quedaron afuera: {string.Join(", ", res.Fallidos)}." +
+                    (string.IsNullOrWhiteSpace(res.DesError) ? "" : $" Motivo: {res.DesError}"));
+            }
+            else
+            {
+                Snackbar.Add($"{res.Procesados} tipo(s) de movimiento actualizados.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(RolAlmacenTiposMovimientoTab), nameof(EnviarLoteAsync));
+            await MostrarErrorAsync($"No se pudo {verbo} los tipos de movimiento.");
+        }
+        finally { _procesando = false; }
+    }
+
+    private Task MostrarErrorAsync(string mensaje)
+        => MostrarAvisoAsync("No se pudo completar la operación", $"{mensaje} Ver detalle en el log de errores.");
+
+    private async Task MostrarAvisoAsync(string titulo, string mensaje)
+        => await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters { ["Titulo"] = titulo, ["Mensaje"] = mensaje },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+}

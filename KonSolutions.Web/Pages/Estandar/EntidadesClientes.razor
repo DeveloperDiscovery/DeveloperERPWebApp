@@ -1,0 +1,41 @@
+@page "/estandar/entidades-clientes"
+@attribute [Authorize]
+@inject MenuService MenuService
+@inject HttpClient Http
+
+@*
+    Reutiliza Entidades.razor (grilla + diálogo) fijando el Tipo de Entidad = "CLI" (Clientes).
+    El "CLI" NO está hardcodeado acá — se lee de DES_PARAMETRO en SEGURIDAD.APLICACIONES_OPCIONES,
+    resolviendo esta opción de menú por su ruta (DES_FORMULARIO), que es estable aunque el
+    administrador mueva la opción de carpeta y le cambie el COD_OPCION_APLICACION (ver
+    MenuService.BuscarCodigosPorFormulario y PROC_SEGURIDAD_OPCIONES_MOVE, que arrastra
+    DES_PARAMETRO intacto a la fila renumerada).
+
+    Si no se encuentra la opción (todavía no se registró en SEGURIDAD.APLICACIONES_OPCIONES,
+    ej. primera vez que se despliega) o no tiene DES_PARAMETRO cargado, se muestra sin filtro
+    fijo — se ve como la grilla genérica de Entidades hasta que se complete la configuración.
+*@
+<Entidades CodAplicacion="@_codAplicacion" CodOpcionAplicacion="@_codOpcion" CodTipoEntidadFijo="@_codTipoEntidadFijo" />
+
+@code {
+    private string _codAplicacion = "";
+    private string _codOpcion = "";
+    private string? _codTipoEntidadFijo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var codigos = MenuService.BuscarCodigosPorFormulario("Estandar/EntidadesClientes.razor");
+        if (codigos is null) return;
+
+        _codAplicacion = codigos.Value.CodAplicacion;
+        _codOpcion = codigos.Value.CodOpcionAplicacion;
+
+        try
+        {
+            var url = $"{ApiRoutes.Seguridad.AplicacionesOpciones}/{Uri.EscapeDataString(_codAplicacion)}/{Uri.EscapeDataString(_codOpcion)}";
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<KONSolutions.Shared.Models.Seguridad.AplicacionesOpcionesFormDto>>(url);
+            _codTipoEntidadFijo = string.IsNullOrWhiteSpace(r?.Data?.DES_PARAMETRO) ? null : r!.Data!.DES_PARAMETRO;
+        }
+        catch { /* sin parámetro cargado, la grilla se ve sin filtro fijo (ver comentario arriba) */ }
+    }
+}

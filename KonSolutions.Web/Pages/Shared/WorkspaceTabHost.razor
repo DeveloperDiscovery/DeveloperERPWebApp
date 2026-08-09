@@ -1,0 +1,251 @@
+@inject WorkspaceTabService TabService
+@inject IJSRuntime JS
+@implements IDisposable
+
+<div class="ws-tabs-host">
+    @if (TabService.TieneSplit)
+    {
+        @* ── Modo dividido ── *@
+        <div class="ws-split-container @(TabService.SplitDireccion == "v" ? "ws-split-vertical" : "ws-split-horizontal")"
+             id="ws-split-container">
+            @* Panel A *@
+            <div class="ws-panel" id="ws-panel-a">
+                @PanelContent(0)
+            </div>
+
+            @* Divisor arrastrable *@
+            <div class="ws-split-handle @(TabService.SplitDireccion == "v" ? "ws-split-handle-v" : "ws-split-handle-h")"
+                 id="ws-split-handle"
+                 title="Arrastrar para redimensionar · doble clic para igualar">
+                <div class="ws-split-handle-grip"></div>
+            </div>
+
+            @* Panel B *@
+            <div class="ws-panel" id="ws-panel-b">
+                @PanelContent(1)
+            </div>
+        </div>
+    }
+    else if (TabService.Tabs.Any())
+    {
+        @* ── Modo simple (sin split) ── *@
+        @PanelContent(0)
+    }
+    else
+    {
+        <div class="ws-tab-content">@ChildContent</div>
+    }
+</div>
+
+@* Fragmento reutilizable para un panel *@
+@code {
+    // Al cambiar de tab, cualquier popover/menú abierto (ej. FiltroExcelColumna) queda
+    // "flotando" — vive en un portal fuera del árbol del tab (que solo se oculta con
+    // display:none, no se destruye), así que cambiar de tab no lo cierra solo. En vez de
+    // coordinar esto pestaña por pestaña, se simula un click afuera apenas se activa otra
+    // pestaña: es el mismo mecanismo que MudBlazor ya usa para cerrar sus popovers al
+    // clickear afuera, así que cierra cualquiera que haya quedado abierto, sin importar cuál.
+    private void ActivarTab(string tabId)
+    {
+        TabService.Activar(tabId);
+        _ = JS.InvokeVoidAsync("workspaceTabHost.cerrarPopoversAbiertos");
+        // Los diálogos (MudDialogProvider) viven fuera del árbol de pestañas — sin esto,
+        // un diálogo abierto en esta pestaña se ve/bloquea encima de CUALQUIER otra a la
+        // que cambies. Se oculta (no se cierra) el que no pertenece a la pestaña recién
+        // activada, y se vuelve a mostrar si el usuario regresa a la suya.
+        _ = JS.InvokeVoidAsync("workspaceDialogScope.actualizarVisibilidad", tabId);
+    }
+
+    private RenderFragment PanelContent(int panel) => __builder =>
+    {
+        var tabs = TabService.TabsDePanel(panel).ToList();
+        var activeId = TabService.GetActiveTabId(panel);
+
+        __builder.OpenElement(200, "div");
+        __builder.AddAttribute(201, "class", "ws-tabbar-row");
+
+        __builder.OpenElement(0, "div");
+        __builder.AddAttribute(1, "class", "ws-tabbar");
+        __builder.AddAttribute(202, "id", $"ws-tabbar-{panel}");
+
+        // Las pestañas precargándose en segundo plano (Abrir con activar:false, ej. mientras
+        // gira el menú circular) no deben aparecer en la barra todavía — solo cuando se activan.
+        foreach (var tab in tabs.Where(t => !t.Precargando))
+        {
+            var t = tab;
+            __builder.OpenElement(2, "div");
+            __builder.AddAttribute(3, "class", "ws-tab " + (t.Id == activeId ? "ws-tab-active" : ""));
+            __builder.AddAttribute(4, "onclick", EventCallback.Factory.Create(this, () => ActivarTab(t.Id)));
+
+            // Icono — el propio de la opción en la BD tiene prioridad; si no hay,
+            // se usa el ícono fijo del menú tile/circular/lateral (t.Icono).
+            if (!string.IsNullOrWhiteSpace(t.IconoImagenBase64))
+            {
+                __builder.OpenElement(5, "img");
+                __builder.AddAttribute(6, "src", $"data:image/png;base64,{t.IconoImagenBase64}");
+                __builder.AddAttribute(7, "class", "ws-tab-icon-img");
+                __builder.CloseElement();
+            }
+            else
+            {
+                __builder.OpenComponent<MudIcon>(5);
+                __builder.AddAttribute(6, "Icon", t.Icono);
+                __builder.AddAttribute(7, "Size", Size.Small);
+                __builder.AddAttribute(8, "Class", "ws-tab-icon");
+                __builder.CloseComponent();
+            }
+
+            // Título
+            __builder.OpenElement(9, "span");
+            __builder.AddAttribute(10, "class", "ws-tab-title");
+            __builder.AddContent(11, t.Titulo);
+            __builder.CloseElement();
+
+            if (t.EsCerrable)
+            {
+                // Botón mover al otro panel
+                int destino = panel == 0 ? 1 : 0;
+                string tooltip = panel == 0 ? "Mover a panel inferior" : "Mover a panel principal";
+                if (TabService.SplitDireccion == "v")
+                    tooltip = panel == 0 ? "Mover a panel derecho" : "Mover a panel izquierdo";
+
+                __builder.OpenElement(12, "span");
+                __builder.AddAttribute(13, "class", "ws-tab-split-btn");
+                __builder.AddAttribute(14, "title", tooltip);
+                __builder.AddAttribute(15, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, _ => TabService.MoverAPanel(t.Id, destino)));
+                __builder.AddAttribute(16, "onclick:stopPropagation", true);
+                __builder.OpenComponent<MudIcon>(17);
+                __builder.AddAttribute(18, "Icon", panel == 0 ? Icons.Material.Filled.VerticalSplit : Icons.Material.Filled.Merge);
+                __builder.AddAttribute(19, "Size", Size.Small);
+                __builder.CloseComponent();
+                __builder.CloseElement();
+
+                // Botón cerrar
+                __builder.OpenElement(20, "span");
+                __builder.AddAttribute(21, "class", "ws-tab-close");
+                __builder.AddAttribute(22, "onclick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, _ => TabService.Cerrar(t.Id)));
+                __builder.AddAttribute(23, "onclick:stopPropagation", true);
+                __builder.OpenComponent<MudIcon>(24);
+                __builder.AddAttribute(25, "Icon", Icons.Material.Filled.Close);
+                __builder.AddAttribute(26, "Size", Size.Small);
+                __builder.CloseComponent();
+                __builder.CloseElement();
+            }
+
+            __builder.CloseElement(); // ws-tab
+        }
+
+        // Botón cambiar dirección split (solo en panel 0 cuando hay split)
+        if (panel == 0 && TabService.TieneSplit)
+        {
+            __builder.OpenElement(30, "div");
+            __builder.AddAttribute(31, "class", "ws-tab-split-dir-btn");
+            __builder.AddAttribute(32, "title", TabService.SplitDireccion == "h" ? "Cambiar a split vertical" : "Cambiar a split horizontal");
+            __builder.AddAttribute(33, "onclick", EventCallback.Factory.Create(this, () => TabService.CambiarDireccionSplit()));
+            __builder.OpenComponent<MudIcon>(34);
+            __builder.AddAttribute(35, "Icon", TabService.SplitDireccion == "h"
+                ? Icons.Material.Filled.VerticalSplit
+                : Icons.Material.Filled.HorizontalSplit);
+            __builder.AddAttribute(36, "Size", Size.Small);
+            __builder.CloseComponent();
+            __builder.CloseElement();
+        }
+
+        __builder.CloseElement(); // ws-tabbar
+
+        // Selector de pestañas ocultas (fuera del área con scroll, siempre visible) —
+        // igual que el "▼" de SQL Server Management Studio cuando hay más queries
+        // abiertos de los que caben en el ancho de la ventana.
+        if (tabs.Count(t => !t.Precargando) > 1)
+        {
+            __builder.OpenComponent<MudMenu>(210);
+            __builder.AddAttribute(211, "Class", "ws-tabbar-overflow-btn");
+            __builder.AddAttribute(212, "Icon", Icons.Material.Filled.KeyboardArrowDown);
+            __builder.AddAttribute(213, "Size", Size.Medium);
+            __builder.AddAttribute(214, "Dense", true);
+            __builder.AddAttribute(219, "PopoverClass", "ws-tabbar-overflow-popover");
+            __builder.AddAttribute(215, "AnchorOrigin", Origin.BottomRight);
+            __builder.AddAttribute(216, "TransformOrigin", Origin.TopRight);
+            __builder.AddAttribute(217, "title", "Ver todas las pestañas abiertas");
+            __builder.AddAttribute(218, "ChildContent", (RenderFragment)(b4 =>
+            {
+                var seq = 0;
+                foreach (var tab in tabs.Where(t => !t.Precargando))
+                {
+                    var tt = tab;
+                    b4.OpenComponent<MudMenuItem>(seq++);
+                    b4.AddAttribute(seq++, "OnClick", EventCallback.Factory.Create<Microsoft.AspNetCore.Components.Web.MouseEventArgs>(this, _ => ActivarTab(tt.Id)));
+                    b4.AddAttribute(seq++, "ChildContent", (RenderFragment)(b5 =>
+                    {
+                        b5.OpenElement(0, "span");
+                        b5.AddAttribute(1, "class", "ws-tabbar-overflow-item " + (tt.Id == activeId ? "ws-tabbar-overflow-item-active" : ""));
+                        b5.AddContent(2, tt.Titulo);
+                        b5.CloseElement();
+                    }));
+                    b4.CloseComponent();
+                }
+            }));
+            __builder.CloseComponent();
+        }
+
+        __builder.CloseElement(); // ws-tabbar-row
+
+        // Contenidos — todos montados, solo el activo visible
+        __builder.OpenElement(40, "div");
+        __builder.AddAttribute(41, "class", "ws-tab-content");
+        foreach (var tab in tabs)
+        {
+            var t = tab;
+            __builder.OpenElement(42, "div");
+            __builder.AddAttribute(43, "class", "ws-tab-pane");
+            __builder.AddAttribute(220, "data-tab-id", t.Id);
+            __builder.AddAttribute(44, "style", t.Id == activeId
+                ? "display:flex;flex-direction:column;height:100%;"
+                : "display:none;");
+            // ErrorBoundary: si el componente de esta pestaña lanza una excepción no
+            // controlada (ej. al cargar datos), la contiene aquí en vez de dejar el
+            // renderer de Blazor en un estado roto que congela el resto de la app
+            // (sidebar incluido) hasta alguna otra interacción que fuerce un re-render.
+            __builder.OpenComponent<ErrorBoundary>(45);
+            __builder.AddAttribute(46, "ChildContent", (RenderFragment)(b2 =>
+            {
+                b2.OpenComponent<DynamicComponent>(0);
+                b2.AddAttribute(1, "Type", t.ComponentType);
+                b2.AddAttribute(2, "Parameters", t.Parametros);
+                b2.CloseComponent();
+            }));
+            __builder.AddAttribute(47, "ErrorContent", (RenderFragment<Exception>)(ex => b3 =>
+            {
+                b3.OpenComponent<KONSolutions.Web.Pages.Shared.PaginaError>(0);
+                b3.AddAttribute(1, "Titulo", t.Titulo);
+                b3.AddAttribute(2, "Ruta", t.Ruta ?? "");
+                b3.CloseComponent();
+            }));
+            __builder.CloseComponent();
+            __builder.CloseElement();
+        }
+        __builder.CloseElement(); // ws-tab-content
+    };
+}
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    protected override void OnInitialized() => TabService.OnChange += Refrescar;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try { await JS.InvokeVoidAsync("workspaceDialogScope.iniciar", TabService.GetActiveTabId(0)); } catch { }
+        }
+        if (TabService.TieneSplit)
+        {
+            try { await JS.InvokeVoidAsync("wsSplit.init", TabService.SplitDireccion); } catch { }
+        }
+    }
+
+    private void Refrescar() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => TabService.OnChange -= Refrescar;
+}

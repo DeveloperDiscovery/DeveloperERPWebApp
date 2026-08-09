@@ -1,0 +1,244 @@
+@using KONSolutions.Shared.Models.Entorno
+@using KONSolutions.Shared.Models.Estandar
+@using System.Net.Http.Json
+@inject CatalogoService<TipoNotificacion, TipoNotificacionDto> Service
+@inject CatalogoService<TipoEstado, TipoEstadoDto> TiposEstadoSvc
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ErrorLogService ErrorLog
+
+<MudDialog Style="width:min(820px,95vw);">
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <div style="display:flex;gap:16px;align-items:flex-start;">
+                <div style="flex:1;min-width:0;">
+                    <CampoTexto Tabla="ENTORNO.TIPOS_NOTIFICACION" Columna="COD_TIPO_NOTIFICACION"
+                                @bind-Value="_model.COD_TIPO_NOTIFICACION" Disabled="@(_isEdit || _readonly)" />
+                    <CampoTexto Tabla="ENTORNO.TIPOS_NOTIFICACION" Columna="DES_TIPO_NOTIFICACION"
+                                @bind-Value="_model.DES_TIPO_NOTIFICACION" Disabled="_readonly" />
+
+                    <AriaCombo TItem="TipoEstado"
+                                 Items="_tiposEstado"
+                                 TextFunc="@(t => t.DES_TIPO_ESTADO ?? t.COD_TIPO_ESTADO.ToString())"
+                                 ValueFunc="@(t => t.COD_TIPO_ESTADO.ToString())"
+                                 @bind-Value="_codTipoEstadoTexto"
+                                 Label="Tipo de estado" Disabled="_readonly" />
+
+                    <MudText Typo="Typo.caption" Class="mono mb-1" Style="opacity:.55;">
+                        COMPORTAMIENTO
+                    </MudText>
+                    <div class="d-flex gap-4 mb-3">
+                        <div class="d-flex align-center gap-1">
+                            <MudIcon Icon="@Icons.Material.Filled.HowToReg" Color="Color.Primary" Size="Size.Medium" />
+                            <MudSwitch T="bool" Value="@(_model.FLG_APROBACION ?? false)" ValueChanged="@(v => _model.FLG_APROBACION = v)"
+                                         Disabled="_readonly" Label="Requiere aprobación" Color="Color.Primary" />
+                        </div>
+                        <div class="d-flex align-center gap-1">
+                            <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" Color="Color.Primary" Size="Size.Medium" />
+                            <MudSwitch T="bool" Value="@(_model.FLG_CALENDARIO ?? false)" ValueChanged="@(v => _model.FLG_CALENDARIO = v)"
+                                         Disabled="_readonly" Label="Aparece en calendario" Color="Color.Primary" />
+                        </div>
+                        <div class="d-flex align-center gap-1">
+                            <MudIcon Icon="@Icons.Material.Filled.Message" Color="Color.Primary" Size="Size.Medium" />
+                            <MudSwitch T="bool" Value="@(_model.FLG_MENSAJE ?? false)" ValueChanged="@(v => _model.FLG_MENSAJE = v)"
+                                         Disabled="_readonly" Label="Envía mensaje" Color="Color.Primary" />
+                        </div>
+                    </div>
+                </div>
+                <div style="flex-shrink:0;padding-left:8px;border-left:1px solid rgba(0,0,0,.1);">
+                    <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)" Label="Icono" />
+                </div>
+            </div>
+
+            @if (_mostrarAcciones)
+            {
+                <MudDivider Class="my-4" />
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <MudText Typo="Typo.caption" Class="mono" Style="opacity:.55;">ACCIONES DE ESTE TIPO DE NOTIFICACIÓN</MudText>
+                    @if (!_readonly && _accionEnEdicion is null)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="@(() => AbrirEdicionAccion(null))">Nueva acción</MudButton>
+                    }
+                </div>
+
+                <MudSimpleTable Dense="true" Hover="true" Style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th>Descripción</th>
+                            <th style="text-align:center;">Lectura</th>
+                            <th style="text-align:center;">Aprobar</th>
+                            <th style="text-align:center;">Rechazo</th>
+                            <th style="text-align:center;">Observar</th>
+                            @if (!_readonly) { <th style="width:80px;"></th> }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in _acciones)
+                        {
+                            <tr>
+                                <td>@a.DES_ACCION</td>
+                                <td style="text-align:center;"><MudIcon Icon="@(a.FLG_LECTURA == true ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.RadioButtonUnchecked)" Color="@(a.FLG_LECTURA == true ? Color.Success : Color.Default)" Size="Size.Small" /></td>
+                                <td style="text-align:center;"><MudIcon Icon="@(a.FLG_APROBAR == true ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.RadioButtonUnchecked)" Color="@(a.FLG_APROBAR == true ? Color.Success : Color.Default)" Size="Size.Small" /></td>
+                                <td style="text-align:center;"><MudIcon Icon="@(a.FLG_RECHAZO == true ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.RadioButtonUnchecked)" Color="@(a.FLG_RECHAZO == true ? Color.Success : Color.Default)" Size="Size.Small" /></td>
+                                <td style="text-align:center;"><MudIcon Icon="@(a.FLG_OBSERVAR == true ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.RadioButtonUnchecked)" Color="@(a.FLG_OBSERVAR == true ? Color.Success : Color.Default)" Size="Size.Small" /></td>
+                                @if (!_readonly)
+                                {
+                                    <td style="text-align:center;white-space:nowrap;">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => AbrirEdicionAccion(a))" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => EliminarAccion(a))" />
+                                    </td>
+                                }
+                            </tr>
+                        }
+                        @if (_acciones.Count == 0)
+                        {
+                            <tr><td colspan="6" style="text-align:center;opacity:.5;">Sin acciones registradas.</td></tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+
+                @if (_accionEnEdicion is not null)
+                {
+                    <MudPaper Elevation="0" Class="pa-3 mt-2" Style="border:1px solid var(--line);">
+                        <CampoTextoEstable @bind-Value="_accionEnEdicion.DES_ACCION" Label="Descripción de la acción"
+                                      Variant="Variant.Outlined" Class="mb-3" />
+                        <div class="d-flex gap-4 mb-3 flex-wrap">
+                            <MudSwitch T="bool" Value="@(_accionEnEdicion.FLG_LECTURA ?? false)" ValueChanged="@(v => _accionEnEdicion.FLG_LECTURA = v)" Label="Lectura" Color="Color.Primary" />
+                            <MudSwitch T="bool" Value="@(_accionEnEdicion.FLG_APROBAR ?? false)" ValueChanged="@(v => _accionEnEdicion.FLG_APROBAR = v)" Label="Aprobar" Color="Color.Primary" />
+                            <MudSwitch T="bool" Value="@(_accionEnEdicion.FLG_RECHAZO ?? false)" ValueChanged="@(v => _accionEnEdicion.FLG_RECHAZO = v)" Label="Rechazo" Color="Color.Primary" />
+                            <MudSwitch T="bool" Value="@(_accionEnEdicion.FLG_OBSERVAR ?? false)" ValueChanged="@(v => _accionEnEdicion.FLG_OBSERVAR = v)" Label="Observar" Color="Color.Primary" />
+                        </div>
+                        <div class="d-flex gap-2 justify-end">
+                            <MudButton Variant="Variant.Text" OnClick="@(() => _accionEnEdicion = null)">Cancelar</MudButton>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_guardandoAccion || string.IsNullOrWhiteSpace(_accionEnEdicion.DES_ACCION))"
+                                       OnClick="GuardarAccion">Guardar acción</MudButton>
+                        </div>
+                    </MudPaper>
+                }
+            }
+
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TipoNotificacion? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TipoNotificacionDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+    private bool _mostrarAcciones => Modo == CrudModo.Update || Modo == CrudModo.Read;
+    private List<TipoEstado> _tiposEstado = new();
+
+    private List<TiposNotificacionAcciones> _acciones = new();
+    private TiposNotificacionAccionesDto? _accionEnEdicion;
+    private bool _guardandoAccion;
+
+    private string? _codTipoEstadoTexto
+    {
+        get => _model.COD_TIPO_ESTADO?.ToString();
+        set => _model.COD_TIPO_ESTADO = short.TryParse(value, out var v) ? v : null;
+    }
+
+    private void MapearDesdeModelo(TipoNotificacion m)
+    {
+        _model.COD_TIPO_NOTIFICACION = m.COD_TIPO_NOTIFICACION;
+        _model.DES_TIPO_NOTIFICACION = m.DES_TIPO_NOTIFICACION;
+        _model.FLG_APROBACION = m.FLG_APROBACION;
+        _model.FLG_CALENDARIO = m.FLG_CALENDARIO;
+        _model.FLG_MENSAJE = m.FLG_MENSAJE;
+        _model.COD_TIPO_ESTADO = m.COD_TIPO_ESTADO;
+        _model.IMG_ICONO = m.IMG_ICONO;
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Service.GetByIdAsync(_model.COD_TIPO_NOTIFICACION);
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (Modo != CrudModo.Create && Item is not null) await RecargarDesdeShowbyidAsync();
+        _tiposEstado = await TiposEstadoSvc.GetAllAsync();
+        if (_mostrarAcciones) await CargarAccionesAsync();
+    }
+
+    private async Task CargarAccionesAsync()
+    {
+        var r = await Http.SafeGetAsync<List<TiposNotificacionAcciones>>(
+            $"{ApiRoutes.Entorno.TiposNotificacionAcciones}?codTipoNotificacion={Uri.EscapeDataString(_model.COD_TIPO_NOTIFICACION)}");
+        _acciones = r ?? new();
+    }
+
+    private void AbrirEdicionAccion(TiposNotificacionAcciones? a)
+    {
+        _accionEnEdicion = a is null
+            ? new TiposNotificacionAccionesDto { COD_TIPO_NOTIFICACION = _model.COD_TIPO_NOTIFICACION }
+            : new TiposNotificacionAccionesDto
+              {
+                  COD_TIPO_NOTIFICACION = a.COD_TIPO_NOTIFICACION,
+                  NUM_SECUENCIA = a.NUM_SECUENCIA,
+                  DES_ACCION = a.DES_ACCION ?? "",
+                  FLG_LECTURA = a.FLG_LECTURA,
+                  FLG_APROBAR = a.FLG_APROBAR,
+                  FLG_RECHAZO = a.FLG_RECHAZO,
+                  FLG_OBSERVAR = a.FLG_OBSERVAR
+              };
+    }
+
+    private async Task GuardarAccion()
+    {
+        if (_accionEnEdicion is null) return;
+        _guardandoAccion = true;
+        var resp = await Http.PostAsJsonAsync(ApiRoutes.Entorno.TiposNotificacionAcciones, _accionEnEdicion);
+        _guardandoAccion = false;
+        if (resp.IsSuccessStatusCode)
+        {
+            Snackbar.Add("Acción guardada.", Severity.Success);
+            _accionEnEdicion = null;
+            await CargarAccionesAsync();
+        }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TipoNotificacionDialog), nameof(GuardarAccion));
+    }
+
+    private async Task EliminarAccion(TiposNotificacionAcciones a)
+    {
+        var confirmado = await DialogService.ShowMessageBox(
+            "Eliminar acción", $"¿Eliminar la acción \"{a.DES_ACCION}\"?", yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirmado != true) return;
+
+        var resp = await Http.DeleteAsync($"{ApiRoutes.Entorno.TiposNotificacionAcciones}/{Uri.EscapeDataString(a.COD_TIPO_NOTIFICACION)}/{a.NUM_SECUENCIA}");
+        if (resp.IsSuccessStatusCode)
+        {
+            Snackbar.Add("Acción eliminada.", Severity.Success);
+            await CargarAccionesAsync();
+        }
+        else Snackbar.Add("No se pudo eliminar la acción.", Severity.Error);
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync(_model.COD_TIPO_NOTIFICACION);
+            _saving = false;
+            if (okd) { Snackbar.Add("Tipo de notificación eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(TipoNotificacionDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Tipo de notificación actualizado." : "Tipo de notificación creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(TipoNotificacionDialog));
+    }
+}

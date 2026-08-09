@@ -1,0 +1,113 @@
+@using TiposComprobantesPagoModel = KONSolutions.Shared.Models.Estandar.TiposComprobantesPago
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_COMPROBANTE_PAGO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="ESTANDAR.TIPOS_COMPROBANTES_PAGO" Columna="COD_TIPO_COMPROBANTE_PAGO"
+                                @bind-Value="_model.COD_TIPO_COMPROBANTE_PAGO"
+                                Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="ESTANDAR.TIPOS_COMPROBANTES_PAGO" Columna="COD_PREFIJO"
+                                @bind-Value="_model.COD_PREFIJO"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+            </MudGrid>
+            <CampoTexto Tabla="ESTANDAR.TIPOS_COMPROBANTES_PAGO" Columna="DES_TIPO_COMPROBANTE_PAGO"
+                        @bind-Value="_model.DES_TIPO_COMPROBANTE_PAGO"
+                        Disabled="_readonly" Obligatorio="true" />
+            <CampoTexto Tabla="ESTANDAR.TIPOS_COMPROBANTES_PAGO" Columna="COD_COMPROBANTE_PAGO_SUNAT"
+                        @bind-Value="_codSunatStr"
+                        Disabled="_readonly" />
+
+            <MudText Typo="Typo.caption" Class="mono mb-2" Style="opacity:.55;display:block;margin-top:8px;">CARACTERÍSTICAS</MudText>
+            <MudGrid Class="mb-3">
+                <MudItem xs="6" sm="4"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Send" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_EMISION" Color="Color.Primary" Disabled="_readonly" Label="Emisión" /></div></MudItem>
+                <MudItem xs="6" sm="4"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_POSITIVO" Color="Color.Primary" Disabled="_readonly" Label="Positivo" /></div></MudItem>
+                <MudItem xs="6" sm="4"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Payments" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_ANTICIPO" Color="Color.Primary" Disabled="_readonly" Label="Anticipo" /></div></MudItem>
+                <MudItem xs="6" sm="4"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Link" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_PREFIJO_COMPROBANTE_ORIGEN" Color="Color.Primary" Disabled="_readonly" Label="Prefijo comprobante origen" /></div></MudItem>
+                <MudItem xs="6" sm="4"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.TaskAlt" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_DOCUMENTO_APLICABLE" Color="Color.Primary" Disabled="_readonly" Label="Documento aplicable" /></div></MudItem>
+                <MudItem xs="6" sm="4"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_CONTROL_INTERNO" Color="Color.Primary" Disabled="_readonly" Label="Control interno" /></div></MudItem>
+            </MudGrid>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposComprobantesPagoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposComprobantesPagoModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private string? _codSunatStr
+    {
+        get => _model.COD_COMPROBANTE_PAGO_SUNAT?.ToString();
+        set => _model.COD_COMPROBANTE_PAGO_SUNAT = int.TryParse(value, out var n) ? n : (int?)null;
+    }
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(TiposComprobantesPagoModel m) =>
+        _model = new TiposComprobantesPagoModel
+        {
+            COD_TIPO_COMPROBANTE_PAGO      = m.COD_TIPO_COMPROBANTE_PAGO,
+            DES_TIPO_COMPROBANTE_PAGO      = m.DES_TIPO_COMPROBANTE_PAGO,
+            COD_PREFIJO                    = m.COD_PREFIJO,
+            COD_COMPROBANTE_PAGO_SUNAT     = m.COD_COMPROBANTE_PAGO_SUNAT,
+            FLG_EMISION                    = m.FLG_EMISION,
+            FLG_POSITIVO                   = m.FLG_POSITIVO,
+            FLG_ANTICIPO                   = m.FLG_ANTICIPO,
+            FLG_PREFIJO_COMPROBANTE_ORIGEN = m.FLG_PREFIJO_COMPROBANTE_ORIGEN,
+            FLG_DOCUMENTO_APLICABLE        = m.FLG_DOCUMENTO_APLICABLE,
+            FLG_CONTROL_INTERNO            = m.FLG_CONTROL_INTERNO
+        };
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposComprobantesPagoModel>($"{ApiRoutes.Estandar.TiposComprobantesPago}/{Uri.EscapeDataString(_model.COD_TIPO_COMPROBANTE_PAGO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Estandar.TiposComprobantesPago}/{Uri.EscapeDataString(_model.COD_TIPO_COMPROBANTE_PAGO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposComprobantesPagoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // El controller solo expone POST (el SP hace upsert: inserta o actualiza según el código).
+        var resp = await Http.GuardarAsync(ApiRoutes.Estandar.TiposComprobantesPago, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposComprobantesPagoDialog), nameof(Submit));
+    }
+}

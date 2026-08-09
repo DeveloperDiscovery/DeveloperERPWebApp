@@ -1,0 +1,117 @@
+@using TreeListModel = KONSolutions.Shared.Models.Ingenieria.GruposFamiliasSubFamiliasEspecificacionTecnicaTreeList
+
+@* Nodo recursivo del árbol de configuración Especificación Técnica / Ítem Técnico.
+   Solo los nodos de nivel 1 (Especificación Técnica) tienen menú contextual — los Ítems
+   (nivel 2) son solo informativos, no se asignan de forma individual. *@
+
+<div>
+    <div class="tl-row-items @(EsActual ? "tl-row-seleccionada" : "")"
+         style="cursor:pointer;user-select:none;"
+         @onclick="ToggleYSeleccionar"
+         @oncontextmenu="OnRightClick"
+         @oncontextmenu:preventDefault="@_tieneMenu"
+         @oncontextmenu:stopPropagation="@_tieneMenu">
+
+        <div class="d-flex align-center gap-1" style="@($"padding-left:{8 + Nivel * 18}px;")">
+            @if (Nodo.Hijos.Any())
+            {
+                <MudIcon Icon="@(_expandido ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                         Style="font-size:1rem;opacity:.6;flex-shrink:0;" />
+            }
+            else
+            {
+                <span style="width:20px;flex-shrink:0;"></span>
+            }
+
+            <MudIcon Icon="@IconoNivel" Style="font-size:.95rem;opacity:.7;flex-shrink:0;" />
+
+            <span style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                @Nodo.DES_KEY
+            </span>
+
+            @if (Nodo.COD_KEY_TYPE == "1" && Nodo.FLG_ASIGNADO == true)
+            {
+                <MudTooltip Text="Asignada a esta Sub Familia">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Style="color:#2f855a;opacity:.85;" />
+                </MudTooltip>
+            }
+        </div>
+
+        <div class="d-flex align-center gap-1">
+            @if (!string.IsNullOrEmpty(Nodo.DES_ESTADO))
+            {
+                @if (!string.IsNullOrEmpty(Nodo.DES_BACKCOLOR))
+                { <div style="width:10px;height:10px;border-radius:50%;background:@Nodo.DES_BACKCOLOR;flex-shrink:0;"></div> }
+                <span class="mono" style="font-size:.74rem;opacity:.75;">@Nodo.DES_ESTADO</span>
+            }
+        </div>
+
+        <div class="mono" style="font-size:.8rem;">
+            @Nodo.VAL_ESPECIFICACION_TENICA
+        </div>
+
+        <div class="mono" style="font-size:.8rem;text-align:right;">
+            @(Nodo.VAL_MINIMO?.ToString("N2"))
+        </div>
+
+        <div class="mono" style="font-size:.8rem;text-align:right;">
+            @(Nodo.VAL_MAXIMO?.ToString("N2"))
+        </div>
+    </div>
+
+    @if (_expandido && Nodo.Hijos.Any())
+    {
+        @foreach (var hijo in Nodo.Hijos)
+        {
+            <NodoGruposEspecificacionTecnica Nodo="hijo" Nivel="@(Nivel + 1)" NodoActual="NodoActual"
+                       OnSeleccionar="OnSeleccionar" OnContextMenu="OnContextMenu"
+                       ForzarExpandido="ForzarExpandido" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public TreeListModel Nodo { get; set; } = null!;
+    [Parameter] public int Nivel { get; set; } = 0;
+    [Parameter] public TreeListModel? NodoActual { get; set; }
+    [Parameter] public EventCallback<TreeListModel> OnSeleccionar { get; set; }
+    [Parameter] public EventCallback<(TreeListModel Nodo, double X, double Y)> OnContextMenu { get; set; }
+    [Parameter] public bool? ForzarExpandido { get; set; }
+
+    private bool _expandido = true;
+    private bool? _ultimoForzado;
+
+    // Solo las Especificaciones Técnicas (nivel 1) son asignables — los Ítems (nivel 2)
+    // son solo informativos dentro del árbol.
+    private bool _tieneMenu => Nodo.COD_KEY_TYPE == "1";
+
+    private Task OnRightClick(MouseEventArgs e)
+    {
+        if (!_tieneMenu) return Task.CompletedTask;
+        return OnContextMenu.InvokeAsync((Nodo, e.ClientX, e.ClientY));
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (ForzarExpandido.HasValue && ForzarExpandido != _ultimoForzado)
+        {
+            _expandido = ForzarExpandido.Value;
+            _ultimoForzado = ForzarExpandido;
+        }
+    }
+
+    private bool EsActual => NodoActual?.COD_KEY == Nodo.COD_KEY;
+
+    private string IconoNivel => Nodo.COD_KEY_TYPE switch
+    {
+        "1" => Icons.Material.Filled.Rule,
+        "2" => Icons.Material.Filled.Numbers,
+        _   => Icons.Material.Filled.Circle
+    };
+
+    private void ToggleYSeleccionar()
+    {
+        if (Nodo.Hijos.Any()) _expandido = !_expandido;
+        OnSeleccionar.InvokeAsync(Nodo);
+    }
+}

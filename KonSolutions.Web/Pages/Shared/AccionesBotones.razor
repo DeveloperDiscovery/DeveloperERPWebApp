@@ -1,0 +1,253 @@
+@*
+    AccionesBotones.razor
+    --------------------------------------------------------------------------
+    Renderiza los botones de acción configurados para esta opción y el rol activo
+    (MenuService). Íconos 100 % Material Design — sin imágenes de BD.
+
+    Zona  Header → MudButton con ícono + texto, color por acción.
+    Zona  Grilla → MudIconButton pequeño con tooltip, color por acción.
+
+    Resolución de ícono/color: primero por nombre del botón (DES_BOTON_OPCION),
+    luego por flags HTTP (FLG_ACCION_PUT/POST/DELETE/GET).
+*@
+@inject MenuService MenuService
+@inject KONSolutions.Web.Services.ConfigService ConfigSvc
+
+@if (Zona == ZonaBotones.Header)
+{
+    @foreach (var boton in Botones)
+    {
+        var b = boton;
+        <MudButton Variant="Variant.Filled"
+                   Color="@ColorEstandar(b)"
+                   Style="@EstiloBotonHeader(b)"
+                   OnClick="@(() => OnAccion.InvokeAsync(b))">
+            @* Ícono propio del botón (BD, cargado aparte en segundo plano) si existe;
+               si no (o todavía no llegó), el calculado por nombre/flags. *@
+            @if (!string.IsNullOrEmpty(b.IMG_ICONO_BOTON))
+            {
+                <span class="icono-accion-mask" style="@EstiloMaskIcono(b, 20, conMargen: true)"></span>
+            }
+            else
+            {
+                <MudIcon Icon="@IconoEstandar(b)" Size="Size.Small" Class="@ClaseColorIcono(b)" Style="margin-right:6px;vertical-align:middle;" />
+            }
+            @(b.DES_BOTON_OPCION ?? b.DES_ALIAS ?? "")
+        </MudButton>
+    }
+}
+else
+{
+    @foreach (var boton in Botones)
+    {
+        var b = boton;
+        <MudTooltip Text="@(b.DES_TOOLTIPTEXT ?? b.DES_BOTON_OPCION ?? "")">
+            <MudIconButton Size="Size.Small"
+                           Color="@ColorEstandar(b)"
+                           OnClick="@(() => OnAccion.InvokeAsync(b))">
+                @if (!string.IsNullOrEmpty(b.IMG_ICONO_BOTON))
+                {
+                    <span class="icono-accion-mask" style="@EstiloMaskIcono(b, 18)"></span>
+                }
+                else
+                {
+                    <MudIcon Icon="@IconoEstandar(b)" Size="Size.Small" Class="@ClaseColorIcono(b)" />
+                }
+            </MudIconButton>
+        </MudTooltip>
+    }
+}
+
+@code {
+    public enum ZonaBotones { Grilla, Header }
+
+    [Parameter, EditorRequired] public string CodAplicacion { get; set; } = "";
+    [Parameter, EditorRequired] public string CodOpcionAplicacion { get; set; } = "";
+    [Parameter] public ZonaBotones Zona { get; set; } = ZonaBotones.Grilla;
+    [Parameter] public EventCallback<BotonTreeviewItem> OnAccion { get; set; }
+
+    // Nota: este componente se instancia una vez por botón por fila (decenas por grilla),
+    // así que NO se suscribe a ConfigSvc.OnChange — con MudDataGrid reciclando celdas al
+    // paginar/filtrar, cientos de suscripciones sin garantía de Dispose confiable volvían
+    // la app cada vez más lenta con el uso. El color de ClaseColorIcono/EstiloMaskIcono se
+    // lee en vivo de ConfigSvc.Current en cada render normal (selección de fila, paginación,
+    // etc.), que ya ocurre naturalmente en el uso real de una grilla.
+
+    private List<BotonTreeviewItem> Botones =>
+        MenuService.GetBotonesPorOpcion(CodAplicacion, CodOpcionAplicacion)
+            .Where(b => Zona == ZonaBotones.Header ? b.FLG_HEADER == true : b.FLG_GRILLA == true)
+            .OrderBy(b => b.COD_BOTON_OPCION)
+            .ToList();
+
+    // Color configurable (Configuración General → DES_ICONCOLOR_ACTIONS) para los íconos
+    // de acción; el de Eliminar siempre queda rojo, sin importar este color. Se aplica vía
+    // clase + variable CSS (--icono-acciones-color, ver app.css) en vez de style en línea:
+    // el hover/foco de fila fuerza "color" con !important sobre la celda (ancestro), y esa
+    // regla le ganaba en algunos navegadores al style en línea del ícono.
+    private string ClaseColorIcono(BotonTreeviewItem b)
+        => b.FLG_ACCION_DELETE == true || string.IsNullOrWhiteSpace(ConfigSvc.Current.IconoAccionesColor)
+            ? "" : "icono-accion-color";
+
+    // Íconos propios subidos a BD (IMG_ICONO_BOTON): son un PNG fijo, no un ícono Material,
+    // así que no se pueden recolorear con "color" ni con clases CSS normales. Se pintan como
+    // máscara: el PNG define la forma (alfa) y el "background-color" (el color configurado,
+    // o rojo si es Eliminar) rellena esa forma — igual que un ícono de fuente, pero con la
+    // imagen que subió el usuario a la BD.
+    private string EstiloMaskIcono(BotonTreeviewItem b, int size, bool conMargen = false)
+    {
+        var color = b.FLG_ACCION_DELETE == true ? "var(--mud-palette-error, #d32f2f)" : "var(--icono-acciones-color, #16130f)";
+        var url = $"url('data:image/png;base64,{b.IMG_ICONO_BOTON}')";
+        var margen = conMargen ? "margin-right:6px;" : "";
+        return $"display:inline-block;width:{size}px;height:{size}px;vertical-align:middle;{margen}" +
+               $"background-color:{color};" +
+               $"-webkit-mask-image:{url};mask-image:{url};" +
+               $"-webkit-mask-size:contain;mask-size:contain;" +
+               $"-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;" +
+               $"-webkit-mask-position:center;mask-position:center;";
+    }
+
+    // ── Mapeo de ícono por nombre del botón (DES_BOTON_OPCION / DES_ALIAS / tooltip) ──
+    // Se incluye DES_TOOLTIPTEXT porque hay botones donde el nombre interno no describe
+    // la acción (ej. queda en blanco o genérico) y solo el tooltip visible la identifica
+    // ("Asignar a Usuario" caía en el ícono de Editar por el flag PUT hasta este fix).
+    private static string IconoEstandar(BotonTreeviewItem b)
+    {
+        var n = (b.DES_BOTON_OPCION ?? b.DES_ALIAS ?? "").ToUpperInvariant()
+              + " " + (b.DES_TOOLTIPTEXT ?? "").ToUpperInvariant();
+
+        // El flag HTTP DELETE manda sobre el nombre: así el botón de borrado siempre
+        // muestra el basurero, sin importar si en BD lo llamaron "Eliminar", "Anular",
+        // "Borrar", etc. (antes "Anular" caía en el ícono de bloqueo/"no" más abajo).
+        if (b.FLG_ACCION_DELETE == true)
+            return Icons.Material.Filled.Delete;
+
+        // CRUD principal
+        if (n.Contains("NUEVO") || n.Contains("CREAR") || n.Contains("AGREG") ||
+            n.Contains("INSERT") || n.Contains("NEW")  || n.Contains("ADD"))
+            return Icons.Material.Filled.NoteAdd;
+        if (n.Contains("MODIF") || n.Contains("EDIT") || n.Contains("ACTUALIZ"))
+            return Icons.Material.Filled.Edit;
+        if (n.Contains("ELIM") || n.Contains("BORR") || n.Contains("DELETE") || n.Contains("REMOV"))
+            return Icons.Material.Filled.Delete;
+        if (n.Contains("ASIGNAR") || n.Contains("ASIGNAC") || n.Contains("ASSIGN") ||
+            n.Contains("RESPONSABLE") || n.Contains("VER ASIG"))
+            return Icons.Material.Filled.Badge;
+        // Antes que "VER..." genérico: "VERSION" contiene "VER" y caía en el ojo de
+        // Consultar en vez de un ícono propio (Diseños → Versiones).
+        if (n.Contains("VERSION"))
+            return Icons.Material.Filled.Layers;
+        if (n.Contains("VER") || n.Contains("DETALL") || n.Contains("CONSULT") ||
+            n.Contains("VIEW")  || n.Contains("MOST"))
+            return Icons.Material.Filled.Visibility;
+
+        // Operaciones comunes
+        if (n.Contains("COPIAR") || n.Contains("COPI") || n.Contains("DUPLIC") || n.Contains("COPY"))
+            return Icons.Material.Filled.ContentCopy;
+        if (n.Contains("IMPRIM") || n.Contains("PRINT"))
+            return Icons.Material.Filled.Print;
+        if (n.Contains("EXPORT") || n.Contains("DESCAR") || n.Contains("DOWNLOAD"))
+            return Icons.Material.Filled.FileDownload;
+        if (n.Contains("IMPORT") || n.Contains("SUBIR") || n.Contains("UPLOAD") || n.Contains("CARGAR"))
+            return Icons.Material.Filled.Upload;
+        if (n.Contains("BUSCAR") || n.Contains("SEARCH") || n.Contains("FILTRAR"))
+            return Icons.Material.Filled.Search;
+        if (n.Contains("GUARDAR") || n.Contains("SAVE") || n.Contains("GRABAR"))
+            return Icons.Material.Filled.Save;
+        if (n.Contains("CANCEL") || n.Contains("CERRAR") || n.Contains("SALIR"))
+            return Icons.Material.Filled.Cancel;
+        if (n.Contains("APROB") || n.Contains("CONFIRM") || n.Contains("VALID"))
+            return Icons.Material.Filled.CheckCircle;
+        if (n.Contains("RECHAZ") || n.Contains("ANULAR") || n.Contains("REJECT"))
+            return Icons.Material.Filled.Block;
+        if (n.Contains("REFRESH") || n.Contains("REFRES"))
+            return Icons.Material.Filled.Refresh;
+
+        // Seguridad / usuarios — las específicas (password/intentos) van antes que el
+        // "reset" genérico, porque "RESETEAR PASSWORD" y "RESET INTENTOS" contienen
+        // ambas la palabra RESET y antes caían las dos en el mismo ícono (LockReset).
+        // "Cambiar password" (el propio usuario define una nueva) vs "resetear password"
+        // (el admin la resetea a una temporal) — íconos distintos aunque ambos hablen de
+        // password, para no confundirlos en la grilla.
+        if (n.Contains("CAMBIAR") && (n.Contains("PASSWORD") || n.Contains("CONTRASE") || n.Contains("CLAVE")))
+            return Icons.Material.Filled.Password;
+        if (n.Contains("PASSWORD") || n.Contains("CONTRASE") || n.Contains("CLAVE"))
+            return Icons.Material.Filled.Key;
+        // Ícono deliberadamente distinto al de password (no relacionado a candados/llaves)
+        // porque Key y LockOpen se ven casi idénticos en tamaño pequeño y mismo color.
+        if (n.Contains("INTENTOS"))
+            return Icons.Material.Filled.RestartAlt;
+        if (n.Contains("BLOQUE"))
+            return Icons.Material.Filled.LockOpen;
+        if (n.Contains("RESET") || n.Contains("RESETEAR"))
+            return Icons.Material.Filled.LockReset;
+        if (n.Contains("ROL") || n.Contains("PERMISO"))
+            return Icons.Material.Filled.ManageAccounts;
+        if (n.Contains("ESTADO"))
+            return Icons.Material.Filled.ToggleOn;
+
+        // Fallback por flags HTTP
+        if (b.FLG_ACCION_POST   == true) return Icons.Material.Filled.NoteAdd;
+        if (b.FLG_ACCION_PUT    == true) return Icons.Material.Filled.Edit;
+        if (b.FLG_ACCION_DELETE == true) return Icons.Material.Filled.Delete;
+        if (b.FLG_ACCION_GET    == true) return Icons.Material.Filled.Visibility;
+        return Icons.Material.Filled.SmartButton;
+    }
+
+    // Botones de cabecera (Nuevo/Modificar/etc.): mismo color configurable que los
+    // botones de diálogo (Configuración General → Botones de Diálogo y Acciones de
+    // Cabecera). Eliminar mantiene siempre su rojo de peligro, sin tomar el color
+    // configurado — igual que en los diálogos.
+    private static string EstiloBotonHeader(BotonTreeviewItem b) => ColorEstandar(b) == Color.Error
+        ? "font-weight:700;"
+        : "font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));";
+
+    // ── Mapeo de color por nombre del botón ─────────────────────────────────
+    private static Color ColorEstandar(BotonTreeviewItem b)
+    {
+        var n = (b.DES_BOTON_OPCION ?? b.DES_ALIAS ?? "").ToUpperInvariant()
+              + " " + (b.DES_TOOLTIPTEXT ?? "").ToUpperInvariant();
+
+        // Mismo criterio que IconoEstandar: el flag DELETE manda sobre el nombre.
+        if (b.FLG_ACCION_DELETE == true)
+            return Color.Error;
+
+        if (n.Contains("NUEVO") || n.Contains("CREAR") || n.Contains("AGREG") ||
+            n.Contains("INSERT") || n.Contains("NEW")  || n.Contains("ADD"))
+            return Color.Success;
+        if (n.Contains("MODIF") || n.Contains("EDIT") || n.Contains("ACTUALIZ"))
+            return Color.Primary;
+        if (n.Contains("ELIM") || n.Contains("BORR") || n.Contains("DELETE") || n.Contains("REMOV"))
+            return Color.Error;
+        if (n.Contains("APROB") || n.Contains("CONFIRM") || n.Contains("VALID"))
+            return Color.Success;
+        if (n.Contains("RECHAZ") || n.Contains("ANULAR") || n.Contains("REJECT"))
+            return Color.Error;
+        if (n.Contains("GUARDAR") || n.Contains("SAVE") || n.Contains("GRABAR"))
+            return Color.Primary;
+        if (n.Contains("RESET") || n.Contains("RESETEAR"))
+            return Color.Warning;
+        if (n.Contains("PASSWORD") || n.Contains("CONTRASE") || n.Contains("CLAVE"))
+            return Color.Warning;
+        if (n.Contains("INTENTOS") || n.Contains("BLOQUE"))
+            return Color.Warning;
+        if (n.Contains("ESTADO"))
+            return Color.Info;
+        if (n.Contains("ASIGNAC") || n.Contains("ASIGNAR") || n.Contains("RESPONSABLE") ||
+            n.Contains("ROL")     || n.Contains("PERMISO"))
+            return Color.Tertiary;
+        // "Ver/Consultar/Detalle" (mismo criterio que IconoEstandar para el ícono de ojo):
+        // antes caía en Color.Default, que hereda el color de texto de la fila y se volvía
+        // casi invisible sin foco/hover — ahora usa un color semántico propio, como el
+        // resto de acciones, para que siempre contraste sin depender del estado de la fila.
+        if (n.Contains("VER") || n.Contains("DETALL") || n.Contains("CONSULT") ||
+            n.Contains("VIEW")  || n.Contains("MOST"))
+            return Color.Info;
+
+        // Fallback por flags HTTP
+        if (b.FLG_ACCION_DELETE == true) return Color.Error;
+        if (b.FLG_ACCION_PUT    == true) return Color.Primary;
+        if (b.FLG_ACCION_POST   == true) return Color.Success;
+        if (b.FLG_ACCION_GET    == true) return Color.Info;
+        return Color.Default;
+    }
+}

@@ -1,0 +1,208 @@
+@page "/logistica/tipos-almacen"
+@attribute [Authorize]
+@using TiposAlmacenModel = KONSolutions.Shared.Models.Logistica.TiposAlmacen
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Tipos de Almacén · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Almacén" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema LOGISTICA · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar tipo de almacén..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="tipos-almacen" style="position:relative;">
+    <MudDataGrid T="TiposAlmacenModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código"
+                            Width="@Limites.ColWidth("LOGISTICA.TIPOS_ALMACEN","COD_TIPO_ALMACEN",70,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_TIPO_ALMACEN" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TiposAlmacenModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_TIPO_ALMACEN)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_ALMACEN</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo de Almacén"
+                            Width="@Limites.ColWidth("LOGISTICA.TIPOS_ALMACEN","DES_TIPO_ALMACEN",150,300)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_ALMACEN" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TiposAlmacenModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_TIPO_ALMACEN)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_ALMACEN</CellTemplate>
+            </TemplateColumn>
+            @* Los FLG_* no son excluyentes: se muestran juntos como iconos, igual que
+               "Comportamiento" en Tipos de Movimiento y Tipos de Sucursal. *@
+            <TemplateColumn Title="Clasificación" Sortable="false" Width="220">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Clasificación" /></HeaderTemplate>
+                <CellTemplate>
+                    <div class="d-flex flex-wrap align-center" style="gap:6px;">
+                        @foreach (var f in _flags.Where(f => f.Get(context.Item) == true))
+                        {
+                            <MudTooltip Text="@f.Tooltip">
+                                <MudIcon Icon="@f.Icon" Size="Size.Small" Style="opacity:.75;" />
+                            </MudTooltip>
+                        }
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TiposAlmacenModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private static readonly (string Icon, string Tooltip, Func<TiposAlmacenModel, bool?> Get)[] _flags = new (string, string, Func<TiposAlmacenModel, bool?>)[]
+    {
+        (Icons.Material.Filled.Warehouse,      "Regular",            x => x.FLG_REGULAR),
+        (Icons.Material.Filled.LocalShipping,  "Tránsito",           x => x.FLG_TRANSITO),
+        (Icons.Material.Filled.Factory,        "Producción",         x => x.FLG_PRODUCCION),
+        (Icons.Material.Filled.Inventory2,     "Producto terminado", x => x.FLG_PRODUCTO_TERMINADO),
+    };
+
+    private List<TiposAlmacenModel> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<TiposAlmacenModel> Ordenar(List<TiposAlmacenModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_ALMACEN).ToList() : items.OrderByDescending(x => x.COD_TIPO_ALMACEN).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_ALMACEN).ToList() : items.OrderByDescending(x => x.DES_TIPO_ALMACEN).ToList(),
+        _ => items
+    };
+    private List<TiposAlmacenModel> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<TiposAlmacenModel> Base(int col) => Aplicar(_items, col);
+
+    private List<TiposAlmacenModel> Aplicar(List<TiposAlmacenModel> src, int ex)
+    {
+        IEnumerable<TiposAlmacenModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_TIPO_ALMACEN)),
+                1 => q.Where(x => v.Contains(x.DES_TIPO_ALMACEN)),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    // El SP _SEARCH de esta tabla arranca con "WHERE 1 = 1 OR (...)", así que ignora el
+    // texto y siempre devuelve todo — por eso se filtra en memoria y no se llama al SP.
+    private Task Buscar() { StateHasChanged(); return Task.CompletedTask; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("LOGISTICA", "TiposAlmacen");
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("LOGISTICA.TIPOS_ALMACEN", _onCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposAlmacenModel>>>(
+                ApiRoutes.Logistica.TiposAlmacen);
+            var todos = r?.Data ?? new();
+            _items = string.IsNullOrWhiteSpace(_search)
+                ? todos
+                : todos.Where(x => x.COD_TIPO_ALMACEN.Contains(_search, StringComparison.OrdinalIgnoreCase)
+                                || x.DES_TIPO_ALMACEN.Contains(_search, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(TiposAlmacen), nameof(Load));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            _items = new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(TiposAlmacenModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(TiposAlmacenModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de almacén",
+            CrudModo.Delete => $"Eliminar · {item?.DES_TIPO_ALMACEN}",
+            CrudModo.Read   => $"Consultar · {item?.DES_TIPO_ALMACEN}",
+            _               => $"Editar · {item?.DES_TIPO_ALMACEN}"
+        };
+        var dlg = await DialogService.ShowAsync<TiposAlmacenDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("LOGISTICA.TIPOS_ALMACEN", _onCambio ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

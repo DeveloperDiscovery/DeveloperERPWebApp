@@ -1,0 +1,252 @@
+@page "/entorno/postits"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Entorno
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject IAuthService AuthSvc
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject ConfigService ConfigSvc
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+@implements IAsyncDisposable
+
+<PageTitle>Post-its · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<style>
+    .pit-root { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+    .pit-toolbar {
+        flex-shrink:0; display:flex; align-items:center; justify-content:space-between;
+        padding:10px 14px; border:1px solid var(--line); border-bottom:none; border-radius:8px 8px 0 0;
+        background:var(--mud-palette-surface);
+    }
+    .pit-toolbar .titulo { display:flex; align-items:center; gap:8px; font-weight:700; font-size:.9rem; }
+    /* Marco de madera alrededor del corcho: borde grueso con veta simulada + relieve. */
+    .pit-board {
+        position:relative; flex:1 1 auto; min-height:300px; overflow:hidden;
+        border-radius:0 0 10px 10px;
+        border:14px solid #8a5a34;
+        border-image: repeating-linear-gradient(100deg, #7a4c2c 0 6px, #96633a 6px 11px, #6e451f 11px 14px) 14;
+        box-shadow: inset 0 0 0 2px rgba(0,0,0,.25), inset 0 3px 8px rgba(0,0,0,.35), 0 4px 10px rgba(0,0,0,.2);
+    }
+    /* Textura de corcho: manchas radiales superpuestas en tonos marrón/tostado. */
+    .pit-board::before {
+        content:""; position:absolute; inset:0; pointer-events:none;
+        background:
+            radial-gradient(circle at 12% 18%, rgba(90,55,25,.16) 0 3px, transparent 4px),
+            radial-gradient(circle at 34% 62%, rgba(120,75,35,.14) 0 4px, transparent 5px),
+            radial-gradient(circle at 58% 22%, rgba(90,55,25,.13) 0 2.5px, transparent 3.5px),
+            radial-gradient(circle at 76% 70%, rgba(120,75,35,.15) 0 3.5px, transparent 4.5px),
+            radial-gradient(circle at 90% 35%, rgba(90,55,25,.12) 0 3px, transparent 4px),
+            radial-gradient(circle at 22% 85%, rgba(120,75,35,.13) 0 3px, transparent 4px),
+            radial-gradient(circle at 48% 40%, rgba(90,55,25,.1) 0 2px, transparent 3px),
+            radial-gradient(circle at 68% 90%, rgba(90,55,25,.14) 0 3px, transparent 4px);
+        background-size: 90px 90px, 110px 110px, 70px 70px, 100px 100px, 130px 130px, 85px 85px, 60px 60px, 95px 95px;
+    }
+    .pit-board::after {
+        content:""; position:absolute; inset:0; pointer-events:none;
+        background: linear-gradient(155deg, rgba(0,0,0,0) 60%, rgba(0,0,0,.12) 100%);
+    }
+    .pit-board { background:#c69a63; }
+    .pit-board > * { position:relative; }
+    .postit {
+        position:absolute; width:190px; min-height:150px; padding:16px 12px 34px;
+        border-radius:2px 2px 10px 10px;
+        box-shadow:0 10px 18px -6px rgba(0,0,0,.28), 0 2px 4px rgba(0,0,0,.12);
+        cursor:grab; display:flex; flex-direction:column; gap:6px; user-select:none;
+    }
+    .postit.arrastrando { cursor:grabbing; box-shadow:0 18px 30px -6px rgba(0,0,0,.4); z-index:50; }
+    .postit.c0 { background:#fff3a3; }
+    .postit.c1 { background:#a9e6c4; }
+    .postit.c2 { background:#bcd9f5; }
+    .postit.c3 { background:#f7c1d6; }
+    /* Chinche estilo "pushpin" fotográfico: tapa ovalada roja arriba, cuello y disco
+       (flange) rojo, aguja metálica plateada abajo — apenas inclinado, superpuesto
+       sobre la esquina superior izquierda de la nota. */
+    .pit-pin {
+        position:absolute; top:-24px; left:-2px; width:32px; height:46px;
+        transform:rotate(-12deg); transform-origin:50% 30%;
+        pointer-events:none; z-index:2;
+    }
+    .pit-pin .pit-pin-cabeza {
+        position:absolute; top:0; left:3px; width:26px; height:16px;
+        background:linear-gradient(155deg, #ff8a7a 0%, #e8271f 45%, #8f0e0a 100%);
+        border-radius:50%;
+        box-shadow:inset -3px -3px 5px rgba(0,0,0,.35), inset 2px 3px 4px rgba(255,255,255,.5), 0 2px 4px rgba(0,0,0,.3);
+    }
+    .pit-pin .pit-pin-cuello {
+        position:absolute; top:11px; left:9px; width:14px; height:11px;
+        background:linear-gradient(90deg, #8f0e0a, #e8271f 40%, #ff8a7a 60%, #b5140f);
+    }
+    .pit-pin .pit-pin-base {
+        position:absolute; top:18px; left:1px; width:30px; height:13px;
+        background:linear-gradient(160deg, #ff8a7a 0%, #e8271f 45%, #8f0e0a 100%);
+        border-radius:50%;
+        box-shadow:inset -3px -3px 5px rgba(0,0,0,.35), inset 2px 2px 4px rgba(255,255,255,.45), 0 3px 5px rgba(0,0,0,.35);
+    }
+    .pit-pin .pit-pin-aguja {
+        position:absolute; top:27px; left:13px; width:0; height:0;
+        border-left:3px solid transparent; border-right:3px solid transparent;
+        border-top:19px solid #b7bdc4;
+        filter:drop-shadow(1px 1px 1px rgba(0,0,0,.3));
+    }
+    .postit .pit-del {
+        position:absolute; top:4px; right:4px; min-width:0;
+    }
+    .postit .pit-titulo {
+        font-family:'Archivo', sans-serif; font-weight:700; font-size:.85rem; color:#2a2410;
+        background:transparent; border:none; outline:none; width:100%; padding-right:22px;
+        font-family:inherit;
+    }
+    .postit .pit-cuerpo {
+        font-size:.78rem; line-height:1.4; color:#3a3320; background:transparent; border:none;
+        outline:none; resize:none; flex:1; min-height:70px; font-family:inherit;
+    }
+    .pit-empty { padding:40px; text-align:center; opacity:.4; font-size:.85rem; font-style:italic; }
+</style>
+
+<div class="pit-root">
+    <div class="pit-toolbar">
+        <div class="titulo">
+            <MudIcon Icon="@Icons.Material.Filled.PushPin" Size="Size.Small" Style="color:#c0392b;" />
+            Post-its @(_codUsuario is null ? "" : $"· {_codUsuario}")
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Add" OnClick="NuevoPostIt">
+            Nuevo Post-it
+        </MudButton>
+    </div>
+
+    <div class="pit-board" @ref="_boardRef">
+        @if (!_cargando && !_notas.Any())
+        {
+            <div class="pit-empty">Sin post-its todavía — crea el primero con "Nuevo Post-it".</div>
+        }
+        @foreach (var n in _notas)
+        {
+            <div class="postit c@(ColorIndex(n.NUM_POSTIT))" data-postit="@n.NUM_POSTIT"
+                 style="left:@(n.POS_LEFT)px;top:@(n.POS_TOP)px;">
+                <div class="pit-pin">
+                    <div class="pit-pin-cabeza"></div>
+                    <div class="pit-pin-cuello"></div>
+                    <div class="pit-pin-base"></div>
+                    <div class="pit-pin-aguja"></div>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Class="pit-del postit-no-drag"
+                               Style="color:rgba(0,0,0,.5);" OnClick="@(() => Eliminar(n))" />
+                <input class="pit-titulo postit-no-drag" placeholder="Título" maxlength="25"
+                       @bind="n.DES_TITULO" @bind:event="oninput" @onblur="@(() => Guardar(n))" />
+                <textarea class="pit-cuerpo postit-no-drag" placeholder="Escribe aquí..." maxlength="100"
+                          @bind="n.DES_POSTIT" @bind:event="oninput" @onblur="@(() => Guardar(n))"></textarea>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<PostIt> _notas = new();
+    private string? _codUsuario;
+    private bool _cargando = true;
+    private ElementReference _boardRef;
+    private DotNetObjectReference<PostItsBoard>? _dotNetRef;
+    private bool _jsInit;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var sesion = await AuthSvc.GetSesionAsync();
+        _codUsuario = sesion?.COD_USUARIO;
+        await Cargar();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_jsInit)
+        {
+            _jsInit = true;
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("postits.init", _boardRef, _dotNetRef);
+        }
+    }
+
+    private async Task Cargar()
+    {
+        _cargando = true;
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<PostIt>>>(ApiRoutes.Entorno.PostIts);
+            _notas = (r?.Data ?? new())
+                .Where(n => string.Equals(n.COD_USUARIO, _codUsuario, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+        catch { _notas = new(); }
+        _cargando = false;
+        StateHasChanged();
+    }
+
+    private static int ColorIndex(long numPostit) => (int)(Math.Abs(numPostit) % 4);
+
+    private async Task NuevoPostIt()
+    {
+        if (string.IsNullOrWhiteSpace(_codUsuario)) return;
+        var rnd = new Random();
+        // Numeración correlativa por usuario empezando en 1 (no timestamp): el máximo
+        // NUM_POSTIT ya cargado + 1.
+        var siguiente = (_notas.Count > 0 ? _notas.Max(x => x.NUM_POSTIT) : 0) + 1;
+        var nueva = new PostIt
+        {
+            NUM_POSTIT = siguiente,
+            COD_USUARIO = _codUsuario,
+            DES_TITULO = "",
+            DES_POSTIT = "",
+            POS_LEFT = rnd.Next(20, 260),
+            POS_TOP = rnd.Next(20, 160)
+        };
+        _notas.Add(nueva);
+        StateHasChanged();
+        await Guardar(nueva);
+    }
+
+    private async Task Guardar(PostIt n)
+    {
+        try
+        {
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Entorno.PostIts, n);
+            if (!resp.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(PostItsBoard), nameof(Guardar));
+            }
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(PostItsBoard)); await ErrorLog.LogAsync(ex, nameof(PostItsBoard), nameof(Guardar)); }
+    }
+
+    private async Task Eliminar(PostIt n)
+    {
+        _notas.Remove(n);
+        StateHasChanged();
+        try
+        {
+            var resp = await Http.DeleteAsync($"{ApiRoutes.Entorno.PostIts}/{n.NUM_POSTIT}");
+            if (!resp.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(PostItsBoard), nameof(Eliminar));
+            }
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(PostItsBoard)); await ErrorLog.LogAsync(ex, nameof(PostItsBoard), nameof(Eliminar)); }
+    }
+
+    [JSInvokable]
+    public async Task GuardarPosicion(long numPostit, int left, int top)
+    {
+        var n = _notas.FirstOrDefault(x => x.NUM_POSTIT == numPostit);
+        if (n is null) return;
+        n.POS_LEFT = left;
+        n.POS_TOP = top;
+        await Guardar(n);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("postits.dispose"); } catch { }
+        _dotNetRef?.Dispose();
+    }
+}

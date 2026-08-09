@@ -1,0 +1,397 @@
+@page "/estandar/monedas-tipo-cambio"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Estandar
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject ErrorLogService ErrorLog
+@implements IDisposable
+
+<PageTitle>Tipo de Cambio · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="mb-4">
+    <TituloPagina Fallback="Tipo de Cambio" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+    <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · MONEDAS_TIPO_CAMBIO</MudText>
+</div>
+
+<div class="tc-layout">
+
+    @* ── Panel izquierdo: lista de monedas ── *@
+    <MudPaper Elevation="0" Class="tc-panel-monedas" Style="border:1px solid var(--line);">
+        <div class="tc-panel-header">
+            <MudText Typo="Typo.subtitle2" Style="font-weight:600;letter-spacing:.04em;">MONEDAS</MudText>
+        </div>
+        <CampoTextoEstable @bind-Value="_searchMoneda" Placeholder="Buscar moneda..." Variant="Variant.Text"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Immediate="true" DebounceInterval="250"
+                      OnDebounceIntervalElapsed="StateHasChanged"
+                      Clearable="true" OnClearButtonClick="@(() => { _searchMoneda = ""; StateHasChanged(); })"
+                      Class="mx-2 mt-1 mb-1" Style="font-size:.85rem;" />
+        <div class="tc-monedas-list">
+            @foreach (var m in _monedas.Where(x => string.IsNullOrWhiteSpace(_searchMoneda) ||
+                x.COD_MONEDA.Contains(_searchMoneda, StringComparison.OrdinalIgnoreCase) ||
+                x.DES_MONEDA.Contains(_searchMoneda, StringComparison.OrdinalIgnoreCase)))
+            {
+                var esActiva = _monedaSeleccionada?.COD_MONEDA == m.COD_MONEDA;
+                <div class="tc-moneda-item @(esActiva ? "tc-moneda-item--activa" : "")"
+                     @onclick="@(() => SeleccionarMoneda(m))">
+                    <GridImage Image="m.IMG_ICONO" />
+                    <div class="tc-moneda-info">
+                        <span class="tc-moneda-cod mono">@m.COD_MONEDA</span>
+                        <span class="tc-moneda-des">@m.DES_MONEDA</span>
+                    </div>
+                </div>
+            }
+        </div>
+    </MudPaper>
+
+    @* ── Panel derecho: grilla de tipos de cambio ── *@
+    <MudPaper Elevation="0" Class="tc-panel-grid" Style="border:1px solid var(--line);">
+        @if (_monedaSeleccionada is null)
+        {
+            <div class="tc-empty">
+                <MudIcon Icon="@Icons.Material.Outlined.CurrencyExchange" Style="font-size:3rem;opacity:.25;" />
+                <MudText Class="mt-2" Style="opacity:.45;font-size:.9rem;">Selecciona una moneda para ver sus tipos de cambio</MudText>
+            </div>
+        }
+        else
+        {
+            <div class="tc-grid-header d-flex align-center justify-space-between px-3 py-2">
+                <div>
+                    <MudText Typo="Typo.subtitle2" Style="font-weight:600;">
+                        @_monedaSeleccionada.DES_MONEDA
+                        <span class="mono" style="opacity:.5;font-size:.8rem;margin-left:6px;">(@_monedaSeleccionada.COD_MONEDA)</span>
+                    </MudText>
+                    <MudText Style="opacity:.45;font-size:.77rem;">@_tiposCambio.Count registros</MudText>
+                </div>
+                <div class="d-flex gap-2 align-center">
+                    <GridRefreshButton OnRefresh="LoadTC" />
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderDetalle" />
+                </div>
+            </div>
+            <MudToolBar Dense="true">
+                <CampoTextoEstable @bind-Value="_searchTC" Placeholder="Buscar fecha..." Variant="Variant.Text"
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                              Immediate="true" DebounceInterval="300"
+                              OnDebounceIntervalElapsed="StateHasChanged"
+                              Clearable="true" OnClearButtonClick="@(() => { _searchTC = ""; StateHasChanged(); })"
+                              Class="mt-0" Style="max-width:320px;" />
+            </MudToolBar>
+            <div data-resizable-grid="monedas-tipo-cambio" style="position:relative;">
+            @if (_cargandoTC)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            }
+            <MudDataGrid T="MonedaTipoCambio" Items="TipoCambioFiltrado" Dense="true" Hover="true" Striped="true"
+                         Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica"
+                         SortMode="SortMode.Single">
+                <Columns>
+                    <TemplateColumn Sortable="false" Title="Fecha" InitialDirection="SortDirection.Descending" Width="110">
+                        <HeaderTemplate>
+                            <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="FEC_TIPO_CAMBIO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                                <FiltroExcelColumna T="MonedaTipoCambio" ItemsBase="@Base(0)" ValorDe="@(x=>x.FEC_TIPO_CAMBIO?.ToString("dd/MM/yyyy") ?? "")"
+                                                    ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                            </div>
+                        </HeaderTemplate>
+                        <CellTemplate><span class="mono">@context.Item.FEC_TIPO_CAMBIO?.ToString("dd/MM/yyyy")</span></CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Sortable="false" Title="TC Comer. Compra" Width="130">
+                        <HeaderTemplate>
+                            <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="FAC_COMERCIAL_COMPRA" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                                <FiltroExcelColumna T="MonedaTipoCambio" ItemsBase="@Base(1)" ValorDe="@(x=>x.FAC_COMERCIAL_COMPRA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture) ?? "")"
+                                                    ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                            </div>
+                        </HeaderTemplate>
+                        <CellTemplate><span class="mono">@context.Item.FAC_COMERCIAL_COMPRA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture)</span></CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Sortable="false" Title="TC Comer. Venta" Width="130">
+                        <HeaderTemplate>
+                            <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="FAC_COMERCIAL_VENTA" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                                <FiltroExcelColumna T="MonedaTipoCambio" ItemsBase="@Base(2)" ValorDe="@(x=>x.FAC_COMERCIAL_VENTA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture) ?? "")"
+                                                    ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                            </div>
+                        </HeaderTemplate>
+                        <CellTemplate><span class="mono">@context.Item.FAC_COMERCIAL_VENTA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture)</span></CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Sortable="false" Title="TC SUNAT Compra" Width="130">
+                        <HeaderTemplate>
+                            <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="FAC_SUNAT_COMPRA" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                                <FiltroExcelColumna T="MonedaTipoCambio" ItemsBase="@Base(3)" ValorDe="@(x=>x.FAC_SUNAT_COMPRA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture) ?? "")"
+                                                    ValoresActivos="_filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                            </div>
+                        </HeaderTemplate>
+                        <CellTemplate><span class="mono">@context.Item.FAC_SUNAT_COMPRA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture)</span></CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Sortable="false" Title="TC SUNAT Venta" Width="130">
+                        <HeaderTemplate>
+                            <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="FAC_SUNAT_VENTA" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                                <FiltroExcelColumna T="MonedaTipoCambio" ItemsBase="@Base(4)" ValorDe="@(x=>x.FAC_SUNAT_VENTA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture) ?? "")"
+                                                    ValoresActivos="_filtros.GetValueOrDefault(4)" ValoresActivosChanged="@(v=>Filtro(4,v))" />
+                            </div>
+                        </HeaderTemplate>
+                        <CellTemplate><span class="mono">@context.Item.FAC_SUNAT_VENTA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture)</span></CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Sortable="false" Title="TC Paralelo Compra" Width="140">
+                        <HeaderTemplate>
+                            <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="FAC_PARALELO_COMPRA" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                                <FiltroExcelColumna T="MonedaTipoCambio" ItemsBase="@Base(5)" ValorDe="@(x=>x.FAC_PARALELO_COMPRA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture) ?? "")"
+                                                    ValoresActivos="_filtros.GetValueOrDefault(5)" ValoresActivosChanged="@(v=>Filtro(5,v))" />
+                            </div>
+                        </HeaderTemplate>
+                        <CellTemplate><span class="mono">@context.Item.FAC_PARALELO_COMPRA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture)</span></CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Sortable="false" Title="TC Paralelo Venta" Width="140">
+                        <HeaderTemplate>
+                            <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="FAC_PARALELO_VENTA" Activo="@(_ordenColumna == 6)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(6))" />
+                                <FiltroExcelColumna T="MonedaTipoCambio" ItemsBase="@Base(6)" ValorDe="@(x=>x.FAC_PARALELO_VENTA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture) ?? "")"
+                                                    ValoresActivos="_filtros.GetValueOrDefault(6)" ValoresActivosChanged="@(v=>Filtro(6,v))" />
+                            </div>
+                        </HeaderTemplate>
+                        <CellTemplate><span class="mono">@context.Item.FAC_PARALELO_VENTA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture)</span></CellTemplate>
+                    </TemplateColumn>
+                    <TemplateColumn Title="Acciones" Sortable="false">
+                        <CellTemplate>
+                            @{ var item = context.Item; }
+                            <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                             Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                        </CellTemplate>
+                    </TemplateColumn>
+                </Columns>
+                <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros de tipo de cambio.</MudText></NoRecordsContent>
+                <PagerContent><MudDataGridPager T="MonedaTipoCambio" /></PagerContent>
+            </MudDataGrid>
+            <div class="grid-resize-handle"></div>
+            </div>
+        }
+    </MudPaper>
+</div>
+
+<style>
+    .tc-layout {
+        display: grid;
+        grid-template-columns: 260px 1fr;
+        gap: 12px;
+        align-items: start;
+    }
+    .tc-panel-monedas {
+        display: flex;
+        flex-direction: column;
+        max-height: calc(100vh - 200px);
+        overflow: hidden;
+    }
+    .tc-panel-header {
+        padding: 10px 12px 6px;
+        border-bottom: 1px solid var(--line, rgba(0,0,0,.1));
+    }
+    .tc-monedas-list {
+        overflow-y: auto;
+        flex: 1;
+    }
+    .tc-moneda-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        cursor: pointer;
+        transition: background .13s;
+        border-bottom: 1px solid rgba(0,0,0,.04);
+    }
+    .tc-moneda-item:hover { background: rgba(0,0,0,.04); }
+    .tc-moneda-item--activa { background: rgba(184,71,45,.1); border-left: 3px solid #b8472d; }
+    .tc-moneda-ico { width: 28px; height: 28px; object-fit: contain; flex-shrink: 0; }
+    .tc-moneda-ico-mud { font-size: 1.4rem !important; opacity: .4; flex-shrink: 0; }
+    .tc-moneda-info { display: flex; flex-direction: column; min-width: 0; }
+    .tc-moneda-cod { font-size: .78rem; font-weight: 700; }
+    .tc-moneda-des { font-size: .75rem; opacity: .6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tc-panel-grid { min-height: 400px; }
+    .tc-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; }
+    .tc-grid-header { border-bottom: 1px solid var(--line, rgba(0,0,0,.1)); }
+    @@media (max-width: 768px) {
+        .tc-layout { grid-template-columns: 1fr; }
+    }
+</style>
+
+@code {
+    private Func<Task>? _onCambio0;
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<Moneda>         _monedas           = new();
+    private List<MonedaTipoCambio> _tiposCambio     = new();
+    private Moneda?              _monedaSeleccionada;
+    private string               _searchMoneda      = "";
+    private string               _searchTC          = "";
+    private bool                 _cargandoTC;
+
+    private List<MonedaTipoCambio> _tiposCambioBuscados => string.IsNullOrWhiteSpace(_searchTC)
+        ? _tiposCambio
+        : _tiposCambio.Where(x => x.FEC_TIPO_CAMBIO?.ToString("dd/MM/yyyy")
+            ?.Contains(_searchTC, StringComparison.OrdinalIgnoreCase) == true).ToList();
+
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<MonedaTipoCambio> Ordenar(List<MonedaTipoCambio> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.FEC_TIPO_CAMBIO).ToList() : items.OrderByDescending(x => x.FEC_TIPO_CAMBIO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.FAC_COMERCIAL_COMPRA).ToList() : items.OrderByDescending(x => x.FAC_COMERCIAL_COMPRA).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.FAC_COMERCIAL_VENTA).ToList() : items.OrderByDescending(x => x.FAC_COMERCIAL_VENTA).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.FAC_SUNAT_COMPRA).ToList() : items.OrderByDescending(x => x.FAC_SUNAT_COMPRA).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.FAC_SUNAT_VENTA).ToList() : items.OrderByDescending(x => x.FAC_SUNAT_VENTA).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.FAC_PARALELO_COMPRA).ToList() : items.OrderByDescending(x => x.FAC_PARALELO_COMPRA).ToList(),
+        6 => _ordenAscendente ? items.OrderBy(x => x.FAC_PARALELO_VENTA).ToList() : items.OrderByDescending(x => x.FAC_PARALELO_VENTA).ToList(),
+        _ => items
+    };
+    private List<MonedaTipoCambio> TipoCambioFiltrado => Ordenar(Aplicar(_tiposCambioBuscados, -1));
+    private List<MonedaTipoCambio> Base(int col) => Aplicar(_tiposCambioBuscados, col);
+
+    private List<MonedaTipoCambio> Aplicar(List<MonedaTipoCambio> src, int ex)
+    {
+        IEnumerable<MonedaTipoCambio> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.FEC_TIPO_CAMBIO?.ToString("dd/MM/yyyy") ?? "")),
+                1 => q.Where(x => v.Contains(x.FAC_COMERCIAL_COMPRA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture) ?? "")),
+                2 => q.Where(x => v.Contains(x.FAC_COMERCIAL_VENTA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture) ?? "")),
+                3 => q.Where(x => v.Contains(x.FAC_SUNAT_COMPRA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture) ?? "")),
+                4 => q.Where(x => v.Contains(x.FAC_SUNAT_VENTA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture) ?? "")),
+                5 => q.Where(x => v.Contains(x.FAC_PARALELO_COMPRA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture) ?? "")),
+                6 => q.Where(x => v.Contains(x.FAC_PARALELO_VENTA?.ToString("N4", System.Globalization.CultureInfo.InvariantCulture) ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ESTANDAR", "MonedasTipoCambio");
+        await LoadAll();
+        _onCambio0 = async () =>
+            await InvokeAsync(async () => { await LoadTC(); StateHasChanged(); });
+        Cambios.Suscribir("ESTANDAR.MONEDAS_TIPO_CAMBIO", _onCambio0);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task LoadAll()
+    {
+        await LoadMonedas();
+        if (_monedaSeleccionada is null && _monedas.Count > 0) _monedaSeleccionada = _monedas[0];
+        if (_monedaSeleccionada is not null)
+            await LoadTC();
+    }
+
+    private async Task LoadMonedas()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<Moneda>>>(ApiRoutes.Estandar.Monedas);
+            _monedas = r?.Data ?? new();
+        }
+        catch { _monedas = new(); }
+    }
+
+    private async Task SeleccionarMoneda(Moneda m)
+    {
+        _monedaSeleccionada = m;
+        _searchTC = "";
+        await LoadTC();
+    }
+
+    private async Task LoadTC()
+    {
+        if (_monedaSeleccionada is null) return;
+        _cargandoTC = true;
+        StateHasChanged();
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<MonedaTipoCambio>>>(
+                $"{ApiRoutes.Estandar.MonedasTipoCambio}?COD_MONEDA={Uri.EscapeDataString(_monedaSeleccionada.COD_MONEDA)}");
+            _tiposCambio = r?.Data ?? new();
+        }
+        catch { _tiposCambio = new(); }
+        _cargandoTC = false;
+        StateHasChanged();
+    }
+
+    private Task OnAccionHeaderDetalle(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        if (string.Equals(b.DES_METODO?.Trim(), "MonedasTipoCambioDownloadSnippet", StringComparison.OrdinalIgnoreCase)) return DescargarDesdeSnippet(b);
+        return Task.CompletedTask;
+    }
+
+    private async Task DescargarDesdeSnippet(BotonTreeviewItem b)
+    {
+        try
+        {
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Estandar.MonedasTipoCambioDownloadSnippet, new { b.COD_APLICACION, b.COD_OPCION_APLICACION, b.COD_BOTON_OPCION });
+            if (resp.IsSuccessStatusCode)
+            {
+                var r = await resp.Content.ReadFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<MonedaTipoCambio>>();
+                Snackbar.Add(r?.Message ?? "Tipo de cambio SUNAT descargado.", Severity.Success);
+                await LoadTC();
+            }
+            else
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(MonedasTipoCambio), nameof(DescargarDesdeSnippet));
+            }
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(MonedasTipoCambio)); }
+    }
+
+    private Task OnAccionGrilla(MonedaTipoCambio item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(MonedaTipoCambio? item, CrudModo modo)
+    {
+        if (_monedaSeleccionada is null) return;
+        var fechaStr = item?.FEC_TIPO_CAMBIO?.ToString("dd/MM/yyyy") ?? "";
+        var titulo = modo switch
+        {
+            CrudModo.Create => $"Nuevo tipo de cambio · {_monedaSeleccionada.DES_MONEDA}",
+            CrudModo.Read   => $"Ver · {fechaStr}",
+            CrudModo.Delete => $"Eliminar · {fechaStr}",
+            _               => $"Editar · {fechaStr}"
+        };
+        var dlg = await DialogService.ShowAsync<MonedasTipoCambioDialog>(titulo,
+            new DialogParameters
+            {
+                ["Item"]    = item,
+                ["Modo"]    = modo,
+                ["Moneda"]  = _monedaSeleccionada
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadTC();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ESTANDAR.MONEDAS_TIPO_CAMBIO", _onCambio0 ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

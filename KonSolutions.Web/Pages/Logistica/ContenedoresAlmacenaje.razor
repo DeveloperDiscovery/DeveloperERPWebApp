@@ -1,0 +1,568 @@
+@page "/logistica/contenedores-almacenaje"
+@attribute [Authorize]
+@using ContenedorModel = KONSolutions.Shared.Models.Logistica.ContenedoresAlmacenaje
+@using CasilleroModel = KONSolutions.Shared.Models.Logistica.ContenedoresAlmacenajeCasilleros
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Contenedores de Almacenaje · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Contenedores de Almacenaje" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema LOGISTICA · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar contenedor..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="contenedores-almacenaje" style="position:relative;">
+    <MudDataGrid T="ContenedorModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica"
+                 RowClick="OnContenedorRowClick" RowClassFunc="@FilaContenedorSeleccionado">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código"
+                            Width="@Limites.ColWidth("LOGISTICA.CONTENEDORES_ALMACENAJE","COD_CONTENEDOR",70,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_CONTENEDOR" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="ContenedorModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_CONTENEDOR)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.COD_CONTENEDOR</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Contenedor"
+                            Width="@Limites.ColWidth("LOGISTICA.CONTENEDORES_ALMACENAJE","DES_CONTENDOR",150,300)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_CONTENDOR" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="ContenedorModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_CONTENDOR)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_CONTENDOR</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo" Width="150">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_UBICACION" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="ContenedorModel" ItemsBase="@Base(2)" ValorDe="@(x=>x.DES_TIPO_UBICACION ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_TIPO_UBICACION ?? context.Item.COD_TIPO_UBICACION)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Almacén" Width="170">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ALMACEN" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="ContenedorModel" ItemsBase="@Base(3)" ValorDe="@(x=>x.DES_ALMACEN ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_ALMACEN ?? context.Item.COD_ALMACEN)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Zonificación" Width="160">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_ZONIFICACION" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="ContenedorModel" ItemsBase="@Base(4)" ValorDe="@(x=>x.DES_ZONIFICACION ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(4)" ValoresActivosChanged="@(v=>Filtro(4,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_ZONIFICACION ?? context.Item.COD_ZONIFICACION)</CellTemplate>
+            </TemplateColumn>
+            @* Filas × columnas y el total que se generará de casilleros: es la razón de ser
+               del contenedor, así que va visible en la grilla. *@
+            <TemplateColumn Sortable="false" Title="Grilla" Width="130" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Grilla" /></HeaderTemplate>
+                <CellTemplate>
+                    @if (context.Item.TotalCasilleros > 0)
+                    {
+                        <MudTooltip Text="@($"{context.Item.TotalCasilleros} casilleros")">
+                            <span class="mono">@context.Item.NUM_FILAS × @context.Item.NUM_COLUMNAS</span>
+                        </MudTooltip>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Medidas (cm)" Width="150" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Medidas (cm)" /></HeaderTemplate>
+                <CellTemplate>
+                    @if (context.Item.VAL_ALTO_NIVEL_CENTIMETROS is > 0 || context.Item.VAL_LARGO_NIVEL_CENTIMETROS is > 0)
+                    {
+                        <MudTooltip Text="Alto × Largo × Profundidad">
+                            <span class="mono" style="opacity:.75;">
+                                @context.Item.VAL_ALTO_NIVEL_CENTIMETROS · @context.Item.VAL_LARGO_NIVEL_CENTIMETROS · @context.Item.VAL_PROFUNDIDAD_NIVEL_CENTIMETROS
+                            </span>
+                        </MudTooltip>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            @* Señal de qué contenedores ya están dibujados sobre el plano del nivel. *@
+            <TemplateColumn Sortable="false" Title="Plano" Width="70" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Plano" /></HeaderTemplate>
+                <CellTemplate>
+                    @if (Poligono.TienePoligono(context.Item.DES_POLIGONO))
+                    {
+                        <MudTooltip Text="Ubicado en el plano">
+                            <MudIcon Icon="@Icons.Material.Filled.Polyline" Size="Size.Small" Color="Color.Success" />
+                        </MudTooltip>
+                    }
+                    else
+                    {
+                        <MudTooltip Text="Sin ubicar en el plano">
+                            <MudIcon Icon="@Icons.Material.Filled.Polyline" Size="Size.Small" Style="opacity:.2;" />
+                        </MudTooltip>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Estado" Width="120" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1 justify-center"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="ContenedorModel" ItemsBase="@Base(5)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(5)" ValoresActivosChanged="@(v=>Filtro(5,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrWhiteSpace(context.Item.DES_ESTADO))
+                    {
+                        <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="ContenedorModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@* ── DETALLE: Casilleros del contenedor seleccionado (LOGISTICA.CONTENEDORES_ALMACENAJE_CASILLEROS) ── *@
+<MudPaper Elevation="0" Class="mt-4" Style="border:1px solid var(--line);">
+    <div class="d-flex align-center justify-space-between pa-3" style="border-bottom:1px solid var(--line);">
+        <div>
+            <MudText Typo="Typo.h6">Casilleros</MudText>
+            <MudText Class="mono" Style="opacity:.5;font-size:.78rem;color:var(--subtitulo-color,#6b6358);">
+                @if (_contenedorSel is not null) { <text>Contenedor: @_contenedorSel.DES_CONTENDOR · @_casilleros.Count casilleros</text> }
+                else { <text>Seleccione un contenedor arriba</text> }
+            </MudText>
+        </div>
+        <div class="d-flex gap-2">
+            <GridRefreshButton OnRefresh="LoadCasilleros" />
+            <GridClearFiltersButton OnClear="LimpiarFiltrosCasillero" HasFilters="@(_filtrosCasillero.Any(f=>f.Value is not null))" />
+            @* Lo normal es generar la matriz completa; el alta suelta queda para el caso raro
+               de un casillero agregado después. *@
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.GridOn"
+                       Disabled="@(_contenedorSel is null)" Size="Size.Small"
+                       OnClick="AbrirGenerador">Generar casilleros</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       Disabled="@(_contenedorSel is null)" Size="Size.Small"
+                       OnClick="@(() => AbrirCasillero(null, CrudModo.Create))">Nuevo casillero</MudButton>
+        </div>
+    </div>
+
+    @if (_contenedorSel is null)
+    {
+        <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione un contenedor para ver sus casilleros.</MudText>
+    }
+    else if (_loadingCasilleros)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else
+    {
+        <div data-resizable-grid="contenedores-casilleros" style="position:relative;">
+        <MudDataGrid T="CasilleroModel" Items="_casillerosVisibles" Dense="true" Hover="true" Striped="true"
+                     Height="100%" FixedHeader="true"
+                     RowClick="@(args => _casilleroSel = args.Item)"
+                     RowClassFunc="@FilaFocoCasillero"
+                     RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+            <Columns>
+                <TemplateColumn Sortable="false" Title="Cód"
+                                Width="@Limites.ColWidth("LOGISTICA.CONTENEDORES_ALMACENAJE_CASILLEROS","COD_CASILLERO",70,120)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="COD_CASILLERO" Activo="@(_ordenColumnaCasillero == 0)" Ascendente="_ordenAscendenteCasillero" OnClick="@(() => ToggleOrdenCasillero(0))" />
+                            <FiltroExcelColumna T="CasilleroModel" ItemsBase="@CasillerosBase(0)" ValorDe="@(x=>x.COD_CASILLERO)"
+                                                ValoresActivos="_filtrosCasillero.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroCasillero(0,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate><span class="mono">@context.Item.COD_CASILLERO</span></CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Casillero"
+                                Width="@Limites.ColWidth("LOGISTICA.CONTENEDORES_ALMACENAJE_CASILLEROS","DES_CASILLERO",150,300)">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="DES_CASILLERO" Activo="@(_ordenColumnaCasillero == 1)" Ascendente="_ordenAscendenteCasillero" OnClick="@(() => ToggleOrdenCasillero(1))" />
+                            <FiltroExcelColumna T="CasilleroModel" ItemsBase="@CasillerosBase(1)" ValorDe="@(x=>x.DES_CASILLERO)"
+                                                ValoresActivos="_filtrosCasillero.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroCasillero(1,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@context.Item.DES_CASILLERO</CellTemplate>
+                </TemplateColumn>
+                @* Fila y columna juntas: solas no dicen nada, la posición es el par. *@
+                <TemplateColumn Sortable="false" Title="Posición" Width="110" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1 justify-center">
+                            <EncabezadoOrdenable Campo="Posición" Activo="@(_ordenColumnaCasillero == 2)" Ascendente="_ordenAscendenteCasillero" OnClick="@(() => ToggleOrdenCasillero(2))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        <MudTooltip Text="Fila (nivel) · Columna">
+                            <span class="mono" style="opacity:.8;">@context.Item.Posicion</span>
+                        </MudTooltip>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Ubicación" Width="220">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="DES_UBICACION_ALMACEN" Activo="@(_ordenColumnaCasillero == 3)" Ascendente="_ordenAscendenteCasillero" OnClick="@(() => ToggleOrdenCasillero(3))" />
+                            <FiltroExcelColumna T="CasilleroModel" ItemsBase="@CasillerosBase(3)" ValorDe="@(x=>x.DES_UBICACION_ALMACEN ?? "")"
+                                                ValoresActivos="_filtrosCasillero.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>FiltroCasillero(3,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>
+                        @* Un casillero sin ubicación no direcciona stock: se marca en rojo
+                           en vez de mostrarse vacío y pasar desapercibido. *@
+                        @if (context.Item.SinUbicacion)
+                        {
+                            <MudTooltip Text="Sin ubicación asignada: no puede recibir stock">
+                                <div class="d-flex align-center gap-1">
+                                    <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Size="Size.Small" Color="Color.Error" />
+                                    <span style="opacity:.6;">Sin ubicación</span>
+                                </div>
+                            </MudTooltip>
+                        }
+                        else
+                        {
+                            <span><span class="mono" style="opacity:.6;">@context.Item.COD_UBICACION_ALMACEN</span> @context.Item.DES_UBICACION_ALMACEN</span>
+                        }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Almacén" Width="170">
+                    <HeaderTemplate>
+                        <div class="d-flex align-center gap-1">
+                            <EncabezadoOrdenable Campo="DES_ALMACEN" Activo="@(_ordenColumnaCasillero == 4)" Ascendente="_ordenAscendenteCasillero" OnClick="@(() => ToggleOrdenCasillero(4))" />
+                            <FiltroExcelColumna T="CasilleroModel" ItemsBase="@CasillerosBase(4)" ValorDe="@(x=>x.DES_ALMACEN ?? "")"
+                                                ValoresActivos="_filtrosCasillero.GetValueOrDefault(4)" ValoresActivosChanged="@(v=>FiltroCasillero(4,v))" />
+                        </div>
+                    </HeaderTemplate>
+                    <CellTemplate>@(context.Item.DES_ALMACEN ?? context.Item.COD_ALMACEN)</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false" Width="130">
+                    <CellTemplate>
+                        @{ var c = context.Item; }
+                        <div class="d-flex align-center gap-1">
+                            <MudTooltip Text="Modificar">
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                                               OnClick="@(() => AbrirCasillero(c, CrudModo.Update))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Eliminar">
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(() => AbrirCasillero(c, CrudModo.Delete))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Consultar">
+                                <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" Color="Color.Info"
+                                               OnClick="@(() => AbrirCasillero(c, CrudModo.Read))" />
+                            </MudTooltip>
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent><MudText Class="pa-4 mono" Style="opacity:.5;">Este contenedor no tiene casilleros aún. Use «Generar casilleros».</MudText></NoRecordsContent>
+            <PagerContent><MudDataGridPager T="CasilleroModel" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    }
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<ContenedorModel> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+
+    private List<ContenedorModel> Ordenar(List<ContenedorModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_CONTENEDOR).ToList()     : items.OrderByDescending(x => x.COD_CONTENEDOR).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_CONTENDOR).ToList()      : items.OrderByDescending(x => x.DES_CONTENDOR).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_UBICACION).ToList() : items.OrderByDescending(x => x.DES_TIPO_UBICACION).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_ALMACEN).ToList()        : items.OrderByDescending(x => x.DES_ALMACEN).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_ZONIFICACION).ToList()   : items.OrderByDescending(x => x.DES_ZONIFICACION).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList()         : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+
+    private List<ContenedorModel> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<ContenedorModel> Base(int col) => Aplicar(_items, col);
+
+    private List<ContenedorModel> Aplicar(List<ContenedorModel> src, int ex)
+    {
+        IEnumerable<ContenedorModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_CONTENEDOR)),
+                1 => q.Where(x => v.Contains(x.DES_CONTENDOR)),
+                2 => q.Where(x => v.Contains(x.DES_TIPO_UBICACION ?? "")),
+                3 => q.Where(x => v.Contains(x.DES_ALMACEN ?? "")),
+                4 => q.Where(x => v.Contains(x.DES_ZONIFICACION ?? "")),
+                5 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private async Task Buscar() => await Load();
+
+    // ── DETALLE: Casilleros del contenedor seleccionado ───────────────────────
+    private ContenedorModel? _contenedorSel;
+    private List<CasilleroModel> _casilleros = new();
+    private CasilleroModel? _casilleroSel;
+    private bool _loadingCasilleros;
+    private Func<Task>? _onCambioCasilleros;
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosCasillero = new();
+    private int? _ordenColumnaCasillero;
+    private bool _ordenAscendenteCasillero = true;
+
+    private List<CasilleroModel> _casillerosVisibles => OrdenarCasillero(AplicarCasillero(_casilleros, -1));
+    private List<CasilleroModel> CasillerosBase(int col) => AplicarCasillero(_casilleros, col);
+
+    private void ToggleOrdenCasillero(int columna)
+    {
+        if (_ordenColumnaCasillero == columna) _ordenAscendenteCasillero = !_ordenAscendenteCasillero;
+        else { _ordenColumnaCasillero = columna; _ordenAscendenteCasillero = true; }
+        StateHasChanged();
+    }
+
+    private List<CasilleroModel> OrdenarCasillero(List<CasilleroModel> items) => _ordenColumnaCasillero switch
+    {
+        0 => _ordenAscendenteCasillero ? items.OrderBy(x => x.COD_CASILLERO).ToList()         : items.OrderByDescending(x => x.COD_CASILLERO).ToList(),
+        1 => _ordenAscendenteCasillero ? items.OrderBy(x => x.DES_CASILLERO).ToList()         : items.OrderByDescending(x => x.DES_CASILLERO).ToList(),
+        // Fila y columna se ordenan juntas: por posición, no por el texto "F1·C10".
+        2 => _ordenAscendenteCasillero ? items.OrderBy(x => x.NUM_FILA).ThenBy(x => x.NUM_COLUMNA).ToList()
+                                       : items.OrderByDescending(x => x.NUM_FILA).ThenByDescending(x => x.NUM_COLUMNA).ToList(),
+        3 => _ordenAscendenteCasillero ? items.OrderBy(x => x.DES_UBICACION_ALMACEN).ToList() : items.OrderByDescending(x => x.DES_UBICACION_ALMACEN).ToList(),
+        4 => _ordenAscendenteCasillero ? items.OrderBy(x => x.DES_ALMACEN).ToList()           : items.OrderByDescending(x => x.DES_ALMACEN).ToList(),
+        // Por defecto en el orden físico del mueble: nivel y luego posición.
+        _ => items.OrderBy(x => x.NUM_FILA).ThenBy(x => x.NUM_COLUMNA).ThenBy(x => x.COD_CASILLERO).ToList()
+    };
+
+    private List<CasilleroModel> AplicarCasillero(List<CasilleroModel> src, int ex)
+    {
+        IEnumerable<CasilleroModel> q = src;
+        foreach (var (c, v) in _filtrosCasillero)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_CASILLERO)),
+                1 => q.Where(x => v.Contains(x.DES_CASILLERO)),
+                3 => q.Where(x => v.Contains(x.DES_UBICACION_ALMACEN ?? "")),
+                4 => q.Where(x => v.Contains(x.DES_ALMACEN ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void FiltroCasillero(int c, HashSet<string>? v) { _filtrosCasillero[c] = v; StateHasChanged(); }
+    private void LimpiarFiltrosCasillero() { foreach (var k in _filtrosCasillero.Keys.ToList()) _filtrosCasillero[k] = null; StateHasChanged(); }
+
+    private string FilaContenedorSeleccionado(ContenedorModel item, int _)
+        => _contenedorSel is not null && item.COD_CONTENEDOR == _contenedorSel.COD_CONTENEDOR ? "fila-seleccionada" : "";
+
+    private string FilaFocoCasillero(CasilleroModel item, int _)
+        => _casilleroSel is not null && item.COD_CASILLERO == _casilleroSel.COD_CASILLERO ? "fila-foco" : "";
+
+    private async Task OnContenedorRowClick(DataGridRowClickEventArgs<ContenedorModel> args)
+    {
+        _contenedorSel = args.Item;
+        _casilleroSel = null;
+        await LoadCasilleros();
+    }
+
+    /// <summary>Tras recargar el maestro: mantiene el contenedor seleccionado si sigue
+    /// existiendo, y si no, apunta al primero para que la grilla hija no quede huérfana.</summary>
+    private async Task SincronizarContenedorSeleccionado()
+    {
+        if (_contenedorSel is null || !_items.Any(c => c.COD_CONTENEDOR == _contenedorSel.COD_CONTENEDOR))
+            _contenedorSel = _items.FirstOrDefault();
+        else
+            _contenedorSel = _items.First(c => c.COD_CONTENEDOR == _contenedorSel.COD_CONTENEDOR);
+        await LoadCasilleros();
+    }
+
+    private async Task LoadCasilleros()
+    {
+        if (_contenedorSel is null || string.IsNullOrWhiteSpace(_contenedorSel.COD_CONTENEDOR)) { _casilleros = new(); return; }
+        _loadingCasilleros = true;
+        try
+        {
+            // El SP SHOWALL exige @COD_CONTENEDOR: la ruta lleva el código del padre.
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<CasilleroModel>>>(
+                $"{ApiRoutes.Logistica.ContenedoresCasilleros}/{Uri.EscapeDataString(_contenedorSel.COD_CONTENEDOR)}");
+            _casilleros = r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(ContenedoresAlmacenaje), nameof(LoadCasilleros));
+            Snackbar.Add("No se pudieron cargar los casilleros. Ver detalle en el log de errores.", Severity.Error);
+            _casilleros = new();
+        }
+        _loadingCasilleros = false;
+    }
+
+    private async Task AbrirCasillero(CasilleroModel? item, CrudModo modo)
+    {
+        if (_contenedorSel is null) { Snackbar.Add("Seleccione primero un contenedor.", Severity.Warning); return; }
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo casillero",
+            CrudModo.Delete => $"Eliminar · {item?.DES_CASILLERO}",
+            CrudModo.Read   => $"Consultar · {item?.DES_CASILLERO}",
+            _               => $"Editar · {item?.DES_CASILLERO}"
+        };
+        var dlg = await DialogService.ShowAsync<ContenedorCasilleroDialog>(titulo,
+            new DialogParameters
+            {
+                ["Item"]          = item,
+                ["Modo"]          = modo,
+                ["CodContenedor"] = _contenedorSel.COD_CONTENEDOR,
+                ["DesContenedor"] = _contenedorSel.DES_CONTENDOR,
+                ["CodAlmacen"]    = _contenedorSel.COD_ALMACEN ?? "",
+                ["DesAlmacen"]    = _contenedorSel.DES_ALMACEN ?? ""
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadCasilleros();
+    }
+
+    /// <summary>Generador de la matriz completa. Reemplaza los casilleros existentes, por eso
+    /// pasa siempre por un diálogo que lo advierte.</summary>
+    private async Task AbrirGenerador()
+    {
+        if (_contenedorSel is null) { Snackbar.Add("Seleccione primero un contenedor.", Severity.Warning); return; }
+        var dlg = await DialogService.ShowAsync<ContenedorGenerarCasillerosDialog>("",
+            new DialogParameters
+            {
+                ["CodContenedor"] = _contenedorSel.COD_CONTENEDOR,
+                ["DesContenedor"] = _contenedorSel.DES_CONTENDOR,
+                ["CodAlmacen"]    = _contenedorSel.COD_ALMACEN ?? "",
+                ["DesAlmacen"]    = _contenedorSel.DES_ALMACEN ?? "",
+                ["Filas"]         = _contenedorSel.NUM_FILAS,
+                ["Columnas"]      = _contenedorSel.NUM_COLUMNAS
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadCasilleros();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("LOGISTICA", "ContenedoresAlmacenaje");
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        _onCambioCasilleros = async () => await InvokeAsync(async () => { await LoadCasilleros(); StateHasChanged(); });
+        Cambios.Suscribir("LOGISTICA.CONTENEDORES_ALMACENAJE", _onCambio);
+        Cambios.Suscribir("LOGISTICA.CONTENEDORES_ALMACENAJE_CASILLEROS", _onCambioCasilleros);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load()
+    {
+        try
+        {
+            // El SP _SEARCH de esta tabla sí filtra bien (arranca con "WHERE 1 = 1 AND ..."),
+            // así que la búsqueda va contra el servidor.
+            var url = string.IsNullOrWhiteSpace(_search)
+                ? ApiRoutes.Logistica.ContenedoresAlmacenaje
+                : $"{ApiRoutes.Logistica.ContenedoresAlmacenajeSearch}?search={Uri.EscapeDataString(_search)}";
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ContenedorModel>>>(url);
+            _items = r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(ContenedoresAlmacenaje), nameof(Load));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            _items = new();
+        }
+        await SincronizarContenedorSeleccionado();
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(ContenedorModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(ContenedorModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo contenedor",
+            CrudModo.Delete => $"Eliminar · {item?.DES_CONTENDOR}",
+            CrudModo.Read   => $"Consultar · {item?.DES_CONTENDOR}",
+            _               => $"Editar · {item?.DES_CONTENDOR}"
+        };
+        var dlg = await DialogService.ShowAsync<ContenedoresAlmacenajeDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("LOGISTICA.CONTENEDORES_ALMACENAJE", _onCambio ?? (() => Task.CompletedTask));
+        Cambios.Desuscribir("LOGISTICA.CONTENEDORES_ALMACENAJE_CASILLEROS", _onCambioCasilleros ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

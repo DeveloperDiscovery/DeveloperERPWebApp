@@ -1,0 +1,142 @@
+@using Modelo = KONSolutions.Shared.Models.Logistica.TiposRequerimiento
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Codigo="@Item?.COD_TIPO_REQUERIMIENTO" Descripcion="@Item?.DES_TIPO_REQUERIMIENTO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="4">
+                    @* El código lo escribe el usuario y es la clave primaria: solo se fija al crear. *@
+                    <CampoTexto Tabla="LOGISTICA.TIPOS_REQUERIMIENTO" Columna="COD_TIPO_REQUERIMIENTO"
+                                @bind-Value="_model.COD_TIPO_REQUERIMIENTO"
+                                Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <CampoTexto Tabla="LOGISTICA.TIPOS_REQUERIMIENTO" Columna="DES_TIPO_REQUERIMIENTO"
+                                @bind-Value="_model.DES_TIPO_REQUERIMIENTO"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+                <MudItem xs="12">
+                    @* Las marcas dicen en qué operaciones puede usarse este tipo. No son
+                       excluyentes: un mismo tipo puede servir para más de una. *@
+                    <div class="d-flex align-center gap-2" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.SwapHoriz"
+                                 Color="@(_model.FLG_TRANSFERENCIA == true ? Color.Primary : Color.Default)"
+                                 Style="@(_model.FLG_TRANSFERENCIA == true ? "" : "opacity:.35;")" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_TRANSFERENCIA" Disabled="_readonly"
+                                   Color="Color.Primary" Label="Transferencia entre almacenes" />
+                    </div>
+                    <div class="d-flex align-center gap-2" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Factory"
+                                 Color="@(_model.FLG_PRODUCCION == true ? Color.Primary : Color.Default)"
+                                 Style="@(_model.FLG_PRODUCCION == true ? "" : "opacity:.35;")" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_PRODUCCION" Disabled="_readonly"
+                                   Color="Color.Primary" Label="Producción" />
+                    </div>
+                    <div class="d-flex align-center gap-2" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.ShoppingCart"
+                                 Color="@(_model.FLG_COMPRA == true ? Color.Primary : Color.Default)"
+                                 Style="@(_model.FLG_COMPRA == true ? "" : "opacity:.35;")" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_COMPRA" Disabled="_readonly"
+                                   Color="Color.Primary" Label="Compra" />
+                    </div>
+                    <div class="d-flex align-center gap-2" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Inventory"
+                                 Color="@(_model.FLG_CONSUMO_INTERNO == true ? Color.Primary : Color.Default)"
+                                 Style="@(_model.FLG_CONSUMO_INTERNO == true ? "" : "opacity:.35;")" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_CONSUMO_INTERNO" Disabled="_readonly"
+                                   Color="Color.Primary" Label="Consumo interno" />
+                    </div>
+                    <div class="d-flex align-center gap-2" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Replay"
+                                 Color="@(_model.FLG_REPOSICION == true ? Color.Primary : Color.Default)"
+                                 Style="@(_model.FLG_REPOSICION == true ? "" : "opacity:.35;")" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_REPOSICION" Disabled="_readonly"
+                                   Color="Color.Primary" Label="Reposición" />
+                    </div>
+                </MudItem>
+            </MudGrid>
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Modelo? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private Modelo _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private void MapearDesdeModelo(Modelo m)
+    {
+        _model = new Modelo
+        {
+            COD_TIPO_REQUERIMIENTO       = m.COD_TIPO_REQUERIMIENTO,
+            DES_TIPO_REQUERIMIENTO       = m.DES_TIPO_REQUERIMIENTO,
+            FLG_TRANSFERENCIA            = m.FLG_TRANSFERENCIA,
+            FLG_PRODUCCION               = m.FLG_PRODUCCION,
+            FLG_COMPRA                   = m.FLG_COMPRA,
+            FLG_CONSUMO_INTERNO          = m.FLG_CONSUMO_INTERNO,
+            FLG_REPOSICION               = m.FLG_REPOSICION,
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID: evita editar sobre datos que la grilla
+    /// puede tener desactualizados.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<Modelo>(
+            $"{ApiRoutes.Logistica.TiposRequerimiento}/{Uri.EscapeDataString(_model.COD_TIPO_REQUERIMIENTO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    private async Task OnInvalidSubmit(EditContext ctx)
+    {
+        var errores = string.Join(" · ", ctx.GetValidationMessages());
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"]  = "Faltan datos obligatorios",
+                ["Mensaje"] = string.IsNullOrWhiteSpace(errores) ? "Hay campos obligatorios sin completar." : errores
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Logistica.TiposRequerimiento;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_TIPO_REQUERIMIENTO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposRequerimientoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        // POST al crear, PUT al modificar: el SP de alta es estricto y rechaza la clave repetida.
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposRequerimientoDialog), nameof(Submit));
+    }
+}

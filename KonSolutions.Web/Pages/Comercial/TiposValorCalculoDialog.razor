@@ -1,0 +1,106 @@
+@using TiposValorCalculoModel = KONSolutions.Shared.Models.Comercial.TiposValorCalculo
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_VALOR_CALCULO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="COMERCIAL.TIPOS_VALOR_CALCULO" Columna="COD_TIPO_VALOR_CALCULO"
+                        @bind-Value="_model.COD_TIPO_VALOR_CALCULO"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="COMERCIAL.TIPOS_VALOR_CALCULO" Columna="DES_TIPO_VALOR_CALCULO"
+                        @bind-Value="_model.DES_TIPO_VALOR_CALCULO"
+                        Disabled="_readonly" />
+            <AriaCombo TItem="ComboboxItem" Items="_tiposImpuesto"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       @bind-Value="_model.COD_TIPO_IMPUESTO"
+                       Label="Tipo de impuesto" Disabled="_readonly" />
+            <CampoTexto Tabla="COMERCIAL.TIPOS_VALOR_CALCULO" Columna="DES_ETIQUETA_XML"
+                        @bind-Value="_model.DES_ETIQUETA_XML"
+                        Disabled="_readonly" />
+
+            <MudText Typo="Typo.caption" Class="mono mb-2" Style="opacity:.55;display:block;">CARACTERÍSTICAS</MudText>
+            <MudGrid Class="mb-3">
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Add" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_POSITIVO" Color="Color.Primary" Disabled="_readonly" Label="Positivo" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.ReceiptLong" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_IMPUESTO" Color="Color.Primary" Disabled="_readonly" Label="Impuesto" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Calculate" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_CALCULA" Color="Color.Primary" Disabled="_readonly" Label="Calcula" /></div></MudItem>
+                <MudItem xs="6" sm="3"><div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Gavel" Color="Color.Primary" Size="Size.Small" /><MudSwitch T="bool?" @bind-Value="_model.FLG_REGIMEN_TRIBUTARIO" Color="Color.Primary" Disabled="_readonly" Label="Régimen tributario" /></div></MudItem>
+            </MudGrid>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposValorCalculoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposValorCalculoModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _tiposImpuesto = new();
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(TiposValorCalculoModel m)
+    {
+        _model.COD_TIPO_VALOR_CALCULO = m.COD_TIPO_VALOR_CALCULO;
+        _model.DES_TIPO_VALOR_CALCULO = m.DES_TIPO_VALOR_CALCULO;
+        _model.COD_TIPO_IMPUESTO      = m.COD_TIPO_IMPUESTO;
+        _model.FLG_POSITIVO           = m.FLG_POSITIVO;
+        _model.FLG_IMPUESTO           = m.FLG_IMPUESTO;
+        _model.FLG_CALCULA            = m.FLG_CALCULA;
+        _model.FLG_REGIMEN_TRIBUTARIO = m.FLG_REGIMEN_TRIBUTARIO;
+        _model.DES_ETIQUETA_XML       = m.DES_ETIQUETA_XML;
+    }
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposValorCalculoModel>($"{ApiRoutes.Comercial.TiposValorCalculo}/{Uri.EscapeDataString(_model.COD_TIPO_VALOR_CALCULO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(
+                ApiRoutes.Comercial.TiposImpuestoCombobox);
+            _tiposImpuesto = r?.Data ?? new();
+        }
+        catch { }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Comercial.TiposValorCalculo;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_TIPO_VALOR_CALCULO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposValorCalculoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposValorCalculoDialog), nameof(Submit));
+    }
+}

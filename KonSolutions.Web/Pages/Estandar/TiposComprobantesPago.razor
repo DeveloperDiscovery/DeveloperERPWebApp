@@ -1,0 +1,237 @@
+@page "/estandar/tipos-comprobantes-pago"
+@attribute [Authorize]
+@using TiposComprobantesPagoModel = KONSolutions.Shared.Models.Estandar.TiposComprobantesPago
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Tipos de Comprobante de Pago · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Comprobante de Pago" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Filtrar" Placeholder="Buscar tipo de comprobante..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="tipos-comprobantes-pago" style="position:relative;">
+    <MudDataGrid T="TiposComprobantesPagoModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="@Limites.ColWidth("ESTANDAR.TIPOS_COMPROBANTES_PAGO","COD_TIPO_COMPROBANTE_PAGO",60,110)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_TIPO_COMPROBANTE_PAGO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TiposComprobantesPagoModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_TIPO_COMPROBANTE_PAGO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_COMPROBANTE_PAGO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("ESTANDAR.TIPOS_COMPROBANTES_PAGO","DES_TIPO_COMPROBANTE_PAGO",150,400)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_COMPROBANTE_PAGO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TiposComprobantesPagoModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_TIPO_COMPROBANTE_PAGO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_COMPROBANTE_PAGO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Prefijo" Width="100">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_PREFIJO" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="TiposComprobantesPagoModel" ItemsBase="@Base(2)" ValorDe="@(x=>x.COD_PREFIJO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>Filtro(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_PREFIJO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Cód. SUNAT" Width="110">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_COMPROBANTE_PAGO_SUNAT" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="TiposComprobantesPagoModel" ItemsBase="@Base(3)" ValorDe="@(x=>x.COD_COMPROBANTE_PAGO_SUNAT?.ToString() ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)" ValoresActivosChanged="@(v=>Filtro(3,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_COMPROBANTE_PAGO_SUNAT</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Características" Sortable="false" Width="240" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <div class="d-flex align-center justify-center gap-1 flex-wrap">
+                        @foreach (var (icono, texto) in Flags(context.Item))
+                        {
+                            <MudTooltip Text="@texto"><MudIcon Icon="@icono" Size="Size.Small" Style="opacity:.8;" /></MudTooltip>
+                        }
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TiposComprobantesPagoModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<TiposComprobantesPagoModel> _items = new();
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+
+    private List<TiposComprobantesPagoModel> Ordenar(List<TiposComprobantesPagoModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_COMPROBANTE_PAGO).ToList() : items.OrderByDescending(x => x.COD_TIPO_COMPROBANTE_PAGO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_COMPROBANTE_PAGO).ToList() : items.OrderByDescending(x => x.DES_TIPO_COMPROBANTE_PAGO).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.COD_PREFIJO).ToList() : items.OrderByDescending(x => x.COD_PREFIJO).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.COD_COMPROBANTE_PAGO_SUNAT).ToList() : items.OrderByDescending(x => x.COD_COMPROBANTE_PAGO_SUNAT).ToList(),
+        _ => items
+    };
+    private List<TiposComprobantesPagoModel> _visibles => Ordenar(Aplicar(_items, -1));
+    private List<TiposComprobantesPagoModel> Base(int col) => Aplicar(_items, col);
+
+    private List<TiposComprobantesPagoModel> Aplicar(List<TiposComprobantesPagoModel> src, int ex)
+    {
+        IEnumerable<TiposComprobantesPagoModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_TIPO_COMPROBANTE_PAGO)),
+                1 => q.Where(x => v.Contains(x.DES_TIPO_COMPROBANTE_PAGO)),
+                2 => q.Where(x => v.Contains(x.COD_PREFIJO)),
+                3 => q.Where(x => v.Contains(x.COD_COMPROBANTE_PAGO_SUNAT?.ToString() ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+    private async Task Filtrar() => _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+
+    private static IEnumerable<(string Icono, string Texto)> Flags(TiposComprobantesPagoModel t)
+    {
+        if (t.FLG_EMISION == true)                    yield return (Icons.Material.Filled.Send, "Emisión");
+        if (t.FLG_POSITIVO == true)                   yield return (Icons.Material.Filled.Add, "Positivo");
+        if (t.FLG_ANTICIPO == true)                   yield return (Icons.Material.Filled.Payments, "Anticipo");
+        if (t.FLG_PREFIJO_COMPROBANTE_ORIGEN == true) yield return (Icons.Material.Filled.Link, "Prefijo comprobante origen");
+        if (t.FLG_DOCUMENTO_APLICABLE == true)        yield return (Icons.Material.Filled.TaskAlt, "Documento aplicable");
+        if (t.FLG_CONTROL_INTERNO == true)            yield return (Icons.Material.Filled.Lock, "Control interno");
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ESTANDAR", "TiposComprobantesPago");
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("ESTANDAR.TIPOS_COMPROBANTES_PAGO", _onCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Abrir(null, CrudModo.Create));
+
+    private async Task Load() => _items = string.IsNullOrWhiteSpace(_search) ? await Fetch() : await FetchSearch(_search);
+
+    private async Task<List<TiposComprobantesPagoModel>> Fetch()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposComprobantesPagoModel>>>(ApiRoutes.Estandar.TiposComprobantesPago);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(TiposComprobantesPago), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task<List<TiposComprobantesPagoModel>> FetchSearch(string s)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposComprobantesPagoModel>>>(
+                $"{ApiRoutes.Estandar.TiposComprobantesPago}/search?search={Uri.EscapeDataString(s)}");
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(TiposComprobantesPago), nameof(FetchSearch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(TiposComprobantesPagoModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(TiposComprobantesPagoModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de comprobante de pago",
+            CrudModo.Delete => $"Eliminar · {item?.DES_TIPO_COMPROBANTE_PAGO}",
+            CrudModo.Read   => $"Consultar · {item?.DES_TIPO_COMPROBANTE_PAGO}",
+            _               => $"Editar · {item?.DES_TIPO_COMPROBANTE_PAGO}"
+        };
+        var dlg = await DialogService.ShowAsync<TiposComprobantesPagoDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ESTANDAR.TIPOS_COMPROBANTES_PAGO", _onCambio ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

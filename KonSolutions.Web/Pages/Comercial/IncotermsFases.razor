@@ -1,0 +1,205 @@
+@page "/comercial/incoterms-fases"
+@attribute [Authorize]
+@using IncotermsFasesModel = KONSolutions.Shared.Models.Comercial.IncotermsFases
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Incoterms - Fases · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center justify-space-between mb-4">
+    <div>
+        <TituloPagina Fallback="Incoterms - Fases" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema COMERCIAL · @_visibles.Count fases</MudText>
+    </div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Class="pa-4 mb-4" Style="border:1px solid var(--line);">
+    <AriaCombo Items="_incoterms" TextFunc="@(t => $"{t.Texto} ({t.Id})")" ValueFunc="@(t => t.Id)"
+                 @bind-Value="_codIncotermSeleccionado" Label="Incoterm"
+                 Class="mb-0" />
+</MudPaper>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="incoterms-fases" style="position:relative;">
+    <MudDataGrid T="IncotermsFasesModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Fase">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_FASE_INCOTERM" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="IncotermsFasesModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.DES_FASE_INCOTERM ?? x.COD_FASE_INCOTERM ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@(context.Item.DES_FASE_INCOTERM ?? context.Item.COD_FASE_INCOTERM)</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Orden" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1 justify-center"><EncabezadoOrdenable Campo="NUM_ORDEN_PRESENTACION" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="IncotermsFasesModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.NUM_ORDEN_PRESENTACION?.ToString() ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.NUM_ORDEN_PRESENTACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Vendedor" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    @if (context.Item.FLG_VENDEDOR == true) { <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Primary" Size="Size.Small" /> }
+                    else { <MudText Typo="Typo.caption" Style="opacity:.25;">—</MudText> }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-6 mono" Style="opacity:.5;">
+                @(string.IsNullOrEmpty(_codIncotermSeleccionado) ? "Selecciona un incoterm para ver sus fases." : "Sin fases registradas para este incoterm.")
+            </MudText>
+        </NoRecordsContent>
+        <PagerContent><MudDataGridPager T="IncotermsFasesModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<IncotermsFasesModel> _items = new();
+    private List<KONSolutions.Shared.Common.ComboboxItem> _incoterms = new();
+    private string? _codIncotermSeleccionado;
+
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<IncotermsFasesModel> Ordenar(List<IncotermsFasesModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.DES_FASE_INCOTERM).ToList() : items.OrderByDescending(x => x.DES_FASE_INCOTERM).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.NUM_ORDEN_PRESENTACION).ToList() : items.OrderByDescending(x => x.NUM_ORDEN_PRESENTACION).ToList(),
+        _ => items
+    };
+
+    private List<IncotermsFasesModel> _porIncoterm =>
+        string.IsNullOrEmpty(_codIncotermSeleccionado)
+            ? new()
+            : _items.Where(x => x.COD_INCOTERM == _codIncotermSeleccionado).ToList();
+
+    private List<IncotermsFasesModel> _visibles => Ordenar(Aplicar(_porIncoterm, -1));
+    private List<IncotermsFasesModel> Base(int col) => Aplicar(_porIncoterm, col);
+
+    private List<IncotermsFasesModel> Aplicar(List<IncotermsFasesModel> src, int ex)
+    {
+        IEnumerable<IncotermsFasesModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.DES_FASE_INCOTERM ?? x.COD_FASE_INCOTERM ?? "")),
+                1 => q.Where(x => v.Contains(x.NUM_ORDEN_PRESENTACION?.ToString() ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("COMERCIAL", "IncotermsFases");
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<KONSolutions.Shared.Common.ComboboxItem>>>(
+                ApiRoutes.Comercial.IncotermsCombobox);
+            _incoterms = r?.Data ?? new();
+        }
+        catch { }
+        await Load();
+        _onCambio = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("COMERCIAL.INCOTERMS_FASES", _onCambio);
+    }
+
+    private async Task Load() => _items = await Fetch();
+
+    private async Task<List<IncotermsFasesModel>> Fetch()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<IncotermsFasesModel>>>(
+                ApiRoutes.Comercial.IncotermsFases);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(IncotermsFases), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true)
+        {
+            if (string.IsNullOrEmpty(_codIncotermSeleccionado))
+            {
+                Snackbar.Add("Selecciona primero un incoterm.", Severity.Warning);
+                return Task.CompletedTask;
+            }
+            return Abrir(null, CrudModo.Create);
+        }
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(IncotermsFasesModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(IncotermsFasesModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva fase para el incoterm",
+            CrudModo.Delete => $"Eliminar · {item?.DES_FASE_INCOTERM}",
+            _               => $"Editar · {item?.DES_FASE_INCOTERM}"
+        };
+        var dlg = await DialogService.ShowAsync<IncotermsFasesDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo, ["CodIncotermFijo"] = _codIncotermSeleccionado },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("COMERCIAL.INCOTERMS_FASES", _onCambio ?? (() => Task.CompletedTask));
+    }
+}

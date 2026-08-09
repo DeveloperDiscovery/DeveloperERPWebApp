@@ -1,0 +1,100 @@
+@using ClaseDesarrolloModel = KONSolutions.Shared.Models.Ingenieria.ClaseDesarrollo
+@using ClaseDesarrolloRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(560px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Codigo="@Item?.COD_CLASE_DESARROLLO" Descripcion="@Item?.DES_CLASE_DESARROLLO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            @* Label explícito: el Diccionario de Etiquetas todavía no tiene rótulo para estas
+               columnas nuevas y CampoTexto dejaba la etiqueta en blanco. *@
+            <div style="width:180px;">
+                <CampoTexto Tabla="INGENIERIA.CLASES_DESARROLLO" Columna="COD_CLASE_DESARROLLO"
+                            Label="Código"
+                            @bind-Value="_model.COD_CLASE_DESARROLLO"
+                            Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            </div>
+            <CampoTexto Tabla="INGENIERIA.CLASES_DESARROLLO" Columna="DES_CLASE_DESARROLLO"
+                        Label="Descripción"
+                        @bind-Value="_model.DES_CLASE_DESARROLLO"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            @* La tabla no tiene columnas de estado ni de auditoría, por eso este diálogo
+               no lleva EstadoCombo ni PanelAuditoria (a diferencia del de Clases de Operación). *@
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public ClaseDesarrolloModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private ClaseDesarrolloModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(ClaseDesarrolloModel m)
+    {
+        _model = new ClaseDesarrolloModel
+        {
+            COD_CLASE_DESARROLLO = m.COD_CLASE_DESARROLLO,
+            DES_CLASE_DESARROLLO = m.DES_CLASE_DESARROLLO,
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID — evita mostrar datos
+    /// desactualizados de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<ClaseDesarrolloModel>>(
+                $"{ClaseDesarrolloRoute.ClasesDesarrollo}/{Uri.EscapeDataString(_model.COD_CLASE_DESARROLLO)}");
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ClaseDesarrolloRoute.ClasesDesarrollo;
+
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_CLASE_DESARROLLO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(ClaseDesarrolloDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        // El SP INSERT es upsert: sirve tanto para crear como para modificar.
+        var dto = new { _model.COD_CLASE_DESARROLLO, _model.DES_CLASE_DESARROLLO };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ClaseDesarrolloDialog), nameof(Submit));
+    }
+}

@@ -1,0 +1,631 @@
+@page "/sistema/dashboard-monitoreo-bd"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Entorno
+@inject DashboardBdService Dash
+@inject ConfigService ConfigSvc
+@implements IDisposable
+
+<PageTitle>Monitoreo de BD · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="dmb">
+
+    @* ── Tabs ── *@
+    <div class="dmb-tabs">
+        <div class="dmb-tab @(_tab == 0 ? "active" : "")" @onclick="@(() => _tab = 0)">📊 Monitoreo</div>
+        <div class="dmb-tab @(_tab == 1 ? "active" : "")" @onclick="@(() => _tab = 1)">🔎 Trace de Procesos</div>
+    </div>
+
+    @* ════════ TAB 1: MONITOREO ════════ *@
+    <div class="dmb-pane @(_tab == 0 ? "active" : "")">
+
+        @* Cabecera + KPIs fijos: permanecen visibles al hacer scroll del resto del dashboard. *@
+        <div class="dmb-sticky">
+
+        @* Velocímetros de velocidad de I/O (latencia ms/operación): verde<10, ámbar<20, rojo≥20 *@
+        <div class="dmb-speed">
+            @foreach (var io in _ioLatencia)
+            {
+                <div class="speed-card">
+                    <div class="speed-title">@(io.DES_TIPO == "LOG" ? "📄 LOG" : "🗃️ DATOS")</div>
+                    <div class="speed-gauges">
+                        @RenderGauge("Lectura", io.VAL_MS_LECTURA)
+                        @RenderGauge("Escritura", io.VAL_MS_ESCRITURA)
+                    </div>
+                    <div class="speed-sub">@io.VAL_MB_LEIDOS?.ToString("N0", Ci) MB leídos · @io.VAL_MB_ESCRITOS?.ToString("N0", Ci) MB escritos</div>
+                </div>
+            }
+            @if (_ioLatencia.Count == 0)
+            {
+                <div class="speed-card"><div class="speed-title">⚡ Velocidad de I/O</div><div class="speed-sub">Sin datos aún</div></div>
+            }
+        </div>
+
+        <div class="dmb-top-right">
+        <div class="dmb-hd">
+            <h1>Monitoreo de Base de Datos</h1>
+            @if (_resumen is not null)
+            {
+                <span class="dmb-db">@_resumen.DES_BASE_DATOS · SQL @_resumen.DES_VERSION_SQL</span>
+                <span class="dmb-spacer"></span>
+                <span class="dmb-chip"><span class="dot" style="background:var(--ok)"></span>@_resumen.DES_ESTADO · @_resumen.DES_MODELO_RECUPERACION</span>
+                <span class="dmb-chip">Uptime: @_resumen.NUM_DIAS_ACTIVO días</span>
+            }
+            else { <span class="dmb-spacer"></span> }
+            <span class="dmb-chip" style="cursor:pointer;" @onclick="ToggleAuto">Auto @(_auto ? "30s ●" : "off")</span>
+            <button class="dmb-btn" @onclick="RefrescarTodoAsync" disabled="@_cargando">↻ @(_cargando ? "..." : "Actualizar")</button>
+        </div>
+
+        @* KPIs *@
+        @if (_resumen is not null)
+        {
+            <div class="dmb-kpis">
+                <div class="dmb-kpi"><span class="strip s-acc"></span><div class="lbl">Tamaño total</div><div class="val">@Mb(_resumen.VAL_TAMANO_TOTAL_MB)</div><div class="sub">Datos @Mb(_resumen.VAL_TAMANO_DATOS_MB) · Log @Mb(_resumen.VAL_TAMANO_LOG_MB)</div></div>
+                <div class="dmb-kpi"><span class="strip s-info"></span><div class="lbl">Conexiones</div><div class="val">@_resumen.NUM_CONEXIONES</div><div class="sub">activas</div></div>
+                <div class="dmb-kpi"><span class="strip s-ok"></span><div class="lbl">Sesiones activas</div><div class="val">@_resumen.NUM_SESIONES_ACTIVAS</div><div class="sub">ejecutando</div></div>
+                <div class="dmb-kpi"><span class="strip @(_resumen.NUM_BLOQUEOS > 0 ? "s-crit" : "s-ok")"></span><div class="lbl">Bloqueos</div><div class="val">@_resumen.NUM_BLOQUEOS</div><div class="sub">@(_resumen.NUM_BLOQUEOS > 0 ? "cadena activa" : "sin bloqueos")</div></div>
+                <div class="dmb-kpi"><span class="strip s-ok"></span><div class="lbl">Buffer hit</div><div class="val">@(_memoria?.VAL_BUFFER_CACHE_HIT?.ToString("0.0", Ci) ?? "—")%</div><div class="sub">PLE @(_memoria?.VAL_PAGE_LIFE_EXPECT?.ToString("N0", Ci) ?? "—")s</div></div>
+                <div class="dmb-kpi"><span class="strip s-info"></span><div class="lbl">Memoria SQL</div><div class="val">@Gb(_memoria?.VAL_SQL_USANDO_MB)</div><div class="sub">de @Gb(_memoria?.VAL_MEMORIA_TOTAL_MB) total</div></div>
+            </div>
+        }
+        </div> @* /dmb-top-right *@
+        </div> @* /dmb-sticky *@
+
+        <div class="dmb-scroll">
+
+        @* Sesiones + Waits *@
+        <div class="dmb-grid">
+            <div class="dmb-card">
+                <h2>🟢 Sesiones activas <span class="tag">TOP por duración</span></h2>
+                <div class="body">
+                    <table>
+                        <thead><tr><th>SID</th><th>Login</th><th>Estado</th><th>Espera</th><th class="num">Dur (ms)</th><th class="num">CPU</th><th>Consulta</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var s in _sesiones)
+                            {
+                                var bloqueada = s.NUM_BLOQUEADO_POR > 0;
+                                <tr>
+                                    <td class="num">@s.NUM_SESION</td>
+                                    <td>@s.DES_LOGIN</td>
+                                    <td><span class="pill @EstadoPill(s.DES_ESTADO)">@EstadoIcono(s.DES_ESTADO, bloqueada) @s.DES_ESTADO</span></td>
+                                    <td>@(bloqueada ? $"⛔ por {s.NUM_BLOQUEADO_POR}" : s.DES_TIPO_ESPERA ?? "—")</td>
+                                    <td class="num">@s.VAL_DURACION_MS.ToString("N0", Ci)</td>
+                                    <td class="num">@s.VAL_CPU_MS.ToString("N0", Ci)</td>
+                                    <td class="q" title="@s.DES_CONSULTA">@s.DES_CONSULTA</td>
+                                    <td>
+                                        @if (bloqueada)
+                                        {
+                                            <button class="dmb-kill" title="Eliminar (KILL) esta sesión bloqueada"
+                                                    @onclick="@(() => KillSesionAsync(s.NUM_SESION))" disabled="@_matandoSesion">🗑</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                            @if (_sesiones.Count == 0) { <tr><td colspan="8" class="vacio">Sin sesiones activas</td></tr> }
+                        </tbody>
+                    </table>
+                    @if (_msgKill is not null) { <div class="dmb-msg">@_msgKill</div> }
+                </div>
+            </div>
+
+            <div class="dmb-card">
+                <h2>⏱️ Esperas principales <span class="tag">wait stats</span></h2>
+                <div class="gauge">
+                    @foreach (var w in _waits)
+                    {
+                        <div class="grow">
+                            <span class="gl" title="@w.DES_TIPO_ESPERA">@w.DES_TIPO_ESPERA</span>
+                            <div class="bar"><span style="@($"width:{Num(Math.Min(100, (double)w.VAL_PORCENTAJE))}%;background:{ColorPct(w.VAL_PORCENTAJE)};")"></span></div>
+                            <span class="gv">@w.VAL_PORCENTAJE.ToString("0.0", Ci)%</span>
+                        </div>
+                    }
+                    @if (_waits.Count == 0) { <div class="vacio">Sin datos de espera</div> }
+                </div>
+            </div>
+        </div>
+
+        @* Consultas costosas *@
+        <div class="dmb-card mb">
+            <h2>🐢 Consultas más costosas <span class="tag">caché de planes</span></h2>
+            <div class="body">
+                <table>
+                    <thead><tr><th>Consulta / SP</th><th class="num">Ejec.</th><th class="num">Dur prom (ms)</th><th class="num">CPU prom</th><th class="num">Lecturas</th><th>Última</th></tr></thead>
+                    <tbody>
+                        @foreach (var c in _consultas)
+                        {
+                            <tr>
+                                <td class="q" title="@c.DES_CONSULTA">@c.DES_CONSULTA</td>
+                                <td class="num">@c.NUM_EJECUCIONES.ToString("N0", Ci)</td>
+                                <td class="num" style="@($"color:{ColorDur((long)c.VAL_DURACION_PROM_MS)};")">@c.VAL_DURACION_PROM_MS.ToString("N0", Ci)</td>
+                                <td class="num">@c.VAL_CPU_PROM_MS.ToString("N0", Ci)</td>
+                                <td class="num">@c.VAL_LECTURAS_PROM.ToString("N0", Ci)</td>
+                                <td>@(c.FEC_ULTIMA_EJECUCION?.ToString("HH:mm:ss") ?? "—")</td>
+                            </tr>
+                        }
+                        @if (_consultas.Count == 0) { <tr><td colspan="6" class="vacio">Sin datos</td></tr> }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        @* Archivos + Backups + Memoria *@
+        <div class="dmb-grid3">
+            <div class="dmb-card">
+                <h2>💾 Archivos
+                    <span class="tag"></span>
+                    <button class="dmb-btn ghost mini" title="CHECKPOINT + SHRINKFILE de los archivos de log"
+                            @onclick="LimpiarLogAsync" disabled="@_limpiandoLog">
+                        🧹 @(_limpiandoLog ? "Limpiando..." : "Limpiar Log")
+                    </button>
+                </h2>
+                @if (_msgLimpieza is not null)
+                {
+                    <div class="dmb-msg">@_msgLimpieza</div>
+                }
+                <div class="body">
+                    <table>
+                        <thead><tr><th>Archivo</th><th>Tipo</th><th class="num">Usado</th><th>Ocupación</th></tr></thead>
+                        <tbody>
+                            @foreach (var f in _archivos)
+                            {
+                                <tr>
+                                    <td class="q" title="@f.DES_RUTA">@f.DES_ARCHIVO</td>
+                                    <td>@f.DES_TIPO</td>
+                                    <td class="num">@Mb(f.VAL_USADO_MB)</td>
+                                    <td><div class="bar"><span style="@($"width:{Num(Math.Min(100,(double)f.VAL_PCT_USADO))}%;background:{ColorPct(f.VAL_PCT_USADO)};")"></span></div></td>
+                                </tr>
+                            }
+                            @if (_archivos.Count == 0) { <tr><td colspan="4" class="vacio">—</td></tr> }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="dmb-card">
+                <h2>🗄️ Backups
+                    <span class="tag"></span>
+                    <button class="dmb-btn ghost mini" title="Genera un BACKUP DATABASE completo en la carpeta por defecto de la instancia"
+                            @onclick="GenerarBackupAsync" disabled="@_generandoBackup">
+                        💾 @(_generandoBackup ? "Generando..." : "Generar Backup")
+                    </button>
+                </h2>
+                @if (_msgBackup is not null) { <div class="dmb-msg">@_msgBackup</div> }
+                <div class="body">
+                    <table>
+                        <thead><tr><th>Tipo</th><th>Último</th><th class="num">Tamaño</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var b in _backups)
+                            {
+                                <tr>
+                                    <td>@b.DES_TIPO_BACKUP</td>
+                                    <td>@(b.FEC_ULTIMO?.ToString("dd/MM HH:mm") ?? "—")</td>
+                                    <td class="num">@Mb(b.VAL_TAMANO_MB)</td>
+                                    <td><span class="pill @(b.NUM_DIAS_DESDE <= 1 ? "p-ok" : b.NUM_DIAS_DESDE <= 7 ? "p-warn" : "p-crit")">@b.NUM_DIAS_DESDE d</span></td>
+                                </tr>
+                            }
+                            @if (_backups.Count == 0) { <tr><td colspan="4" class="vacio">Sin backups</td></tr> }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="dmb-card">
+                <h2>🧠 Memoria / Caché</h2>
+                <div class="ring-wrap">
+                    <div>
+                        <div class="ring" style="@($"--p:{Num((double)(_memoria?.VAL_BUFFER_CACHE_HIT ?? 0))};--c:var(--ok);")"><span class="rv">@(_memoria?.VAL_BUFFER_CACHE_HIT?.ToString("0.0", Ci) ?? "—")%</span></div>
+                        <div class="ring-lbl">Buffer cache hit</div>
+                    </div>
+                    <div>
+                        <div class="ring" style="@($"--p:{Num(PctMem())};--c:var(--info);")"><span class="rv">@Gb(_memoria?.VAL_SQL_USANDO_MB)</span></div>
+                        <div class="ring-lbl">SQL / @Gb(_memoria?.VAL_MEMORIA_TOTAL_MB) total</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* Fragmentación + Índices faltantes *@
+        <div class="dmb-grid">
+            <div class="dmb-card">
+                <h2>🧩 Fragmentación de índices <span class="tag">≥ 10%</span></h2>
+                <div class="body">
+                    <table>
+                        <thead><tr><th>Tabla</th><th>Índice</th><th class="num">Frag.</th><th class="num">Págs</th><th>Acción</th></tr></thead>
+                        <tbody>
+                            @foreach (var fr in _fragmentacion)
+                            {
+                                <tr>
+                                    <td class="q">@($"{fr.DES_SCHEMA}.{fr.DES_TABLA}")</td>
+                                    <td class="q">@fr.DES_INDICE</td>
+                                    <td class="num" style="@($"color:{ColorFrag(fr.VAL_FRAGMENTACION)};")">@fr.VAL_FRAGMENTACION.ToString("0", Ci)%</td>
+                                    <td class="num">@fr.NUM_PAGINAS.ToString("N0", Ci)</td>
+                                    <td><span class="pill @(fr.DES_ACCION == "RECONSTRUIR" ? "p-crit" : "p-warn")">@fr.DES_ACCION</span></td>
+                                </tr>
+                            }
+                            @if (_fragmentacion.Count == 0) { <tr><td colspan="5" class="vacio">Índices sanos 🎉</td></tr> }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="dmb-card">
+                <h2>➕ Índices sugeridos <span class="tag">missing index</span></h2>
+                <div class="body">
+                    <table>
+                        <thead><tr><th>Tabla</th><th class="num">Impacto</th><th class="num">Seeks</th><th>Columnas</th></tr></thead>
+                        <tbody>
+                            @foreach (var mi in _indicesFaltantes)
+                            {
+                                <tr>
+                                    <td class="q" title="@mi.DES_TABLA">@mi.DES_TABLA</td>
+                                    <td class="num" style="@($"color:{(mi.VAL_IMPACTO >= 80 ? "var(--ok)" : "inherit")};")">@mi.VAL_IMPACTO.ToString("0", Ci)%</td>
+                                    <td class="num">@mi.NUM_BUSQUEDAS.ToString("N0", Ci)</td>
+                                    <td class="q" title="@mi.DES_COLUMNAS_EQ">@mi.DES_COLUMNAS_EQ</td>
+                                </tr>
+                            }
+                            @if (_indicesFaltantes.Count == 0) { <tr><td colspan="4" class="vacio">Sin sugerencias</td></tr> }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        @* Tablas grandes *@
+        <div class="dmb-card">
+            <h2>📊 Tablas más grandes <span class="tag">por espacio</span></h2>
+            <div class="body">
+                <table>
+                    <thead><tr><th>Esquema.Tabla</th><th class="num">Filas</th><th class="num">Total MB</th><th class="num">Datos MB</th><th>Tamaño relativo</th></tr></thead>
+                    <tbody>
+                        @{ var maxMb = _tablas.Count > 0 ? (double)_tablas.Max(t => t.VAL_TOTAL_MB) : 1; }
+                        @foreach (var t in _tablas)
+                        {
+                            <tr>
+                                <td class="q">@($"{t.DES_SCHEMA}.{t.DES_TABLA}")</td>
+                                <td class="num">@t.NUM_FILAS.ToString("N0", Ci)</td>
+                                <td class="num">@t.VAL_TOTAL_MB.ToString("N1", Ci)</td>
+                                <td class="num">@t.VAL_DATOS_MB.ToString("N1", Ci)</td>
+                                <td><div class="bar"><span style="@($"width:{Num(maxMb > 0 ? (double)t.VAL_TOTAL_MB / maxMb * 100 : 0)}%;background:var(--accent);")"></span></div></td>
+                            </tr>
+                        }
+                        @if (_tablas.Count == 0) { <tr><td colspan="5" class="vacio">—</td></tr> }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        </div> @* /dmb-scroll *@
+    </div>
+
+    @* ════════ TAB 2: TRACE DE PROCESOS ════════ *@
+    <div class="dmb-pane @(_tab == 1 ? "active" : "")">
+        <div class="dmb-hd">
+            <h1>Trace de Procesos</h1>
+            <span class="dmb-db">Stored procedures ejecutados en vivo</span>
+            <span class="dmb-spacer"></span>
+            <span class="live"><span class="dot"></span>@(_tracePausado ? "PAUSADO" : "EN VIVO")</span>
+        </div>
+
+        <div class="trace-toolbar">
+            <input class="search" placeholder="🔍 filtrar por SP..." @bind="_traceFiltro" @bind:event="oninput" />
+            <select @bind="_traceMinDur">
+                <option value="0">Duración: todas</option>
+                <option value="100">&gt; 100 ms</option>
+                <option value="500">&gt; 500 ms</option>
+                <option value="1000">&gt; 1 s</option>
+            </select>
+            <button class="dmb-btn ghost" @onclick="@(() => _tracePausado = !_tracePausado)">@(_tracePausado ? "▶ Reanudar" : "⏸ Pausar")</button>
+            <button class="dmb-btn ghost" @onclick="@(() => { _trace.Clear(); })">🗑 Limpiar</button>
+            <span class="dmb-spacer"></span>
+            <span class="trace-stat">@TraceFiltrado().Count líneas · buffer 500</span>
+        </div>
+
+        <div class="trace-console">
+            <table>
+                <thead><tr><th style="width:120px">Hora</th><th style="width:100px" class="num">Dur (ms)</th><th>EXEC</th></tr></thead>
+                <tbody>
+                    @foreach (var e in TraceFiltrado())
+                    {
+                        <tr>
+                            <td>@e.FEC_HORA.ToString("HH:mm:ss.fff")</td>
+                            <td class="num" style="@($"color:{ColorDur(e.VAL_DURACION_MS)};font-weight:{(e.VAL_DURACION_MS > 1000 ? 700 : 400)};")">@e.VAL_DURACION_MS.ToString("N0", Ci)</td>
+                            <td class="exec" title="@e.DES_EXEC">@e.DES_EXEC</td>
+                        </tr>
+                    }
+                    @if (TraceFiltrado().Count == 0) { <tr><td colspan="3" class="vacio">Sin actividad registrada aún</td></tr> }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@code {
+    // Pasados por AbrirTabOpcion al abrir cualquier pantalla desde el menú por rol;
+    // esta pantalla no los usa, pero deben declararse para que Blazor no falle.
+    [Parameter] public string? CodAplicacion { get; set; }
+    [Parameter] public string? CodOpcionAplicacion { get; set; }
+
+    private int _tab = 0;
+    private bool _cargando;
+    private bool _auto = true;
+    private System.Threading.Timer? _timer;
+
+    private DashboardBdResumen? _resumen;
+    private DashboardBdMemoria? _memoria;
+    private List<DashboardBdIoLatencia> _ioLatencia = new();
+    private List<DashboardBdSesion> _sesiones = new();
+    private List<DashboardBdWait> _waits = new();
+    private List<DashboardBdConsulta> _consultas = new();
+    private List<DashboardBdArchivo> _archivos = new();
+    private List<DashboardBdBackup> _backups = new();
+    private List<DashboardBdFragmentacion> _fragmentacion = new();
+    private List<DashboardBdIndiceFaltante> _indicesFaltantes = new();
+    private List<DashboardBdTabla> _tablas = new();
+
+    // Trace
+    private List<SpTraceEntry> _trace = new();
+    private string _traceFiltro = "";
+    private int _traceMinDur = 0;
+    private bool _tracePausado = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefrescarTodoAsync();
+        _timer = new System.Threading.Timer(async _ => await TickAsync(), null,
+            TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+    }
+
+    private async Task TickAsync()
+    {
+        if (!_auto) return;
+        if (_tab == 1) await RefrescarTraceAsync();
+        else           await RefrescarTodoAsync();
+    }
+
+    private async Task RefrescarTodoAsync()
+    {
+        _cargando = true; await InvokeAsync(StateHasChanged);
+        try
+        {
+            _resumen          = await Dash.GetResumenAsync();
+            _memoria          = await Dash.GetMemoriaAsync();
+            _ioLatencia       = await Dash.GetIoLatenciaAsync();
+            _sesiones         = await Dash.GetSesionesAsync();
+            _waits            = await Dash.GetWaitsAsync();
+            _consultas        = await Dash.GetConsultasAsync();
+            _archivos         = await Dash.GetArchivosAsync();
+            _backups          = await Dash.GetBackupsAsync();
+            _fragmentacion    = await Dash.GetFragmentacionAsync();
+            _indicesFaltantes = await Dash.GetIndicesFaltantesAsync();
+            _tablas           = await Dash.GetTablasAsync();
+            await RefrescarTraceAsync();
+        }
+        finally { _cargando = false; await InvokeAsync(StateHasChanged); }
+    }
+
+    private async Task RefrescarTraceAsync()
+    {
+        if (_tracePausado) return;
+        _trace = await Dash.GetTraceAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void ToggleAuto() => _auto = !_auto;
+
+    private bool _limpiandoLog;
+    private string? _msgLimpieza;
+    private bool _generandoBackup;
+    private string? _msgBackup;
+    private bool _matandoSesion;
+    private string? _msgKill;
+
+    private async Task GenerarBackupAsync()
+    {
+        _generandoBackup = true; _msgBackup = null; StateHasChanged();
+        try
+        {
+            var (r, error) = await Dash.GenerarBackupAsync("FULL");
+            _msgBackup = r is null
+                ? $"⚠️ No se pudo generar el backup: {error}"
+                : $"✅ Backup {r.DES_TIPO} generado en {r.VAL_SEGUNDOS}s ({r.VAL_TAMANO_MB?.ToString("N0", Ci)} MB): {r.DES_ARCHIVO}";
+            _backups = await Dash.GetBackupsAsync();
+        }
+        finally { _generandoBackup = false; await InvokeAsync(StateHasChanged); }
+    }
+
+    private async Task KillSesionAsync(int numSesion)
+    {
+        _matandoSesion = true; _msgKill = null; StateHasChanged();
+        try
+        {
+            var (r, error) = await Dash.KillSesionAsync(numSesion);
+            _msgKill = r is null
+                ? $"⚠️ No se pudo eliminar la sesión {numSesion}: {error}"
+                : $"✅ Sesión {r.NUM_SESION}: {r.DES_RESULTADO}";
+            _sesiones = await Dash.GetSesionesAsync();
+            _resumen  = await Dash.GetResumenAsync();
+        }
+        finally { _matandoSesion = false; await InvokeAsync(StateHasChanged); }
+    }
+
+    private static string EstadoIcono(string? estado, bool bloqueada) => bloqueada ? "⛔" : estado switch
+    {
+        "running"   => "▶️",
+        "runnable"  => "⏳",
+        "suspended" => "💤",
+        "sleeping"  => "😴",
+        _           => "❔"
+    };
+
+    private async Task LimpiarLogAsync()
+    {
+        _limpiandoLog = true; _msgLimpieza = null; StateHasChanged();
+        try
+        {
+            var (r, error) = await Dash.LimpiarLogAsync();
+            _msgLimpieza = r is null
+                ? $"⚠️ No se pudo limpiar el log: {error}"
+                : $"✅ Log: {r.VAL_ANTES_MB.ToString("N0", Ci)} MB → {r.VAL_DESPUES_MB.ToString("N0", Ci)} MB (liberados {r.VAL_LIBERADO_MB.ToString("N0", Ci)} MB)";
+            _archivos = await Dash.GetArchivosAsync();
+            _resumen  = await Dash.GetResumenAsync();
+        }
+        finally { _limpiandoLog = false; await InvokeAsync(StateHasChanged); }
+    }
+
+    private List<SpTraceEntry> TraceFiltrado()
+        => _trace.Where(e =>
+                (string.IsNullOrWhiteSpace(_traceFiltro) || e.DES_EXEC.Contains(_traceFiltro, StringComparison.OrdinalIgnoreCase))
+                && e.VAL_DURACION_MS >= _traceMinDur)
+            .ToList();
+
+    // ── Helpers de formato ──
+    // Cultura invariante: punto decimal consistente en TODO el dashboard (evita comas
+    // tanto en los textos visibles como en los números que van a estilos CSS/SVG).
+    private static readonly System.Globalization.CultureInfo Ci = System.Globalization.CultureInfo.InvariantCulture;
+
+    // Número para valores que van a estilos CSS/SVG (punto decimal siempre).
+    private static string Num(double d) => d.ToString("0.##", Ci);
+
+    private static string Mb(decimal? v) => v is null ? "—" : v >= 1024 ? (v.Value / 1024).ToString("N2", Ci) + " GB" : v.Value.ToString("N0", Ci) + " MB";
+    private static string Gb(long? mb) => mb is null ? "—" : (mb.Value / 1024.0).ToString("N1", Ci) + " GB";
+    private double PctMem() => (_memoria?.VAL_MEMORIA_TOTAL_MB is > 0 && _memoria?.VAL_SQL_USANDO_MB is not null)
+        ? (double)_memoria.VAL_SQL_USANDO_MB!.Value / _memoria.VAL_MEMORIA_TOTAL_MB!.Value * 100 : 0;
+
+    private static string ColorDur(long ms) => ms > 1000 ? "#ef4444" : ms >= 100 ? "#f59e0b" : "#22c55e";
+    private static string ColorFrag(decimal f) => f >= 30 ? "#ef4444" : "#f59e0b";
+    private static string ColorPct(decimal p) => p >= 85 ? "#ef4444" : p >= 60 ? "#f59e0b" : "#22c55e";
+    private static string EstadoPill(string? e) => e switch
+    {
+        "running" => "p-ok", "runnable" => "p-info", "suspended" => "p-warn", _ => "p-info"
+    };
+
+    public void Dispose() => _timer?.Dispose();
+
+    // ── Velocímetro semicircular (estilo aguja) para la latencia de I/O ──
+    // Escala 0..40 ms mapeada a un semicírculo (180°→0°). Verde<10, ámbar<20, rojo≥20.
+    private RenderFragment RenderGauge(string etiqueta, decimal? ms) => builder =>
+    {
+        double v = (double)(ms ?? 0);
+        double escala = Math.Min(v, 40) / 40.0;          // 0..1
+        double ang = 180 - escala * 180;                 // 180°(izq) → 0°(der)
+        double rad = ang * Math.PI / 180.0;
+        double cx = 60, cy = 55, r = 46;
+        double nx = cx + r * Math.Cos(rad);
+        double ny = cy - r * Math.Sin(rad);
+        string color = v < 10 ? "#22c55e" : v < 20 ? "#f59e0b" : "#ef4444";
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        // IMPORTANTE: formatear coordenadas SVG con cultura invariante (punto decimal).
+        // Con la cultura es-PE se generaba coma (15,6) y SVG lo descartaba → todas las
+        // agujas caían a (0,0) y apuntaban igual.
+        string snx = nx.ToString("0.0", ci), sny = ny.ToString("0.0", ci);
+        string txt = ms is null ? "—" : v.ToString("0.0", ci) + " ms";
+
+        builder.AddMarkupContent(0, $@"
+        <div class='gauge-wrap'>
+          <svg viewBox='0 0 120 66' width='104' height='57'>
+            <path d='M14,55 A46,46 0 0,1 34.6,17' stroke='#22c55e' stroke-width='9' fill='none' stroke-linecap='round'/>
+            <path d='M40,13.5 A46,46 0 0,1 80,13.5' stroke='#f59e0b' stroke-width='9' fill='none'/>
+            <path d='M85.4,17 A46,46 0 0,1 106,55' stroke='#ef4444' stroke-width='9' fill='none' stroke-linecap='round'/>
+            <line x1='{cx}' y1='{cy}' x2='{snx}' y2='{sny}' stroke='#111' stroke-width='2.5' stroke-linecap='round'/>
+            <circle cx='{cx}' cy='{cy}' r='4' fill='#111'/>
+          </svg>
+          <div class='gauge-val' style='color:{color}'>{txt}</div>
+          <div class='gauge-lbl'>{etiqueta}</div>
+        </div>");
+    };
+}
+
+<style>
+    .dmb{ --panel:#151a21; --panel2:#1b222c; --line:#232c38; --fore:#e6edf3; --muted:#8b98a9;
+          --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --crit:#ef4444; --info:#38bdf8;
+          --mono:'Cascadia Code',ui-monospace,monospace;
+          color:var(--fore); font-size:14px;
+          height:100%; display:flex; flex-direction:column; min-height:0; }
+    .dmb *{box-sizing:border-box}
+
+    .dmb-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px;flex-shrink:0}
+    .dmb-tab{padding:9px 16px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+    .dmb-tab:hover{color:var(--fore)}
+    .dmb-tab.active{color:var(--fore);border-bottom-color:var(--accent)}
+    .dmb-pane{display:none}
+    .dmb-pane.active{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
+    .dmb-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;padding-top:14px}
+
+    .dmb-hd{display:flex;align-items:center;gap:12px;margin-bottom:0;flex-wrap:wrap}
+    .dmb-hd h1{font-size:19px;margin:0;font-weight:700}
+    .dmb-db{font-family:var(--mono);font-size:12px;color:var(--info);background:var(--panel2);border:1px solid var(--line);padding:3px 8px;border-radius:6px}
+    .dmb-spacer{flex:1}
+    .dmb-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);background:var(--panel);border:1px solid var(--line);padding:5px 10px;border-radius:20px}
+    .dot{width:8px;height:8px;border-radius:50%}
+    .dmb-btn{background:var(--accent);color:#fff;border:none;border-radius:7px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer}
+    .dmb-btn.ghost{background:var(--panel);color:var(--fore);border:1px solid var(--line)}
+    .dmb-btn:disabled{opacity:.5;cursor:default}
+
+    .dmb-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:0}
+    .dmb-kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;position:relative;overflow:hidden}
+    .dmb-kpi .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+    .dmb-kpi .val{font-size:19px;font-weight:750;margin-top:3px;font-family:var(--mono)}
+    .dmb-kpi .sub{font-size:11px;color:var(--muted);margin-top:2px}
+    .dmb-kpi .strip{position:absolute;left:0;top:0;bottom:0;width:4px}
+    .s-ok{background:var(--ok)} .s-info{background:var(--info)} .s-warn{background:var(--warn)} .s-crit{background:var(--crit)} .s-acc{background:var(--accent)}
+
+    .dmb-grid{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;margin-bottom:16px}
+    .dmb-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px}
+    .dmb-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+    .dmb-card.mb{margin-bottom:16px}
+    .dmb-card h2{font-size:13px;margin:0;padding:12px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;font-weight:700;color:#f5c518}
+    .dmb-hd h1{color:#f5c518}
+    .dmb-db{color:#f5c518!important}
+    .dmb-btn.mini{margin-left:auto;padding:4px 10px;font-size:11.5px}
+    .dmb-sticky{flex-shrink:0;display:flex;gap:12px;align-items:stretch;margin-bottom:14px}
+    .dmb-top-right{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+    .dmb-speed{display:flex;gap:10px;flex-shrink:0}
+    .dmb-speed .speed-card{padding:8px 12px}
+    .speed-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+    .speed-title{font-size:12px;font-weight:700;color:#f5c518;margin-bottom:4px}
+    .speed-gauges{display:flex;gap:10px;justify-content:center}
+    .speed-sub{font-size:11px;color:var(--muted);text-align:center;margin-top:4px;font-family:var(--mono)}
+    .gauge-wrap{display:flex;flex-direction:column;align-items:center}
+    .gauge-val{font-family:var(--mono);font-weight:700;font-size:14px;margin-top:-4px}
+    .gauge-lbl{font-size:11px;color:var(--muted)}
+    .dmb-kill{background:rgba(239,68,68,.15);color:var(--crit);border:1px solid rgba(239,68,68,.35);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:13px}
+    .dmb-kill:hover{background:rgba(239,68,68,.3)}
+    .dmb-kill:disabled{opacity:.4;cursor:default}
+    .dmb-msg{padding:8px 14px;font-size:12px;font-family:var(--mono);color:var(--fore);background:var(--panel2);border-bottom:1px solid var(--line)}
+    .dmb-card h2 .tag{margin-left:auto;font-size:11px;font-weight:600;color:var(--muted)}
+    .dmb-card .body{padding:2px 2px;overflow-x:auto}
+
+    .dmb table{width:100%;border-collapse:collapse;font-size:12.5px}
+    .dmb th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:7px 10px;border-bottom:1px solid var(--line)}
+    .dmb td{padding:7px 10px;border-bottom:1px solid var(--line)}
+    .dmb tr:last-child td{border-bottom:none}
+    .dmb .num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+    .dmb .q{font-family:var(--mono);font-size:11.5px;color:var(--muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .dmb .vacio{text-align:center;color:var(--muted);padding:16px;font-size:12px}
+    .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px}
+    .p-ok{background:rgba(34,197,94,.15);color:var(--ok)} .p-warn{background:rgba(245,158,11,.15);color:var(--warn)} .p-crit{background:rgba(239,68,68,.15);color:var(--crit)} .p-info{background:rgba(56,189,248,.15);color:var(--info)}
+
+    .dmb .bar{height:8px;background:var(--panel2);border-radius:6px;overflow:hidden;min-width:90px}
+    .dmb .bar > span{display:block;height:100%;border-radius:6px}
+    .gauge{display:flex;flex-direction:column;gap:10px;padding:12px 14px}
+    .grow{display:flex;align-items:center;gap:10px}
+    .grow .gl{width:480px;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .grow .gv{width:60px;text-align:right;font-family:var(--mono);font-size:12px}
+
+    .ring-wrap{display:flex;gap:16px;padding:14px;align-items:center;justify-content:space-around;flex-wrap:wrap}
+    .ring{width:92px;height:92px;border-radius:50%;background:conic-gradient(var(--c) calc(var(--p)*1%),var(--panel2) 0);display:grid;place-items:center;position:relative}
+    .ring::before{content:"";position:absolute;inset:10px;border-radius:50%;background:var(--panel)}
+    .ring .rv{position:relative;font-family:var(--mono);font-weight:700;font-size:16px}
+    .ring-lbl{text-align:center;font-size:11.5px;color:var(--muted);margin-top:8px}
+
+    .trace-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+    .trace-toolbar input,.trace-toolbar select{background:var(--panel);border:1px solid var(--line);color:var(--fore);border-radius:7px;padding:7px 10px;font-size:12.5px}
+    .trace-toolbar input.search{min-width:220px;font-family:var(--mono)}
+    .trace-stat{font-size:12px;color:var(--muted);font-family:var(--mono)}
+    .live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ok);font-weight:600}
+    .live .dot{background:var(--ok);animation:dmbpulse 1.4s infinite}
+    @@keyframes dmbpulse{0%,100%{opacity:1}50%{opacity:.3}}
+    .trace-console{background:#0b0e13;border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:60vh}
+    .trace-console table{font-family:var(--mono);font-size:12px}
+    .trace-console th{color:#7d8899;background:#12161d;border-bottom:1px solid #232c38;position:sticky;top:0}
+    .trace-console td{border-bottom:1px solid #1a212b;color:#c9d4e2;white-space:nowrap}
+    .trace-console .exec{white-space:nowrap;max-width:640px;overflow:hidden;text-overflow:ellipsis;color:#9fb3cc}
+</style>

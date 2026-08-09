@@ -1,0 +1,94 @@
+@*
+    CopiarEstadosDialog.razor
+    --------------------------------------------------------------------------
+    Punto 21: copia (duplica) los estados seleccionados de un tipo de estado
+    a otro tipo destino. Crea nuevos registros con el mismo nombre, colores,
+    flags e imagen, pero bajo el COD_TIPO_ESTADO destino.
+*@
+@inject EstadoService EstadoService
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog>
+    <DialogContent>
+        <MudText Class="mb-3">
+            Copiar <strong>@Estados.Count</strong> estado(s) al tipo destino:
+        </MudText>
+        <AriaCombo TItem="TipoEstado"
+                     Items="TiposDestino"
+                     TextFunc="@(t => t.DES_TIPO_ESTADO ?? "")"
+                     ValueFunc="@(t => t.COD_TIPO_ESTADO?.ToString() ?? "")"
+                     Value="@(_tipoDestino?.ToString())"
+                     ValueChanged="@(v => _tipoDestino = int.TryParse(v, out var n) ? n : (int?)null)"
+                     Label="Tipo de estado destino" />
+
+        <div class="d-flex justify-end gap-2 mt-4 dialog-acciones-fijas">
+            <MudButton OnClick="@(async () => { try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { } MudDialog.Cancel(); })"
+                       Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel"
+                       Style="background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cancelar</MudButton>
+            <MudButton OnClick="Copiar" Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.ContentCopy"
+                       Style="background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));"
+                       Disabled="@(_copiando || _tipoDestino is null)">
+                @if (_copiando) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                Copiar
+            </MudButton>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public List<Estado> Estados { get; set; } = new();
+    [Parameter] public List<TipoEstado> TiposDestino { get; set; } = new();
+
+    private int? _tipoDestino;
+    private bool _copiando;
+
+    /// <summary>Duplica cada estado seleccionado en el tipo destino (como nuevo).</summary>
+    private async Task Copiar()
+    {
+        if (_tipoDestino is null) return;
+        _copiando = true;
+
+        int ok = 0, fallo = 0;
+        var errores = new List<string>();
+        foreach (var e in Estados)
+        {
+            var dto = new EstadoDto
+            {
+                COD_TIPO_ESTADO = _tipoDestino,
+                EsNuevo = true,   // crear nuevo (recalcula COD_ESTADO en el tipo destino)
+                DES_ESTADO = e.DES_ESTADO ?? "",
+                COD_ESTADO_ALIAS = e.COD_ESTADO_ALIAS,
+                FLG_DEFAULT = e.FLG_DEFAULT,
+                FLG_DISPARADOR_MAIL = e.FLG_DISPARADOR_MAIL,
+                FLG_DISPARADOR_NOTIFICACION = e.FLG_DISPARADOR_NOTIFICACION ?? false,
+                FLG_DISPARADOR_AUTORIZACION = e.FLG_DISPARADOR_AUTORIZACION,
+                NUM_ORDEN_PRESENTACION = e.NUM_ORDEN_PRESENTACION ?? 0,
+                COD_TIPO_MOTIVO = e.COD_TIPO_MOTIVO,
+                DES_BACKCOLOR = e.DES_BACKCOLOR ?? "#FFFFFF",
+                DES_FORECOLOR = e.DES_FORECOLOR ?? "#000000",
+                IMG_PICTURE = e.IMG_PICTURE
+            };
+            var (exito, msg) = await EstadoService.GuardarAsync(dto);
+            if (exito) ok++; else { fallo++; errores.Add($"{e.DES_ESTADO}: {msg}"); }
+        }
+
+        _copiando = false;
+        if (fallo == 0)
+        {
+            Snackbar.Add($"{ok} estado(s) copiados.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+        {
+            if (ok > 0) Snackbar.Add($"{ok} copiados correctamente.", Severity.Success);
+            await ErrorDialogHelper.MostrarMensajeAsync(
+                string.Join(" · ", errores), DialogService, nameof(CopiarEstadosDialog),
+                titulo: $"No se pudieron copiar {fallo} estado(s)");
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+    }
+}

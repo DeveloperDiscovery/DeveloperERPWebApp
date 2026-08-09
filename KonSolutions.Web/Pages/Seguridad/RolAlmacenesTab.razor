@@ -1,0 +1,197 @@
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject ErrorLogService ErrorLog
+
+@* SEGURIDAD.ROLES_USUARIO_ALMACENES — qué almacenes puede operar el rol.
+   No es un CRUD: la tabla sólo guarda el vínculo, así que son dos grillas y no un formulario.
+
+   Debajo cuelga su propio hijo (tipos de movimiento por almacén), que aparece recién cuando
+   se elige un almacén asignado: el permiso es "este movimiento, en este almacén", y sin
+   almacén no hay nada que mostrar. *@
+
+@if (Rol is null)
+{
+    <MudText Class="pa-6 mono" Style="opacity:.4;">Seleccione un rol para ver sus almacenes.</MudText>
+}
+else
+{
+    <div class="d-flex align-center justify-space-between pa-3 flex-wrap" style="border-bottom:1px solid var(--line);gap:12px;">
+        <MudText Typo="Typo.subtitle2">Almacenes del rol</MudText>
+        <div class="d-flex align-center gap-2">
+            <GridRefreshButton OnRefresh="Cargar" />
+            <MudText Class="mono" Style="opacity:.5;font-size:.75rem;">
+                @_asignados.Count asignados · @_disponibles.Count disponibles
+            </MudText>
+        </div>
+    </div>
+
+    <PanelAsignacionDoble TItem="RolAlmacen" @ref="_panel"
+                          Asignados="_asignados" Disponibles="_disponibles"
+                          Clave="@(a => a.COD_ALMACEN)"
+                          Codigo="@(a => a.COD_ALMACEN)"
+                          Descripcion="@(a => a.DES_ALMACEN ?? a.COD_ALMACEN)"
+                          Secundaria="@(a => a.DES_ABREVIADA)"
+                          TituloColumna="Almacén"
+                          EtiquetaPadre="rol" EtiquetaPlural="almacenes"
+                          VacioAsignados="Este rol no tiene almacenes asignados."
+                          VacioDisponibles="El rol ya tiene todos los almacenes activos."
+                          NombreGrilla="rol-almacenes"
+                          SoloLectura="SoloLectura" Cargando="_cargando" Procesando="_procesando"
+                          OnAsignar="AsignarAsync" OnDesasignar="DesasignarAsync"
+                          OnSeleccionar="SeleccionarAlmacen"
+                          EsSeleccionado="@(a => _almacenSel is not null && a.COD_ALMACEN == _almacenSel.COD_ALMACEN)" />
+
+    @* ── HIJO: tipos de movimiento del rol EN el almacén elegido ── *@
+    <div class="px-3 py-2" style="border-top:1px solid var(--line);background:var(--mud-palette-background-grey);">
+        <MudText Class="mono" Style="opacity:.6;font-size:.78rem;">
+            @if (_almacenSel is not null)
+            {
+                <text>Tipos de movimiento · @_almacenSel.COD_ALMACEN · @(_almacenSel.DES_ALMACEN ?? "")</text>
+            }
+            else
+            {
+                <text>Elija un almacén asignado para configurar sus tipos de movimiento</text>
+            }
+        </MudText>
+    </div>
+
+    @if (_almacenSel is not null)
+    {
+        <RolAlmacenTiposMovimientoTab Rol="Rol" Almacen="_almacenSel" SoloLectura="SoloLectura" />
+    }
+}
+
+@code {
+    /// <summary>Rol sobre el que se asigna. Null = ninguno seleccionado arriba.</summary>
+    [Parameter] public Rol? Rol { get; set; }
+    /// <summary>Bloquea las acciones cuando el rol está anulado o el usuario no puede modificar.</summary>
+    [Parameter] public bool SoloLectura { get; set; }
+
+    private PanelAsignacionDoble<RolAlmacen>? _panel;
+    private List<RolAlmacen> _asignados = new();
+    private List<RolAlmacen> _disponibles = new();
+    private RolAlmacen? _almacenSel;
+
+    private bool _cargando, _procesando;
+    private string? _rolCargado;
+
+    /// <summary>Se compara contra el último rol cargado porque OnParametersSet corre en cada
+    /// render del padre: recargar siempre dispararía llamadas de más y perdería las marcas
+    /// mientras el usuario elige.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        var cod = Rol?.COD_ROL_USUARIO;
+        if (cod == _rolCargado) return;
+        _rolCargado = cod;
+        _almacenSel = null;
+        await Cargar();
+    }
+
+    /// <summary>Dos llamadas: asignados y disponibles. Los disponibles NO se calculan restando
+    /// listas acá — el SP _DISPONIBLES ya descarta los almacenes anulados, y duplicar ese
+    /// criterio en el cliente sería empezar a discrepar con la base.</summary>
+    private async Task Cargar()
+    {
+        if (Rol is null) { _asignados = new(); _disponibles = new(); return; }
+
+        _cargando = true;
+        try
+        {
+            var cod = Uri.EscapeDataString(Rol.COD_ROL_USUARIO);
+
+            var ra = await Http.GetFromJsonAsync<ApiResponse<List<RolAlmacen>>>(
+                $"{ApiRoutes.Seguridad.RolesAlmacenes}/{cod}");
+            _asignados = (ra?.Data ?? new()).OrderBy(a => a.DES_ALMACEN ?? a.COD_ALMACEN).ToList();
+
+            var rd = await Http.GetFromJsonAsync<ApiResponse<List<RolAlmacen>>>(
+                $"{ApiRoutes.Seguridad.RolesAlmacenesDisponibles}/{cod}");
+            _disponibles = (rd?.Data ?? new()).OrderBy(a => a.DES_ALMACEN ?? a.COD_ALMACEN).ToList();
+
+            // Si el almacén abierto abajo dejó de estar asignado, el detalle se cierra solo.
+            if (_almacenSel is not null && !_asignados.Any(a => a.COD_ALMACEN == _almacenSel.COD_ALMACEN))
+                _almacenSel = null;
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(RolAlmacenesTab), nameof(Cargar));
+            await MostrarErrorAsync("No se pudieron cargar los almacenes del rol.");
+            _asignados = new();
+            _disponibles = new();
+        }
+        _cargando = false;
+    }
+
+    private void SeleccionarAlmacen(RolAlmacen a) => _almacenSel = a;
+
+    private Task AsignarAsync(List<RolAlmacen> items)
+        => EnviarLoteAsync(ApiRoutes.Seguridad.RolesAlmacenesAsignar, items, "asignar");
+
+    private Task DesasignarAsync(List<RolAlmacen> items)
+        => EnviarLoteAsync(ApiRoutes.Seguridad.RolesAlmacenesDesasignar, items, "quitar");
+
+    /// <summary>Manda el lote completo en una sola llamada. La respuesta puede ser parcial: el
+    /// servidor sigue con los demás si uno falla, así que se informa cuántos entraron y cuáles
+    /// quedaron afuera en vez de decir sólo "listo" o "error".</summary>
+    private async Task EnviarLoteAsync(string ruta, List<RolAlmacen> items, string verbo)
+    {
+        if (SoloLectura)
+        {
+            await MostrarAvisoAsync("Sólo lectura", "No tiene permiso para modificar los almacenes de este rol.");
+            return;
+        }
+        if (Rol is null || items.Count == 0 || _procesando) return;
+
+        _procesando = true;
+        try
+        {
+            var dto = new RolAlmacenesLote
+            {
+                COD_ROL_USUARIO = Rol.COD_ROL_USUARIO,
+                Almacenes = items.Select(i => i.COD_ALMACEN).ToList()
+            };
+            var resp = await Http.PostAsJsonAsync(ruta, dto);
+            if (!resp.IsSuccessStatusCode)
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService,
+                    nameof(RolAlmacenesTab), nameof(EnviarLoteAsync), $"No se pudo {verbo}");
+                return;
+            }
+
+            var r = await resp.Content.ReadFromJsonAsync<ApiResponse<RolAsignacionLoteResult>>();
+            var res = r?.Data;
+            await Cargar();
+            _panel?.LimpiarMarcas();
+
+            if (res is null) { Snackbar.Add("Operación completada.", Severity.Success); return; }
+
+            if (res.Fallidos.Any())
+            {
+                // Al quitar, lo habitual es que el rechazo venga del SP porque el almacén
+                // todavía tiene tipos de movimiento colgando: se muestra el motivo real.
+                await MostrarAvisoAsync($"No se pudo {verbo} todo",
+                    $"Se procesaron {res.Procesados}. Quedaron afuera: {string.Join(", ", res.Fallidos)}." +
+                    (string.IsNullOrWhiteSpace(res.DesError) ? "" : $" Motivo: {res.DesError}"));
+            }
+            else
+            {
+                Snackbar.Add($"{res.Procesados} almacén(es) actualizados.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(RolAlmacenesTab), nameof(EnviarLoteAsync));
+            await MostrarErrorAsync($"No se pudo {verbo} los almacenes.");
+        }
+        finally { _procesando = false; }
+    }
+
+    private Task MostrarErrorAsync(string mensaje)
+        => MostrarAvisoAsync("No se pudo completar la operación", $"{mensaje} Ver detalle en el log de errores.");
+
+    private async Task MostrarAvisoAsync(string titulo, string mensaje)
+        => await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters { ["Titulo"] = titulo, ["Mensaje"] = mensaje },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+}

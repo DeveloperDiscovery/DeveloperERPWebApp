@@ -1,0 +1,251 @@
+@page "/administracion/cargos"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Administracion
+@inject CatalogoService<Cargo, CargoDto> Service
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject ConfigService ConfigSvc
+@implements IDisposable
+
+<PageTitle>Cargos · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Cargos" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ADMINISTRACION · @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTerm" OnSearch="HandleSearch" Placeholder="Buscar cargo..." DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Cargos" Headers="@_printHeaders" Rows="@PrintRows()" />
+        <AccionesBotones CodAplicacion="@CodAplicacion"
+                         CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header"
+                         OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="cargos" style="position:relative;">
+    <MudDataGrid T="Cargo" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="@Limites.ColWidth("ADMINISTRACION.CARGOS","COD_CARGO",60,150)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_CARGO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="Cargo" ItemsBase="@BaseSinEstaColumna(0)"
+                                            ValorDe="@(x => x.COD_CARGO?.ToString() ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_CARGO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("ADMINISTRACION.CARGOS","DES_CARGO",120,300)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_CARGO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="Cargo" ItemsBase="@BaseSinEstaColumna(1)"
+                                            ValorDe="@(x => x.DES_CARGO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_CARGO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Área" Width="@Limites.ColWidth("ADMINISTRACION.CARGOS","COD_AREA",100,220)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_AREA" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="Cargo" ItemsBase="@BaseSinEstaColumna(2)"
+                                            ValorDe="@(x => x.DES_AREA ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(2, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_AREA</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo de cargo" Width="@Limites.ColWidth("ADMINISTRACION.CARGOS","COD_TIPO_CARGO",100,220)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TIPO_CARGO" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="Cargo" ItemsBase="@BaseSinEstaColumna(3)"
+                                            ValorDe="@(x => x.DES_TIPO_CARGO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(3, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_CARGO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Orden" Width="@Limites.ColWidth("ADMINISTRACION.CARGOS","NUM_ORDEN_PRESENTACION",70,100)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="NUM_ORDEN_PRESENTACION" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="Cargo" ItemsBase="@BaseSinEstaColumna(4)"
+                                            ValorDe="@(x => x.NUM_ORDEN_PRESENTACION?.ToString() ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(4)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(4, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.NUM_ORDEN_PRESENTACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Estado" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1 justify-center"><EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="Cargo" ItemsBase="@BaseSinEstaColumna(5)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(5)" ValoresActivosChanged="@(v=>AplicarFiltro(5,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrWhiteSpace(context.Item.DES_ESTADO))
+                    {
+                        <span style="@($"display:inline-block;padding:2px 10px;border-radius:10px;font-size:.72rem;font-weight:700;background:{context.Item.DES_BACKCOLOR};color:{context.Item.DES_FORECOLOR};")">
+                            @context.Item.DES_ESTADO
+                        </span>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion"
+                                     CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                     OnAccion="@(b => OnAccionGrilla(item, b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin cargos.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="Cargo" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<Cargo> _items = new();
+    private string _searchTerm = string.Empty;
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<Cargo> Ordenar(List<Cargo> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_CARGO).ToList() : items.OrderByDescending(x => x.COD_CARGO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_CARGO).ToList() : items.OrderByDescending(x => x.DES_CARGO).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_AREA).ToList() : items.OrderByDescending(x => x.DES_AREA).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_CARGO).ToList() : items.OrderByDescending(x => x.DES_TIPO_CARGO).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.NUM_ORDEN_PRESENTACION).ToList() : items.OrderByDescending(x => x.NUM_ORDEN_PRESENTACION).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+
+    private List<Cargo> _visibles => Ordenar(AplicarTodos(_items, -1));
+    private List<Cargo> BaseSinEstaColumna(int col) => AplicarTodos(_items, col);
+
+    private List<Cargo> AplicarTodos(List<Cargo> origen, int excluir)
+    {
+        IEnumerable<Cargo> q = origen;
+        foreach (var (col, vals) in _filtros)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.COD_CARGO?.ToString() ?? "")),
+                1 => q.Where(x => vals.Contains(x.DES_CARGO ?? "")),
+                2 => q.Where(x => vals.Contains(x.DES_AREA ?? "")),
+                3 => q.Where(x => vals.Contains(x.DES_TIPO_CARGO ?? "")),
+                4 => q.Where(x => vals.Contains(x.NUM_ORDEN_PRESENTACION?.ToString() ?? "")),
+                5 => q.Where(x => vals.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltro(int col, HashSet<string>? vals) { _filtros[col] = vals; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private readonly List<string> _printHeaders = new() { "Código", "Descripción", "Área", "Tipo de cargo", "Orden", "Estado" };
+    private List<List<string>> PrintRows() => _items.Select(b => new List<string>
+    {
+        b.COD_CARGO?.ToString() ?? "", b.DES_CARGO ?? "", b.DES_AREA ?? "", b.DES_TIPO_CARGO ?? "",
+        b.NUM_ORDEN_PRESENTACION?.ToString() ?? "", b.DES_ESTADO ?? ""
+    }).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ADMINISTRACION", "Cargos");
+        await Load();
+        Cambios.Suscribir("ADMINISTRACION.CARGOS", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Open(null));
+
+    private async Task Load() => _items = await Service.GetAllAsync();
+
+    private async Task HandleSearch()
+    {
+        _items = string.IsNullOrWhiteSpace(_searchTerm)
+            ? await Service.GetAllAsync()
+            : await Service.SearchAsync(_searchTerm);
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Open(null);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(Cargo item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Ver(item);
+        if (b.FLG_ACCION_PUT    == true) return Open(item);
+        if (b.FLG_ACCION_DELETE == true) return Delete(item);
+        return Task.CompletedTask;
+    }
+
+    private async Task Ver(Cargo item)    => await AbrirDialog(item, CrudModo.Read);
+    private async Task Open(Cargo? b)     => await AbrirDialog(b, b is null ? CrudModo.Create : CrudModo.Update);
+    private async Task Delete(Cargo b)    => await AbrirDialog(b, CrudModo.Delete);
+
+    private async Task AbrirDialog(Cargo? b, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo cargo",
+            CrudModo.Read   => $"Ver · {b?.DES_CARGO}",
+            CrudModo.Update => $"Editar · {b?.DES_CARGO}",
+            CrudModo.Delete => $"Eliminar · {b?.DES_CARGO}",
+            _ => "Cargo"
+        };
+        var parameters = new DialogParameters { ["Item"] = b, ["Modo"] = modo };
+        var dlg = await DialogService.ShowAsync<CargosDialog>(titulo, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ADMINISTRACION.CARGOS", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

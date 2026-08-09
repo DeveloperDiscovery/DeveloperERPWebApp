@@ -1,0 +1,117 @@
+@using TiposDisenoModel = KONSolutions.Shared.Models.Ingenieria.TiposDiseno
+@using TiposDisenoRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_DISENO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="INGENIERIA.TIPOS_DISENO" Columna="COD_TIPO_DISENO"
+                        @bind-Value="_model.COD_TIPO_DISENO"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="INGENIERIA.TIPOS_DISENO" Columna="DES_TIPO_DISENO"
+                        @bind-Value="_model.DES_TIPO_DISENO"
+                        Disabled="_readonly" Obligatorio="true" />
+            <MudNumericField T="byte?" @bind-Value="_model.NUM_ORDEN_PRESENTACION" Label="Orden de Presentación"
+                              Variant="Variant.Outlined" Class="mb-3" Disabled="_readonly" />
+            <div class="d-flex align-center justify-space-between py-1">
+                <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.Diamond" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Propio</MudText></div>
+                <MudSwitch T="bool?" @bind-Value="_model.FLG_PROPIO" Color="Color.Primary" Disabled="_readonly" />
+            </div>
+            <div class="d-flex align-center justify-space-between py-1">
+                <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.PrecisionManufacturing" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Producción</MudText></div>
+                <MudSwitch T="bool?" @bind-Value="_model.FLG_PRODUCCION" Color="Color.Primary" Disabled="_readonly" />
+            </div>
+            <div class="d-flex align-center justify-space-between py-1">
+                <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.Visibility" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Muestra</MudText></div>
+                <MudSwitch T="bool?" @bind-Value="_model.FLG_MUESTRA" Color="Color.Primary" Disabled="_readonly" />
+            </div>
+            <div class="d-flex align-center justify-space-between py-1">
+                <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.RequestQuote" Color="Color.Primary" Size="Size.Medium" /><MudText Typo="Typo.body2">Cotización</MudText></div>
+                <MudSwitch T="bool?" @bind-Value="_model.FLG_COTIZACION" Color="Color.Primary" Disabled="_readonly" />
+            </div>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposDisenoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposDisenoModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(TiposDisenoModel m)
+    {
+        _model = new TiposDisenoModel
+        {
+            COD_TIPO_DISENO = m.COD_TIPO_DISENO,
+            DES_TIPO_DISENO = m.DES_TIPO_DISENO,
+            FLG_PROPIO = m.FLG_PROPIO,
+            FLG_PRODUCCION = m.FLG_PRODUCCION,
+            FLG_MUESTRA = m.FLG_MUESTRA,
+            FLG_COTIZACION = m.FLG_COTIZACION,
+            NUM_ORDEN_PRESENTACION = m.NUM_ORDEN_PRESENTACION,
+        };
+    }
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<TiposDisenoModel>>(
+                $"{TiposDisenoRoute.TiposDiseno}/{Uri.EscapeDataString(_model.COD_TIPO_DISENO)}");
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = TiposDisenoRoute.TiposDiseno;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_TIPO_DISENO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposDisenoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new { _model.COD_TIPO_DISENO, _model.DES_TIPO_DISENO, _model.FLG_PROPIO, _model.FLG_PRODUCCION, _model.FLG_MUESTRA, _model.FLG_COTIZACION, _model.NUM_ORDEN_PRESENTACION };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposDisenoDialog), nameof(Submit));
+    }
+}

@@ -1,0 +1,578 @@
+@page "/seguridad/usuarios"
+@attribute [Authorize]
+@inject UsuarioService UsuarioService
+@inject ConfigService ConfigSvc
+@inject CatalogoService<Perfil, PerfilDto> PerfilService
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@implements IDisposable
+
+<PageTitle>Usuarios · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Usuarios" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+            Schema SEGURIDAD · @_usuariosVisibles.Count de @_usuarios.Count registros
+        </MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTerm" OnSearch="HandleSearch" Placeholder="Buscar usuario..."
+                   DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    @if (_loading)
+    {
+        <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+    }
+    <GridClearFiltersButton OnClear="LimpiarFiltros"
+                            HasFilters="@(_filtros.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Usuarios" Headers="@_printHeaders" Rows="@PrintRows()" />
+        @* Experimento: alternar entre tabla y fichas — por ahora solo en esta pantalla. *@
+        <MudTooltip Text="@(_vistaFichas ? "Ver como tabla" : "Ver como fichas")">
+            <MudIconButton Icon="@(_vistaFichas ? Icons.Material.Filled.TableRows : Icons.Material.Filled.ViewAgenda)"
+                           Class="grid-header-btn"
+                           Style="background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));border-radius:10px;"
+                           OnClick="@(() => _vistaFichas = !_vistaFichas)" />
+        </MudTooltip>
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header"
+                         OnAccion="@(b => EjecutarAccion(b, null))" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    @if (_vistaFichas)
+    {
+        <div class="usuarios-fichas">
+            @foreach (var u in _usuariosVisibles)
+            {
+                <div class="usuario-ficha">
+                    <div class="usuario-ficha-foto-col">
+                        @{
+                            var fotoAncho = ConfigSvc.Current.ImagenGrillaAncho * 6;
+                            var fotoAlto  = ConfigSvc.Current.ImagenGrillaAlto  * 6;
+                        }
+                        @if (u.IMG_FOTO is { Length: > 0 })
+                        {
+                            <img src="@($"data:image/png;base64,{Convert.ToBase64String(u.IMG_FOTO)}")"
+                                 style="@($"width:{fotoAncho}px;height:{fotoAlto}px;object-fit:cover;border-radius:8px;")" />
+                        }
+                        else
+                        {
+                            <div style="@($"width:{fotoAncho}px;height:{fotoAlto}px;display:flex;align-items:center;justify-content:center;opacity:.2;border-radius:8px;background:var(--grilla-fila-impar,#f5f1ea);")">
+                                <MudIcon Icon="@Icons.Material.Filled.Person" Style="font-size:2.5rem;" />
+                            </div>
+                        }
+                        <MudChip T="string" Size="Size.Small" Class="mt-2"
+                                 Style="@($"background:{u.DES_BACKCOLOR ?? "#e8e3d8"};color:{u.DES_FORECOLOR ?? "#16130f"};font-weight:600;")">
+                            @(u.DES_ESTADO ?? "—")
+                        </MudChip>
+                    </div>
+                    <div class="usuario-ficha-datos">
+                        <div class="usuario-ficha-titulo">
+                            <div class="usuario-ficha-nombre">@u.DES_USUARIO</div>
+                            <div class="usuario-ficha-cod usuario-ficha-campo mono">
+                                <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" />
+                                <span>@u.COD_USUARIO</span>
+                            </div>
+                        </div>
+                        <div class="usuario-ficha-campo">
+                            <MudIcon Icon="@Icons.Material.Filled.Badge" Size="Size.Small" />
+                            <span>@(u.DES_PERFIL_USUARIO ?? "—")</span>
+                        </div>
+                        <div class="usuario-ficha-campo">
+                            <MudIcon Icon="@Icons.Material.Filled.Email" Size="Size.Small" />
+                            <span>@(u.DES_CORREO_INSTITUCIONAL ?? "—")</span>
+                        </div>
+                        @{
+                            var flgDA   = u.FLG_VALIDA_DIRECTORIO_ACTIVO == true;
+                            var flgCred = u.FLG_LOGIN_CREDENCIALES       == true;
+                            var flgFace = u.FLG_LOGIN_FACE                == true;
+                            var flgHue  = u.FLG_LOGIN_HUELLA_DACTILAR     == true;
+                        }
+                        @if (flgDA || flgCred || flgFace || flgHue)
+                        {
+                            <div class="usuario-ficha-flags">
+                                @if (flgDA)   { <MudTooltip Text="Directorio Activo: activo"><MudIcon Icon="@Icons.Material.Filled.Domain" Size="Size.Small" /></MudTooltip> }
+                                @if (flgCred) { <MudTooltip Text="Credenciales: activo"><MudIcon Icon="@Icons.Material.Filled.Password" Size="Size.Small" /></MudTooltip> }
+                                @if (flgFace) { <MudTooltip Text="Login facial: activo"><MudIcon Icon="@Icons.Material.Filled.FaceRetouchingNatural" Size="Size.Small" /></MudTooltip> }
+                                @if (flgHue)  { <MudTooltip Text="Huella dactilar: activo"><MudIcon Icon="@Icons.Material.Filled.Fingerprint" Size="Size.Small" /></MudTooltip> }
+                            </div>
+                        }
+                        <div class="usuario-ficha-acciones">
+                            <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                             OnAccion="@(b => EjecutarAccion(b, u))" />
+                        </div>
+                    </div>
+                </div>
+            }
+            @if (!_usuariosVisibles.Any())
+            {
+                <MudText Class="pa-6 mono" Style="opacity:.5;">Sin usuarios para mostrar.</MudText>
+            }
+        </div>
+    }
+    else
+    {
+    <div data-resizable-grid="usuarios" style="position:relative;">
+    <MudDataGrid T="Usuario" Items="_usuariosVisibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true"
+                 SortMode="SortMode.Multiple"
+                 RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica"
+                 RowClassFunc="@FilaFocoUsuario"
+                 RowClick="OnUsuarioRowClick">
+        <Columns>
+            @* Foto del usuario (primera columna) *@
+            <TemplateColumn Title="Foto" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <GridImage Image="context.Item.IMG_FOTO" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Usuario" SortBy="x => x.COD_USUARIO" Width="@Limites.ColWidth("SEGURIDAD.USUARIOS","COD_USUARIO",60,150)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_USUARIO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="Usuario" ItemsBase="@BaseSinEstaColumna(0)"
+                                            ValorDe="@(u => u.COD_USUARIO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_USUARIO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Nombre" SortBy="x => x.DES_USUARIO" Width="@Limites.ColWidth("SEGURIDAD.USUARIOS","DES_USUARIO",120,350)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_USUARIO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="Usuario" ItemsBase="@BaseSinEstaColumna(1)"
+                                            ValorDe="@(u => u.DES_USUARIO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_USUARIO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Perfil" SortBy="x => x.DES_PERFIL_USUARIO">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_PERFIL_USUARIO" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="Usuario" ItemsBase="@BaseSinEstaColumna(2)"
+                                            ValorDe="@(u => u.DES_PERFIL_USUARIO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(2, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_PERFIL_USUARIO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Correo" SortBy="x => x.DES_CORREO_INSTITUCIONAL" Width="@Limites.ColWidth("SEGURIDAD.USUARIOS","DES_CORREO_INSTITUCIONAL",120,350)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_CORREO_INSTITUCIONAL" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="Usuario" ItemsBase="@BaseSinEstaColumna(3)"
+                                            ValorDe="@(u => u.DES_CORREO_INSTITUCIONAL)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(3)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(3, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_CORREO_INSTITUCIONAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Estado" SortBy="x => x.DES_ESTADO">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_ESTADO" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="Usuario" ItemsBase="@BaseSinEstaColumna(4)"
+                                            ValorDe="@(u => u.DES_ESTADO)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(4)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(4, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small"
+                             Style="@($"background:{context.Item.DES_BACKCOLOR ?? "#e8e3d8"};color:{context.Item.DES_FORECOLOR ?? "#16130f"};font-weight:600;")">
+                        @(context.Item.DES_ESTADO ?? "—")
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Login" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    @{
+                        var u = context.Item;
+                        var flgDA   = u.FLG_VALIDA_DIRECTORIO_ACTIVO == true;
+                        var flgCred = u.FLG_LOGIN_CREDENCIALES       == true;
+                        var flgFace = u.FLG_LOGIN_FACE                == true;
+                        var flgReg  = u.FLG_REGISTRO_FACIAL           == true;
+                        var flgHue  = u.FLG_LOGIN_HUELLA_DACTILAR     == true;
+
+                        var colorDA   = flgDA   ? "color:#5c8a3c;" : "color:#aaa;";
+                        var colorCred = flgCred ? "color:#5c8a3c;" : "color:#aaa;";
+                        var colorFace = flgFace ? (flgReg ? "color:#5c8a3c;" : "color:#c0392b;") : "color:#aaa;";
+                        var colorHue  = flgHue  ? "color:#5c8a3c;" : "color:#aaa;";
+
+                        var ttDA   = flgDA   ? "Directorio Activo: activo"   : "Directorio Activo: inactivo";
+                        var ttCred = flgCred ? "Credenciales: activo"         : "Credenciales: inactivo";
+                        var ttFace = (flgFace, flgReg) switch {
+                            (true,  true)  => "Login facial: activo · Registrado",
+                            (true,  false) => "Login facial: activo · Sin biometría registrada",
+                            (false, true)  => "Login facial: inactivo · Biometría registrada",
+                            _              => "Login facial: inactivo"
+                        };
+                        var ttHue  = flgHue  ? "Huella dactilar: activo"      : "Huella dactilar: inactivo";
+                    }
+                    <div class="d-flex gap-1 justify-center">
+                        <MudTooltip Text="@ttDA">
+                            <MudIcon Icon="@Icons.Material.Filled.Domain" Size="Size.Small" Style="@colorDA" />
+                        </MudTooltip>
+                        <MudTooltip Text="@ttCred">
+                            <MudIcon Icon="@Icons.Material.Filled.Password" Size="Size.Small" Style="@colorCred" />
+                        </MudTooltip>
+                        <MudTooltip Text="@ttFace">
+                            <MudIcon Icon="@Icons.Material.Filled.FaceRetouchingNatural" Size="Size.Small" Style="@colorFace" />
+                        </MudTooltip>
+                        <MudTooltip Text="@ttHue">
+                            <MudIcon Icon="@Icons.Material.Filled.Fingerprint" Size="Size.Small" Style="@colorHue" />
+                        </MudTooltip>
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Intentos">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="NUM_INTENTOS" Activo="@(_ordenColumna == 5)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(5))" />
+                        <FiltroExcelColumna T="Usuario" ItemsBase="@BaseSinEstaColumna(5)"
+                                            ValorDe="@(u => u.NUM_INTENTOS?.ToString() ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(5)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(5, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    <span class="mono" style="font-size:.85rem;">
+                        @(context.Item.NUM_INTENTOS ?? 0)/@(context.Item.NUM_MAXIMO_INTENTOS ?? 0)
+                    </span>
+                </CellTemplate>
+            </TemplateColumn>
+            @* Firma del usuario (antes de Acciones) *@
+            <TemplateColumn Title="Firma" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <GridImage Image="context.Item.IMG_FIRMA" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     OnAccion="@(b => EjecutarAccion(b, context.Item))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-6 mono" Style="opacity:.5;">Sin usuarios para mostrar.</MudText>
+        </NoRecordsContent>
+        <LoadingContent>
+            <div style="height:1px;"></div>
+        </LoadingContent>
+        <PagerContent>
+            <MudDataGridPager T="Usuario" />
+        </PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+    }
+</MudPaper>
+
+@* ── Sección inferior: asignaciones del usuario seleccionado ── *@
+@if (_usuarioSel is not null)
+{
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);" Class="mt-4">
+        <div class="d-flex align-center justify-space-between pa-3" style="border-bottom:1px solid var(--line);">
+            <div>
+                <MudText Typo="Typo.h6">Asignaciones de @_usuarioSel.DES_USUARIO</MudText>
+                <MudText Class="mono" Style="opacity:.5;font-size:.78rem;">
+                    Usuario: @_usuarioSel.COD_USUARIO · Rol: @(_usuarioSel.DES_ROL_USUARIO ?? _usuarioSel.COD_ROL_USUARIO ?? "—")
+                </MudText>
+            </div>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                           OnClick="@(() => _usuarioSel = null)" />
+        </div>
+        <UsuarioAsignaciones CodUsuario="@(_usuarioSel.COD_USUARIO ?? "")" />
+    </MudPaper>
+}
+
+@code {
+    /// <summary>Códigos recibidos al abrir la pestaña desde el menú — usados por
+    /// AccionesBotones para resolver los botones dinámicos de esta opción.</summary>
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    /// <summary>
+    /// Mapea el texto del botón (DES_BOTON_OPCION) a la acción real de la pantalla.
+    /// Si en la BD se renombra el texto de un botón, esta comparación deja de
+    /// reconocerlo — mantener el texto estable es responsabilidad de quien
+    /// administra los botones en Opciones de Aplicaciones.
+    /// </summary>
+    private async Task EjecutarAccion(BotonTreeviewItem boton, Usuario? item)
+    {
+        var accion = (boton.DES_BOTON_OPCION ?? "").Trim().ToUpperInvariant();
+
+        // Acciones de cabecera (FLG_HEADER) no dependen de una fila seleccionada.
+        if (accion.Contains("NUEVO")) { await OpenCreate(); return; }
+
+        if (item is null) { Snackbar.Add("No hay un registro seleccionado para esta acción.", Severity.Warning); return; }
+
+        switch (accion)
+        {
+            case "VER":
+            case "CONSULTAR": await Ver(item); break;
+            case "EDITAR":
+            case "MODIFICAR": await OpenEdit(item); break;
+            case "RESETEAR CONTRASEÑA":
+            case "RESET CONTRASEÑA":
+            case "RESETEAR PASSWORD": await ResetPassword(item); break;
+            case "CAMBIAR PASSWORD": await OpenCambiarPasswordOtro(item); break;
+            case "RESETEAR INTENTOS":
+            case "RESET INTENTOS": await ResetIntentos(item); break;
+            case "CAMBIAR ESTADO":
+            case "ESTADO": await CambiarEstado(item); break;
+            case "VER ASIGNACIONES":
+            case "ASIGNACIONES": VerAsignaciones(item); break;
+            case "ASIGNACION DE ROLES":
+            case "ASIGNACION ROLES": VerAsignaciones(item); break;
+            case "ELIMINAR":
+            case "BORRAR": await Delete(item); break;
+            default: Snackbar.Add($"Acción '{boton.DES_BOTON_OPCION}' no reconocida.", Severity.Warning); break;
+        }
+    }
+
+    private List<Usuario> _usuarios = new();
+    private readonly List<string> _printHeaders = new() { "Usuario", "Nombre", "Perfil", "Correo" };
+    private List<List<string>> PrintRows() => _usuarios.Select(x => new List<string>
+    {
+        x.COD_USUARIO ?? "", x.DES_USUARIO ?? "", x.DES_PERFIL_USUARIO ?? "", x.DES_CORREO_INSTITUCIONAL ?? ""
+    }).ToList();
+    private Usuario? _usuarioSel;
+
+    // ── Filtro Excel en cascada ──
+    // 0=Usuario, 1=Nombre, 2=Perfil, 3=Correo, 4=Estado
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+
+    private List<Usuario> _usuariosVisibles => Ordenar(AplicarTodos(_usuarios, excluirColumna: -1));
+    private List<Usuario> BaseSinEstaColumna(int columna) => AplicarTodos(_usuarios, columna);
+
+    // ── Ordenamiento manual (clic en el título de columna) ──
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+
+    private List<Usuario> Ordenar(List<Usuario> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(u => u.COD_USUARIO).ToList() : items.OrderByDescending(u => u.COD_USUARIO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(u => u.DES_USUARIO).ToList() : items.OrderByDescending(u => u.DES_USUARIO).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(u => u.DES_PERFIL_USUARIO).ToList() : items.OrderByDescending(u => u.DES_PERFIL_USUARIO).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(u => u.DES_CORREO_INSTITUCIONAL).ToList() : items.OrderByDescending(u => u.DES_CORREO_INSTITUCIONAL).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(u => u.DES_ESTADO).ToList() : items.OrderByDescending(u => u.DES_ESTADO).ToList(),
+        5 => _ordenAscendente ? items.OrderBy(u => u.NUM_INTENTOS).ToList() : items.OrderByDescending(u => u.NUM_INTENTOS).ToList(),
+        _ => items
+    };
+
+    private List<Usuario> AplicarTodos(List<Usuario> origen, int excluirColumna)
+    {
+        IEnumerable<Usuario> q = origen;
+        foreach (var (col, valores) in _filtros)
+        {
+            if (col == excluirColumna || valores is null) continue;
+            q = col switch
+            {
+                0 => q.Where(u => valores.Contains(u.COD_USUARIO ?? "")),
+                1 => q.Where(u => valores.Contains(u.DES_USUARIO ?? "")),
+                2 => q.Where(u => valores.Contains(u.DES_PERFIL_USUARIO ?? "")),
+                3 => q.Where(u => valores.Contains(u.DES_CORREO_INSTITUCIONAL ?? "")),
+                4 => q.Where(u => valores.Contains(u.DES_ESTADO ?? "")),
+                5 => q.Where(u => valores.Contains(u.NUM_INTENTOS?.ToString() ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltro(int columna, HashSet<string>? valores)
+    {
+        _filtros[columna] = valores;
+        StateHasChanged();
+    }
+
+    private void LimpiarFiltros()
+    {
+        foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null;
+        StateHasChanged();
+    }
+
+    // Mostrar la sección inferior de asignaciones del usuario
+    private void OnUsuarioRowClick(DataGridRowClickEventArgs<Usuario> args)
+        => VerAsignaciones(args.Item);
+
+    /// <summary>Resalta con el color de foco la fila del usuario seleccionado (puntos 17/19).</summary>
+    private string FilaFocoUsuario(Usuario item, int _)
+        => _usuarioSel is not null && item.COD_USUARIO == _usuarioSel.COD_USUARIO ? "fila-foco" : "";
+
+    private void VerAsignaciones(Usuario u)
+    {
+        _usuarioSel = u;
+        StateHasChanged();
+    }
+    private bool _loading = true;
+    private bool _vistaFichas = false;
+    private string _searchTerm = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("SEGURIDAD", "Usuarios");
+        await Load();
+        Cambios.Suscribir("SEGURIDAD.USUARIOS", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(OpenCreate);
+
+    private async Task Load()
+    {
+        _loading = true;
+        _usuarios = await UsuarioService.GetAllAsync();
+        _loading = false;
+    }
+
+    private async Task HandleSearch()
+    {
+        _loading = true;
+        _usuarios = string.IsNullOrWhiteSpace(_searchTerm)
+            ? await UsuarioService.GetAllAsync()
+            : await UsuarioService.SearchAsync(_searchTerm);
+        _loading = false;
+    }
+
+    private async Task OpenCreate()
+    {
+        var dlg = await DialogService.ShowAsync<UsuarioDialog>("Nuevo usuario",
+            new DialogParameters { ["Usuario"] = null },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var result = await dlg.Result;
+        if (!result!.Canceled && result.Data is Usuario nuevo)
+            _usuarios.Add(nuevo);
+    }
+
+    private async Task OpenEdit(Usuario u)
+    {
+        var dlg = await DialogService.ShowAsync<UsuarioDialog>($"Editar · {u.COD_USUARIO}",
+            new DialogParameters { ["Usuario"] = u },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var result = await dlg.Result;
+        if (!result!.Canceled && result.Data is Usuario actualizado)
+            ReemplazarEnMemoria(actualizado);
+    }
+
+    /// <summary>Reemplaza un registro existente en _usuarios por su versión actualizada,
+    /// sin volver a pedir la lista completa al servidor.</summary>
+    private void ReemplazarEnMemoria(Usuario actualizado)
+    {
+        var idx = _usuarios.FindIndex(x => x.COD_USUARIO == actualizado.COD_USUARIO);
+        if (idx >= 0) _usuarios[idx] = actualizado;
+        else _usuarios.Add(actualizado);
+    }
+
+    private async Task Ver(Usuario u)
+    {
+        // Consultar usa el MISMO diálogo de Nuevo/Modificar, en modo solo lectura.
+        await DialogService.ShowAsync<UsuarioDialog>($"Usuario · {u.COD_USUARIO}",
+            new DialogParameters { ["Usuario"] = u, ["SoloLectura"] = true },
+            new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    /// <summary>
+    /// Resetea la contraseña del usuario: llama a POST /seguridad/usuarios/password-reset,
+    /// que deja su password en NULL. En su próximo login el sistema le exigirá definir uno nuevo.
+    /// </summary>
+    private async Task ResetPassword(Usuario u)
+    {
+        var confirm = await DialogService.ShowMessageBox("Resetear contraseña",
+            $"¿Resetear la contraseña de {u.COD_USUARIO}? El usuario deberá definir una nueva en su próximo ingreso.",
+            yesText: "Resetear", cancelText: "Cancelar");
+        if (confirm != true) return;
+
+        var (ok, msg) = await UsuarioService.ResetPasswordAsync(new ResetPasswordRequest { COD_USUARIO = u.COD_USUARIO });
+        if (ok) Snackbar.Add("Contraseña reseteada. El usuario deberá cambiarla al ingresar.", Severity.Success);
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(Usuarios));
+    }
+
+    /// <summary>
+    /// Abre el diálogo para establecer una contraseña específica a OTRO usuario
+    /// (botón "Cambiar Password" de la grilla). El backend exige que el rol activo
+    /// tenga este botón habilitado para permitir cambiar la de alguien distinto.
+    /// </summary>
+    private async Task OpenCambiarPasswordOtro(Usuario u)
+    {
+        if (string.IsNullOrWhiteSpace(u.COD_USUARIO)) return;
+        string? codComplejidad = null;
+        if (!string.IsNullOrWhiteSpace(u.COD_PERFIL_USUARIO))
+        {
+            var perfil = await PerfilService.GetByIdAsync(u.COD_PERFIL_USUARIO);
+            codComplejidad = perfil?.COD_PASSWORD_COMPLEJIDAD;
+        }
+        await DialogService.ShowAsync<CambiarPasswordDialog>($"Cambiar contraseña · {u.COD_USUARIO}",
+            new DialogParameters { ["CodUsuario"] = u.COD_USUARIO, ["CodComplejidad"] = codComplejidad },
+            new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task ResetIntentos(Usuario u)
+    {
+        var confirm = await DialogService.ShowMessageBox("Resetear intentos",
+            $"¿Resetear los intentos fallidos de '{u.COD_USUARIO}'?",
+            yesText: "Resetear", cancelText: "Cancelar");
+        if (confirm == true)
+        {
+            var (ok, msg) = await UsuarioService.ResetIntentosAsync(u.COD_USUARIO);
+            if (ok) { Snackbar.Add("Intentos reseteados.", Severity.Success); u.NUM_INTENTOS = 0; }   // solo el campo afectado, sin recargar la lista
+            else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(Usuarios));
+        }
+    }
+
+    private async Task CambiarEstado(Usuario u)
+    {
+        var dlg = await DialogService.ShowAsync<CambiarEstadoDialog>("Cambiar estado",
+            new DialogParameters { ["Usuario"] = u },
+            new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        var result = await dlg.Result;
+        if (!result!.Canceled && result.Data is ValueTuple<int, string?> nuevo)
+        {
+            u.COD_ESTADO = nuevo.Item1;
+            u.DES_ESTADO = nuevo.Item2;
+        }
+    }
+
+    private async Task Delete(Usuario u)
+    {
+        var confirm = await DialogService.ShowMessageBox("Confirmar eliminación",
+            $"¿Eliminar al usuario '{u.COD_USUARIO}'? Esta acción no se puede deshacer.",
+            yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirm == true)
+        {
+            var (ok, msg) = await UsuarioService.DeleteAsync(u.COD_USUARIO);
+            if (ok) { Snackbar.Add("Usuario eliminado.", Severity.Success); _usuarios.RemoveAll(x => x.COD_USUARIO == u.COD_USUARIO); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(Usuarios));
+        }
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("SEGURIDAD.USUARIOS", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

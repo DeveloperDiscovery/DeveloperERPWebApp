@@ -1,0 +1,219 @@
+@using DisenoVersionModel = KONSolutions.Shared.Models.Ingenieria.DisenoVersion
+@using ClaseDesarrolloModel = KONSolutions.Shared.Models.Ingenieria.ClaseDesarrollo
+@using TipoDesarrolloModel = KONSolutions.Shared.Models.Ingenieria.TipoDesarrollo
+@using DisenoVersionRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(820px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Codigo="@(Item?.NUM_VERSION?.ToString())" Descripcion="@Item?.DES_VERSION" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            @* Todo el formulario usa flex (no MudGrid) para que el borde izquierdo de cada
+               fila coincida con el de los campos que van a ancho completo. *@
+            <div class="d-flex gap-3" style="align-items:flex-start;">
+                <div style="flex:1;min-width:0;">
+                    @* El diseño llega fijo desde la pantalla: es parte de la clave compuesta. *@
+                    <MudTextField Value="@DisenoTexto" Label="Diseño"
+                                  Variant="Variant.Outlined" Disabled="true"
+                                  Class="mb-3" Margin="Margin.Normal" />
+                </div>
+                <div style="width:160px;flex-shrink:0;">
+                    @* El SP la calcula solo (MAX(NUM_VERSION)+1 dentro del propio INSERT):
+                       lo que se mande acá al crear se descarta. Se muestra de solo lectura. *@
+                    <MudTextField Value="@(_esNuevo ? "(automático)" : _model.NUM_VERSION?.ToString())" Label="Versión"
+                                  Variant="Variant.Outlined" Margin="Margin.Normal" Class="mb-3"
+                                  Disabled="true" />
+                </div>
+            </div>
+
+            <CampoTexto Tabla="INGENIERIA.DISENOS_VERSION" Columna="DES_VERSION"
+                        Label="Descripción de la versión"
+                        @bind-Value="_model.DES_VERSION"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            <div class="d-flex gap-3" style="align-items:flex-start;">
+                <div style="flex:1;min-width:0;">
+                    <AriaCombo TItem="ComboboxItem" Items="_clases"
+                               TextFunc="@(c => $"{c.Id} - {c.Texto}")" ValueFunc="@(c => c.Id)"
+                               Value="@_model.COD_CLASE_DESARROLLO" ValueChanged="OnClaseChanged"
+                               Label="Clase de desarrollo" Disabled="_readonly" />
+                </div>
+                <div style="flex:1;min-width:0;">
+                    @* Los tipos dependen de la clase: se recargan cada vez que cambia. *@
+                    <AriaCombo TItem="ComboboxItem" Items="_tipos"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_DESARROLLO"
+                               Label="Tipo de desarrollo" Disabled="@(_readonly || _clases.Count == 0)" />
+                </div>
+            </div>
+
+            <AriaCombo TItem="ComboboxItem" Items="_rutas"
+                       TextFunc="@(r => $"{r.Id} - {r.Texto}")" ValueFunc="@(r => r.Id)"
+                       @bind-Value="_model.COD_RUTA_PRODUCCION"
+                       Label="Ruta de producción" Disabled="_readonly" Class="mb-3" />
+
+            <CampoTextoEstable @bind-Value="_model.DES_OBSERVACIONES" Label="Observaciones"
+                          Variant="Variant.Outlined" Lines="3" Class="mb-3"
+                          Margin="Margin.Normal" Disabled="_readonly" />
+
+            <EstadoCombo DesTabla="INGENIERIA.DISENOS_VERSION"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public DisenoVersionModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public string CodDiseno { get; set; } = "";
+    [Parameter] public string? DesDiseno { get; set; }
+
+    private DisenoVersionModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _clases = new();
+    private List<ComboboxItem> _tipos  = new();
+    private List<ComboboxItem> _rutas  = new();
+
+    private string DisenoTexto => string.IsNullOrWhiteSpace(DesDiseno) ? CodDiseno : $"{CodDiseno} - {DesDiseno}";
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        _model.COD_DISENO = CodDiseno;
+    }
+
+    private void MapearDesdeModelo(DisenoVersionModel m)
+    {
+        _model = new DisenoVersionModel
+        {
+            COD_DISENO           = m.COD_DISENO,
+            NUM_VERSION          = m.NUM_VERSION,
+            DES_VERSION          = m.DES_VERSION,
+            COD_CLASE_DESARROLLO = m.COD_CLASE_DESARROLLO,
+            COD_TIPO_DESARROLLO  = m.COD_TIPO_DESARROLLO,
+            COD_RUTA_PRODUCCION  = m.COD_RUTA_PRODUCCION,
+            DES_OBSERVACIONES    = m.DES_OBSERVACIONES,
+            COD_TIPO_ESTADO      = m.COD_TIPO_ESTADO,
+            COD_ESTADO           = m.COD_ESTADO,
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID — evita mostrar datos
+    /// desactualizados de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        try
+        {
+            var url = $"{DisenoVersionRoute.DisenosVersion}/{Uri.EscapeDataString(_model.COD_DISENO)}/{_model.NUM_VERSION}";
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<DisenoVersionModel>>(url);
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        await CargarClasesYRutasAsync();
+        if (!string.IsNullOrWhiteSpace(_model.COD_CLASE_DESARROLLO))
+            await CargarTiposAsync(_model.COD_CLASE_DESARROLLO!);
+    }
+
+    // /loadcombos (PROC_INGENIERIA_DISENOS_VERSIONES_LOADCOMBOS) trae en un solo roundtrip
+    // Clases de Desarrollo y Rutas de Producción — Tipos de Desarrollo queda aparte porque
+    // depende de la Clase elegida (combo encadenado, ver OnClaseChanged/CargarTiposAsync).
+    private async Task CargarClasesYRutasAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<KONSolutions.Shared.Models.Ingenieria.DisenosVersionLoadCombosResult>>(
+                DisenoVersionRoute.DisenosVersionLoadcombos);
+            _clases = r?.Data?.ClasesDesarrollo ?? new();
+            _rutas = r?.Data?.ProduccionRutas ?? new();
+        }
+        catch { _clases = new(); _rutas = new(); }
+    }
+
+    private async Task CargarTiposAsync(string codClase)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TipoDesarrolloModel>>>(
+                $"{DisenoVersionRoute.TiposDesarrollo}?codClaseDesarrollo={Uri.EscapeDataString(codClase)}");
+            _tipos = (r?.Data ?? new())
+                .Select(t => new ComboboxItem { Id = t.COD_TIPO_DESARROLLO, Texto = t.DES_TIPO_DESARROLLO })
+                .ToList();
+        }
+        catch { _tipos = new(); }
+    }
+
+
+    private async Task OnClaseChanged(string? codClase)
+    {
+        _model.COD_CLASE_DESARROLLO = codClase;
+        // Un tipo pertenece a una clase: al cambiarla el tipo anterior deja de ser válido.
+        _model.COD_TIPO_DESARROLLO = null;
+        _tipos = new();
+        if (!string.IsNullOrWhiteSpace(codClase)) await CargarTiposAsync(codClase);
+        StateHasChanged();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = DisenoVersionRoute.DisenosVersion;
+
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_DISENO)}/{_model.NUM_VERSION}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(DisenosVersionDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        // El SP INSERT es upsert: sirve tanto para crear como para modificar. Al crear,
+        // NUM_VERSION viaja en 0 — el SP lo recalcula solo (MAX(NUM_VERSION)+1) apenas el
+        // intento de UPDATE no encuentra fila; el valor que se mande acá no importa.
+        var dto = new
+        {
+            _model.COD_DISENO,
+            NUM_VERSION = _esNuevo ? 0 : _model.NUM_VERSION,
+            _model.DES_VERSION,
+            _model.COD_CLASE_DESARROLLO, _model.COD_TIPO_DESARROLLO,
+            _model.COD_RUTA_PRODUCCION, _model.DES_OBSERVACIONES,
+            _model.COD_TIPO_ESTADO, _model.COD_ESTADO
+        };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(DisenosVersionDialog), nameof(Submit));
+    }
+}

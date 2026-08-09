@@ -1,0 +1,102 @@
+@page "/sistema/genera-sps-text"
+@attribute [Authorize]
+@using System.Net.Http.Json
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject ISnackbar Snackbar
+
+<PageTitle>Generar TXT de SPs · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Generar TXT de Stored Procedures" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+            Exporta el texto de los SPs que empiecen con el prefijo indicado, más la estructura de una tabla, a un
+            archivo .txt en la ruta configurada con la llave KEY_PATH_FILE_SISTEMAS_REPOSITORY.
+        </MudText>
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);max-width:640px;" Class="pa-4 sps-form-paper">
+    <CampoTextoEstable @bind-Value="_prefijoSp" Label="Prefijo de Stored Procedure"
+                  Placeholder="Ej: PROC_ESPECIFICACIONES_TECNICAS" Variant="Variant.Outlined"
+                  Immediate="true" Class="mb-4" />
+    <CampoTextoEstable @bind-Value="_nombreTabla" Label="Nombre de tabla (opcional)"
+                  Placeholder="Ej: ESPECIFICACIONES_TECNICAS" Variant="Variant.Outlined"
+                  Immediate="true" Class="mb-4" />
+
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.TextSnippet"
+               Disabled="@(_generando || string.IsNullOrWhiteSpace(_prefijoSp))" OnClick="Generar">
+        @(_generando ? "Generando..." : "Generar TXT")
+    </MudButton>
+
+    @if (!string.IsNullOrEmpty(_ultimaRuta))
+    {
+        <MudAlert Severity="Severity.Success" Class="mt-4" Dense="true">
+            Archivo generado (@_ultimaCantidadSps SP(s)@(_ultimaTablaEncontrada ? " · tabla encontrada" : "")):
+            <div class="mono" style="word-break:break-all;">@_ultimaRuta</div>
+        </MudAlert>
+    }
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private string _prefijoSp = "";
+    private string _nombreTabla = "";
+    private bool _generando;
+    private string? _ultimaRuta;
+    private int _ultimaCantidadSps;
+    private bool _ultimaTablaEncontrada;
+
+    private class GenerarSpsTextRequest
+    {
+        public string PrefijoSp { get; set; } = "";
+        public string? NombreTabla { get; set; }
+    }
+
+    private class GenerarSpsTextResult
+    {
+        public string RutaArchivo { get; set; } = "";
+        public int CantidadSps { get; set; }
+        public bool TablaEncontrada { get; set; }
+    }
+
+    private async Task Generar()
+    {
+        _generando = true;
+        _ultimaRuta = null;
+        try
+        {
+            var dto = new GenerarSpsTextRequest
+            {
+                PrefijoSp = _prefijoSp.Trim(),
+                NombreTabla = string.IsNullOrWhiteSpace(_nombreTabla) ? null : _nombreTabla.Trim()
+            };
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Sistema.GenerarSpsText, dto);
+            var r = await resp.Content.ReadFromJsonAsync<ApiResponse<GenerarSpsTextResult>>();
+
+            if (resp.IsSuccessStatusCode && r?.Data is not null)
+            {
+                _ultimaRuta = r.Data.RutaArchivo;
+                _ultimaCantidadSps = r.Data.CantidadSps;
+                _ultimaTablaEncontrada = r.Data.TablaEncontrada;
+                Snackbar.Add(r.Message, Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add(r?.Message ?? "No se pudo generar el archivo.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _generando = false;
+        }
+    }
+}

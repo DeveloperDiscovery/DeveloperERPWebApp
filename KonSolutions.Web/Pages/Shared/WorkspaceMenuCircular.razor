@@ -1,0 +1,445 @@
+@* Menú circular multi-anillo: cada aplicación ocupa un anillo completo.
+   El orden y cantidad de anillos depende del orden en que llegan los grupos del SP. *@
+
+<style>
+    /* El anillo de la aplicación clicada gira a la derecha: dos vueltas (1s c/u) y una de
+       vuelta a la izquierda (1s) — termina en la misma orientación visual. Los demás
+       anillos giran en espejo (sentido contrario). Velocidad angular constante, 1s/vuelta. */
+    @@keyframes wmc-ring-spin {
+        0%      { transform: rotate(0deg); }
+        66.667% { transform: rotate(720deg); }
+        100%    { transform: rotate(360deg); }
+    }
+    @@keyframes wmc-ring-spin-reverse {
+        0%      { transform: rotate(0deg); }
+        66.667% { transform: rotate(-720deg); }
+        100%    { transform: rotate(-360deg); }
+    }
+    .wmc-ring-spin         { animation: wmc-ring-spin 3s linear; }
+    .wmc-ring-spin-reverse { animation: wmc-ring-spin-reverse 3s linear; }
+    @@media (prefers-reduced-motion: reduce) {
+        .wmc-ring-spin, .wmc-ring-spin-reverse { animation: none; }
+    }
+</style>
+
+<div style="display:flex;align-items:safe center;justify-content:safe center;width:100%;overflow:auto;padding:12px;box-sizing:border-box;">
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 @_svgSize.ToString("F0",Inv) @_svgSize.ToString("F0",Inv)"
+     width="@((_svgSize * Escala).ToString("F0",Inv))" height="@((_svgSize * Escala).ToString("F0",Inv))"
+     style="display:block;overflow:visible;flex-shrink:0;"
+     @oncontextmenu="@(() => { })" @oncontextmenu:preventDefault="true">
+
+    @{ var cx = _svgSize / 2.0; var cy = _svgSize / 2.0; }
+
+    @* ── Vista resumen: una burbuja por aplicación (sin gajos). Clic en una burbuja
+       "entra" a esa app y se muestra su anillo con gajos (igual que el modo detallado,
+       pero solo para esa app); clic en el centro vuelve al resumen. ── *@
+    @if (ModoResumen && _grupoExpandido is null)
+    {
+        var n      = Grupos.Count;
+        var orbitR = OrbitR(n);
+        for (int gi = 0; gi < n; gi++)
+        {
+            var grupo  = Grupos[gi];
+            var angle  = StartAngle + gi * (360.0 / n);
+            var rad    = angle * Math.PI / 180.0;
+            var bx     = cx + orbitR * Math.Cos(rad);
+            var by     = cy + orbitR * Math.Sin(rad);
+            var isH    = _hoverApp == grupo.CodApp;
+            var fill   = grupo.BackColor.Length > 0 ? grupo.BackColor : $"hsl({(gi * 47) % 360},45%,32%)";
+            var localG = grupo;
+
+            <g style="cursor:pointer;transition:transform .12s ease;transform-origin:@(bx.ToString("F1",Inv))px @(by.ToString("F1",Inv))px;transform:@(isH ? "scale(1.08)" : "");"
+               @onclick="@(() => { _grupoExpandido = localG.CodApp; Redibujar(); })"
+               @onmouseenter="@(() => { _hoverApp = localG.CodApp; Redibujar(); })"
+               @onmouseleave="@(() => { _hoverApp = null; Redibujar(); })">
+                <polygon points="@HexPoints(bx, by, BubbleR)"
+                         fill="@fill" stroke="@(isH ? "#fff" : "rgba(255,255,255,.25)")" stroke-width="@(isH ? 2 : 1)"
+                         stroke-linejoin="round" />
+                <title>@grupo.NombreApp (@grupo.Tiles.Count)</title>
+                @if (!string.IsNullOrEmpty(grupo.IconoApp))
+                {
+                    var iconSize = BubbleR * 1.1;
+                    <image href="data:image/png;base64,@grupo.IconoApp"
+                           x="@((bx - iconSize / 2).ToString("F1", Inv))"
+                           y="@((by - iconSize / 2).ToString("F1", Inv))"
+                           width="@(iconSize.ToString("F1", Inv))" height="@(iconSize.ToString("F1", Inv))"
+                           style="pointer-events:none;" />
+                }
+                else
+                {
+                    var side = BubbleR * 1.1;
+                    <foreignObject x="@((bx - side / 2).ToString("F1", Inv))" y="@((by - side / 2).ToString("F1", Inv))"
+                                   width="@(side.ToString("F1", Inv))" height="@(side.ToString("F1", Inv))" style="pointer-events:none;overflow:visible;">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
+                            <MudIcon Icon="@Icons.Material.Filled.Apps" Style="@($"color:white;font-size:{(BubbleR).ToString("F0",Inv)}px;")" />
+                        </div>
+                    </foreignObject>
+                }
+                <svg:text x="@bx.ToString("F1",Inv)" y="@((by + BubbleR + 14).ToString("F1",Inv))"
+                      fill="@(grupo.ForeColor.Length > 0 ? grupo.ForeColor : "rgba(255,255,255,.65)")"
+                      font-size="10" font-family="monospace" font-weight="700"
+                      text-anchor="middle" style="user-select:none;">
+                    @grupo.NombreApp.ToUpper()
+                </svg:text>
+            </g>
+        }
+    }
+
+    @* Anillos — uno por aplicación (modo detallado), o solo la app "entrada" desde el
+       resumen. Cada anillo gira en su propio <g>: el de la opción clicada en un sentido,
+       el resto en espejo (sentido contrario). *@
+    @for (int gi = 0; gi < _gruposMostrados.Count; gi++)
+    {
+        var grupo  = _gruposMostrados[gi];
+        var rInner = CenterR + gi * (RingWidth + RingGap);
+        var rOuter = rInner + RingWidth;
+        var tiles  = grupo.Tiles;
+        var count  = tiles.Count;
+        if (count == 0) continue;
+
+        var sliceDeg = Math.Min(SliceMax, (360.0 - GapDeg * count) / count);
+        var startA   = StartAngle;
+
+        var claseAnillo = _spinning is null ? ""
+                         : gi == _spinningGrupoIdx ? "wmc-ring-spin" : "wmc-ring-spin-reverse";
+        <g class="@claseAnillo" style="transform-origin:@(cx.ToString("F1",Inv))px @(cy.ToString("F1",Inv))px;">
+
+        @* Fondo del anillo (color de la aplicación como banda base) *@
+        @if (!string.IsNullOrWhiteSpace(grupo.BackColor))
+        {
+            var bgPath = ArcPath(rInner, rOuter, 0, 359.99, cx, cy);
+            <path d="@bgPath" fill="@grupo.BackColor" opacity="0.18" stroke="none" />
+        }
+
+        @for (int ti = 0; ti < count; ti++)
+        {
+            var tile   = tiles[ti];
+            var aStart = startA + ti * (sliceDeg + GapDeg);
+            var aEnd   = aStart + sliceDeg;
+            var aMid   = (aStart + aEnd) / 2.0;
+            var path   = ArcPath(rInner, rOuter, aStart, aEnd, cx, cy);
+            var lx     = cx + (rInner + rOuter) / 2.0 * Math.Cos(aMid * Math.PI / 180.0);
+            var ly     = cy + (rInner + rOuter) / 2.0 * Math.Sin(aMid * Math.PI / 180.0);
+            // Radio del ícono acotado por dos límites, para que nunca sobrepase el borde
+            // de la porción: el ancho radial del anillo, y el ancho angular (cuerda) del arco.
+            var rMid       = (rInner + rOuter) / 2.0;
+            var cuerdaMedia = rMid * Math.Sin(sliceDeg * Math.PI / 360.0) * 0.85;
+            var iconR  = Math.Min((rOuter - rInner) * 0.32, cuerdaMedia);
+            var ox     = lx; var oy = ly;
+            var isH    = _hover == tile; var isP = _press == tile;
+            var localT = tile;
+
+            var xform  = isP
+                ? $"scale(0.96) translate({(cx-ox)*0.04:F2} {(cy-oy)*0.04:F2})"
+                : isH
+                    ? $"scale(1.06) translate({(cx-ox)*(-0.06):F2} {(cy-oy)*(-0.06):F2})"
+                    : "";
+            var filt   = isH && !isP ? "drop-shadow(2px 2px 0px rgba(0,0,0,.6))" : "";
+            var fill   = isP ? "#1a1a1a"
+                       : isH ? AclararColor(tile.BackColor.Length > 0 ? tile.BackColor : grupo.BackColor)
+                       : tile.BackColor.Length > 0 ? tile.BackColor
+                       : grupo.BackColor.Length > 0 ? grupo.BackColor
+                       : $"hsl({(gi * 47) % 360},45%,32%)";
+
+            <g style="cursor:pointer;transition:transform .12s ease,filter .12s ease;transform-origin:@(ox.ToString("F1",Inv))px @(oy.ToString("F1",Inv))px;transform:@xform;filter:@filt;"
+               @onclick="@(() => Clic(localT))"
+               @onmouseenter="@(() => { _hover = localT; Redibujar(); })"
+               @onmouseleave="@(() => { _hover = null; _press = null; Redibujar(); })"
+               @onmousedown="@(() => { _press = localT; Redibujar(); })"
+               @onmouseup="@(() => { _press = null; Redibujar(); })"
+               @oncontextmenu="@(e => OnTileContext.InvokeAsync((e, localT)))"
+               @oncontextmenu:preventDefault="true">
+
+                <path d="@path" fill="@fill" stroke="none" style="transition:fill .12s;" />
+
+                @* Tooltip nativo del navegador: el nombre solo aparece al pasar el mouse *@
+                <title>@tile.Nombre</title>
+
+                @* Icono (propio de la BD, o uno sugerido según el nombre si no tiene), acotado
+                   al tamaño de la porción — nunca sobrepasa su borde. Todos en color blanco. *@
+                @if (tile.IconoOpcion is not null)
+                {
+                    var ix = (lx - iconR).ToString("F1", Inv);
+                    var iy = (ly - iconR).ToString("F1", Inv);
+                    var iw = (iconR * 2).ToString("F1", Inv);
+                    <image href="data:image/png;base64,@tile.IconoOpcion"
+                           x="@ix" y="@iy" width="@iw" height="@iw"
+                           style="pointer-events:none;" />
+                }
+                else
+                {
+                    var side = (iconR * 2).ToString("F1", Inv);
+                    <foreignObject x="@((lx - iconR).ToString("F1", Inv))" y="@((ly - iconR).ToString("F1", Inv))"
+                                   width="@side" height="@side" style="pointer-events:none;overflow:visible;">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
+                            <MudIcon Icon="@IconoSugerido(tile.Nombre)" Style="@($"color:white;font-size:{(iconR*1.6).ToString("F0",Inv)}px;")" />
+                        </div>
+                    </foreignObject>
+                }
+            </g>
+        }
+
+        @* Etiqueta del anillo (nombre de la app) al borde exterior *@
+        @{
+            var labelR = rOuter + 12;
+            var labelX = cx;
+            var labelY = cy - labelR;
+        }
+        <svg:text x="@labelX.ToString("F1",Inv)" y="@labelY.ToString("F1",Inv)"
+              fill="@(grupo.ForeColor.Length > 0 ? grupo.ForeColor : "rgba(255,255,255,.45)")"
+              font-size="9" font-family="monospace" font-weight="700"
+              text-anchor="middle" style="user-select:none;pointer-events:none;">
+            @grupo.NombreApp.ToUpper()
+        </svg:text>
+        </g>
+    }
+
+    @* Centro (no gira) — en modo resumen, con una app "entrada", vuelve al resumen al hacer clic *@
+    <g style="@(ModoResumen && _grupoExpandido is not null ? "cursor:pointer;" : "")"
+       @onclick="@(() => { if (ModoResumen && _grupoExpandido is not null) { _grupoExpandido = null; Redibujar(); } })">
+        <circle cx="@cx.ToString("F0")" cy="@cy.ToString("F0")" r="@((CenterR - 4).ToString("F0"))"
+                fill="#1a1a1a" stroke="#2a2a2a" stroke-width="2" />
+        @if (ModoResumen && _grupoExpandido is not null)
+        {
+            <foreignObject x="@((cx - (CenterR - 4)).ToString("F1", Inv))" y="@((cy - (CenterR - 4)).ToString("F1", Inv))"
+                           width="@(((CenterR - 4) * 2).ToString("F1", Inv))" height="@(((CenterR - 4) * 2).ToString("F1", Inv))" style="overflow:visible;">
+                <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
+                    <MudIcon Icon="@Icons.Material.Filled.ArrowBack" Style="@($"color:rgba(255,255,255,.6);font-size:{((CenterR - 4)).ToString("F0",Inv)}px;")" />
+                </div>
+            </foreignObject>
+        }
+        else if (!string.IsNullOrEmpty(CentroIcono))
+        {
+            var iconSize = (CenterR - 4) * 1.1;
+            <image href="data:image/png;base64,@CentroIcono"
+                   x="@((cx - iconSize / 2).ToString("F1", Inv))"
+                   y="@((cy - iconSize / 2).ToString("F1", Inv))"
+                   width="@(iconSize.ToString("F1", Inv))"
+                   height="@(iconSize.ToString("F1", Inv))"
+                   style="pointer-events:none;" />
+        }
+        else
+        {
+            <svg:text x="@cx.ToString("F0")" y="@((cy + 4).ToString("F0"))"
+                  fill="rgba(255,255,255,.25)" font-size="9" font-family="monospace"
+                  text-anchor="middle" style="user-select:none;">@CentroLabel</svg:text>
+        }
+    </g>
+
+</svg>
+</div>
+
+@code {
+    public class TileVm
+    {
+        public string  CodApp      { get; set; } = "";
+        public string  CodOpcion   { get; set; } = "";
+        public string  Nombre      { get; set; } = "";
+        public string? Ruta        { get; set; }
+        public string? IconoOpcion { get; set; }
+        public int     Orden       { get; set; }
+        public string  BackColor   { get; set; } = "";
+        public string  ForeColor   { get; set; } = "";
+        public bool    EsApp       { get; set; }
+    }
+
+    public class GrupoVm
+    {
+        public string       CodApp    { get; set; } = "";
+        public string       NombreApp { get; set; } = "";
+        public string?      IconoApp  { get; set; }
+        public string       BackColor { get; set; } = "";
+        public string       ForeColor { get; set; } = "";
+        public List<TileVm> Tiles     { get; set; } = new();
+    }
+
+    [Parameter] public List<GrupoVm> Grupos { get; set; } = new();
+    /// <summary>Se invoca apenas empieza el giro: abre y activa la pestaña destino de inmediato
+    /// (el overlay de "cargando" del layout tapa la transición mientras gira el anillo).</summary>
+    [Parameter] public EventCallback<TileVm> OnTileClick { get; set; }
+    [Parameter] public EventCallback<(MouseEventArgs, TileVm)> OnTileContext { get; set; }
+    [Parameter] public double Escala { get; set; } = 1.0;
+    [Parameter] public string? CentroIcono { get; set; }
+    [Parameter] public string  CentroLabel { get; set; } = "favoritos";
+    /// <summary>Vista resumen: una burbuja por aplicación en vez de anillos con gajos.
+    /// Al hacer clic en una burbuja se "entra" a esa app (anillo con gajos, solo esa);
+    /// clic en el centro vuelve al resumen.</summary>
+    [Parameter] public bool ModoResumen { get; set; }
+
+    private string? _grupoExpandido;
+    private string? _hoverApp;
+
+    // ── Optimización de render ──
+    // Este componente dibuja un SVG con decenas de tiles (cada uno con su propio MudIcon):
+    // re-renderizarlo entero es costoso. Por defecto Blazor vuelve a renderizar TODO hijo
+    // cada vez que el padre llama StateHasChanged (p.ej. al abrir el menú contextual de
+    // favoritos), aunque ninguno de los parámetros de este componente haya cambiado — eso
+    // era lo que hacía sentir lento el menú contextual. Con ShouldRender solo se permite
+    // el render si cambiaron los parámetros (Grupos/Escala/etc.) o si el cambio se originó
+    // acá adentro (hover/press/spin/expandir), marcado explícitamente vía Redibujar().
+    private bool _pendienteRedibujar = true;
+    private List<GrupoVm>? _ultimosGrupos;
+    private double _ultimaEscala;
+    private bool _ultimoModoResumen;
+    private string? _ultimoCentroIcono;
+    private string _ultimoCentroLabel = "";
+
+    private void Redibujar() { _pendienteRedibujar = true; StateHasChanged(); }
+
+    protected override bool ShouldRender()
+    {
+        var parametrosIguales =
+            ReferenceEquals(_ultimosGrupos, Grupos) &&
+            _ultimaEscala == Escala &&
+            _ultimoModoResumen == ModoResumen &&
+            _ultimoCentroIcono == CentroIcono &&
+            _ultimoCentroLabel == CentroLabel;
+
+        _ultimosGrupos = Grupos; _ultimaEscala = Escala; _ultimoModoResumen = ModoResumen;
+        _ultimoCentroIcono = CentroIcono; _ultimoCentroLabel = CentroLabel;
+
+        if (_pendienteRedibujar) { _pendienteRedibujar = false; return true; }
+        return !parametrosIguales;
+    }
+
+    /// <summary>Grupos que realmente dibuja el anillo con gajos: todos (modo detallado),
+    /// solo la app "entrada" (resumen + drill-in), o ninguno (resumen sin entrar aún).</summary>
+    private List<GrupoVm> _gruposMostrados =>
+        !ModoResumen ? Grupos
+        : _grupoExpandido is null ? new List<GrupoVm>()
+        : Grupos.Where(g => g.CodApp == _grupoExpandido).ToList();
+
+    // Geometría base
+    private const double CenterR   = 70;
+    private const double BubbleR    = 60;
+    private const double RingWidth  = 95;
+    private const double RingGap    = 6;
+    private const double SliceMax   = 55;
+    private const double GapDeg     = 2;
+    private const double StartAngle = -90;
+
+    private static readonly System.Globalization.CultureInfo Inv =
+        System.Globalization.CultureInfo.InvariantCulture;
+
+    // Tamaño total del SVG: según cantidad de anillos visibles, o el orbital de burbujas
+    // en el resumen (sin app "entrada" todavía) — lo que sea más grande, para que el
+    // switch no achique de golpe el lienzo.
+    private double _svgSize
+    {
+        get
+        {
+            if (Grupos.Count == 0) return 300;
+            var porAnillos  = (CenterR + Math.Max(1, _gruposMostrados.Count) * (RingWidth + RingGap) + 30) * 2;
+            var porBurbujas = (OrbitR(Grupos.Count) + BubbleR + 40) * 2;
+            return ModoResumen && _grupoExpandido is null ? porBurbujas : porAnillos;
+        }
+    }
+
+    /// <summary>Radio de la órbita de burbujas (vista resumen): con pocas apps usa el radio
+    /// base fijo de siempre; a partir de cierta cantidad, crece para que la distancia entre
+    /// centros de burbujas consecutivas alcance para que no se superpongan (cuerda del
+    /// polígono regular de n lados >= diámetro de burbuja + separación mínima).</summary>
+    private static double OrbitR(int n)
+    {
+        const double baseR = CenterR + BubbleR + 30;
+        if (n < 2) return baseR;
+        const double separacionMinima = 16;
+        var requerido = (BubbleR + separacionMinima / 2.0) / Math.Sin(Math.PI / n);
+        return Math.Max(baseR, requerido);
+    }
+
+    private TileVm? _hover;
+    private TileVm? _press;
+    private TileVm? _spinning;
+    private int?    _spinningGrupoIdx;
+
+    /// <summary>Gira el anillo de la opción clicada (dos vueltas a la derecha, una a la
+    /// izquierda, 1s cada una); el resto de los anillos gira en espejo (sentido contrario).
+    /// Al terminar el giro, recién se abre y activa la pestaña destino.</summary>
+    private async Task Clic(TileVm tile)
+    {
+        if (_spinning is not null) return;
+        _press = null;
+        _spinning = tile;
+        _spinningGrupoIdx = _gruposMostrados.FindIndex(g => g.Tiles.Contains(tile));
+        Redibujar();
+        await Task.Delay(3000);
+        _spinning = null;
+        _spinningGrupoIdx = null;
+        await OnTileClick.InvokeAsync(tile);
+    }
+
+    /// <summary>Puntos de un hexágono regular (punta arriba) centrado en (cx,cy) con radio
+    /// r — reemplaza las burbujas circulares de la vista resumen.</summary>
+    private static string HexPoints(double cx, double cy, double r)
+    {
+        var pts = new string[6];
+        for (int i = 0; i < 6; i++)
+        {
+            var ang = (Math.PI / 180.0) * (60 * i - 90);
+            pts[i] = $"{(cx + r * Math.Cos(ang)).ToString("F1", Inv)},{(cy + r * Math.Sin(ang)).ToString("F1", Inv)}";
+        }
+        return string.Join(" ", pts);
+    }
+
+    private static string ArcPath(double ri, double ro, double a1, double a2, double cx, double cy)
+    {
+        var r1  = a1 * Math.PI / 180.0;
+        var r2  = a2 * Math.PI / 180.0;
+        var laf = (a2 - a1) > 180 ? 1 : 0;
+        string F(double v) => v.ToString("F2", Inv);
+        return $"M {F(cx+ro*Math.Cos(r1))} {F(cy+ro*Math.Sin(r1))} " +
+               $"A {F(ro)} {F(ro)} 0 {laf} 1 {F(cx+ro*Math.Cos(r2))} {F(cy+ro*Math.Sin(r2))} " +
+               $"L {F(cx+ri*Math.Cos(r2))} {F(cy+ri*Math.Sin(r2))} " +
+               $"A {F(ri)} {F(ri)} 0 {laf} 0 {F(cx+ri*Math.Cos(r1))} {F(cy+ri*Math.Sin(r1))} Z";
+    }
+
+    // Aclara levemente un color hex en hover (simplificado: mezcla con blanco)
+    private static string AclararColor(string hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex) || hex.Length < 7) return "#5a5a5a";
+        try
+        {
+            var r = Convert.ToInt32(hex.Substring(1, 2), 16);
+            var g = Convert.ToInt32(hex.Substring(3, 2), 16);
+            var b = Convert.ToInt32(hex.Substring(5, 2), 16);
+            return $"#{Math.Min(255,r+40):X2}{Math.Min(255,g+40):X2}{Math.Min(255,b+40):X2}";
+        }
+        catch { return "#5a5a5a"; }
+    }
+
+    /// <summary>Ícono genérico sugerido por palabras clave del nombre, para opciones sin ícono propio en la BD.</summary>
+    private static string IconoSugerido(string nombre)
+    {
+        var n = (nombre ?? "").ToLowerInvariant();
+        if (n.Contains("usuario"))                              return Icons.Material.Filled.People;
+        if (n.Contains("perfil"))                                return Icons.Material.Filled.Badge;
+        if (n.Contains("rol"))                                   return Icons.Material.Filled.AdminPanelSettings;
+        if (n.Contains("aplicacion") || n.Contains("aplicación")) return Icons.Material.Filled.Apps;
+        if (n.Contains("opcion") || n.Contains("opción") || n.Contains("menú") || n.Contains("menu")) return Icons.Material.Filled.AccountTree;
+        if (n.Contains("password") || n.Contains("contraseñ"))   return Icons.Material.Filled.Password;
+        if (n.Contains("boton") || n.Contains("botón"))          return Icons.Material.Filled.SmartButton;
+        if (n.Contains("moneda") || n.Contains("cambio"))        return Icons.Material.Filled.AttachMoney;
+        if (n.Contains("entidad") || n.Contains("cliente") || n.Contains("proveedor")) return Icons.Material.Filled.Business;
+        if (n.Contains("producto") || n.Contains("familia") || n.Contains("grupo"))    return Icons.Material.Filled.Category;
+        if (n.Contains("unidad") || n.Contains("medida") || n.Contains("magnitud"))    return Icons.Material.Filled.Straighten;
+        if (n.Contains("equivalencia"))                          return Icons.Material.Filled.CompareArrows;
+        if (n.Contains("estado"))                                return Icons.Material.Filled.Label;
+        if (n.Contains("motivo"))                                return Icons.Material.Filled.Category;
+        if (n.Contains("pais") || n.Contains("país"))            return Icons.Material.Filled.Flag;
+        if (n.Contains("ubigeo") || n.Contains("ciudad"))        return Icons.Material.Filled.LocationOn;
+        if (n.Contains("sexo"))                                  return Icons.Material.Filled.People;
+        if (n.Contains("documento"))                             return Icons.Material.Filled.Badge;
+        if (n.Contains("via") || n.Contains("vía"))              return Icons.Material.Filled.Signpost;
+        if (n.Contains("especificacion") || n.Contains("especificación")) return Icons.Material.Filled.Rule;
+        if (n.Contains("defecto"))                               return Icons.Material.Filled.ReportProblem;
+        if (n.Contains("log") || n.Contains("error"))            return Icons.Material.Filled.BugReport;
+        if (n.Contains("configuracion") || n.Contains("configuración")) return Icons.Material.Filled.Settings;
+        if (n.Contains("facial") || n.Contains("registro"))      return Icons.Material.Filled.FaceRetouchingNatural;
+        if (n.Contains("snippet") || n.Contains("codigo") || n.Contains("código")) return Icons.Material.Filled.Code;
+        if (n.Contains("asignacion") || n.Contains("asignación")) return Icons.Material.Filled.GroupAdd;
+        if (n.Contains("pantalla") || n.Contains("diseñ"))       return Icons.Material.Filled.DesignServices;
+        return Icons.Material.Filled.Dashboard;
+    }
+}

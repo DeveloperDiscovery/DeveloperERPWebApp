@@ -1,0 +1,300 @@
+@using TiposMovimientoModel = KONSolutions.Shared.Models.Logistica.TiposMovimiento
+@using LogisticaRoute = KONSolutions.Web.Services.ApiRoutes.Logistica
+@using EstandarRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Class="dialog-alto-ampliado">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_MOVIMIENTO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+        <div style="height:88.5vh;overflow-y:auto;padding-right:4px;">
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="@(_esNuevo ? 6 : 4)">
+                    <MudTextField Value="@DescripcionClase" Label="Clase de Movimiento" Variant="Variant.Outlined" Disabled="true" Class="mb-3" />
+                </MudItem>
+                @if (!_esNuevo)
+                {
+                    <MudItem xs="12" sm="4">
+                        @* COD_TIPO_MOVIMIENTO se genera automáticamente (correlativo por Clase de
+                           Movimiento, PROC_LOGISTICA_TIPOS_MOVIMIENTO_INSERT) — no se pide en Crear. *@
+                        <CampoTexto Tabla="LOGISTICA.TIPOS_MOVIMIENTO" Columna="COD_TIPO_MOVIMIENTO"
+                                    @bind-Value="_model.COD_TIPO_MOVIMIENTO" Disabled="true" />
+                    </MudItem>
+                }
+                <MudItem xs="12" sm="@(_esNuevo ? 6 : 4)">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposEntidad"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               @bind-Value="_model.COD_TIPO_ENTIDAD_ASOCIADA"
+                               Label="Tipo de Entidad Asociada" Disabled="_readonly" />
+                </MudItem>
+            </MudGrid>
+
+            <CampoTexto Tabla="LOGISTICA.TIPOS_MOVIMIENTO" Columna="DES_TIPO_MOVIMIENTO"
+                        @bind-Value="_model.DES_TIPO_MOVIMIENTO"
+                        Disabled="_readonly" />
+            <CampoTexto Tabla="LOGISTICA.TIPOS_MOVIMIENTO" Columna="DES_OBSERVACION"
+                        @bind-Value="_model.DES_OBSERVACION"
+                        Lines="3" Disabled="_readonly" />
+
+            @* El SP de combobox de esta misma tabla exige @COD_CLASE_MOVIMIENTO — se usa la
+               misma clase del registro para el "Tipo de Movimiento Sincronizado" (referencia a
+               otro Tipo de Movimiento dentro de la misma Clase). *@
+            <AriaCombo TItem="ComboboxItem" Items="_tiposMovimientoSincronizado"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       @bind-Value="_model.COD_TIPO_MOVIMIENTO_SINCRONIZADO"
+                       Label="Tipo de Movimiento Sincronizado" Disabled="_readonly" />
+
+            @* Tipo de estado que el movimiento aplica al documento relacionado
+               (LOGISTICA.TIPOS_MOVIMIENTO.COD_TIPO_ESTADO_RELACIONADO → ESTANDAR.TIPOS_ESTADOS). *@
+            <AriaCombo TItem="ComboboxItem" Items="_tiposEstado"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       Value="@(_model.COD_TIPO_ESTADO_RELACIONADO?.ToString())"
+                       ValueChanged="@(v => _model.COD_TIPO_ESTADO_RELACIONADO = int.TryParse(v, out var n) ? n : null)"
+                       Label="Tipo de Estado Relacionado" Disabled="_readonly" />
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposMotivo"
+                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                               Value="@(_model.COD_TIPO_MOTIVO_DESTINO?.ToString())"
+                               ValueChanged="OnTipoMotivoChanged"
+                               Label="Tipo de Motivo Destino" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_motivos"
+                               TextFunc="@(m => $"{m.Id} - {m.Texto}")" ValueFunc="@(m => m.Id)"
+                               Value="@(_model.COD_MOTIVO_DEFECTO?.ToString())"
+                               ValueChanged="@(v => _model.COD_MOTIVO_DEFECTO = int.TryParse(v, out var n) ? n : null)"
+                               Label="Motivo por Defecto" Disabled="@(_readonly || _model.COD_TIPO_MOTIVO_DESTINO is null)" />
+                </MudItem>
+            </MudGrid>
+
+            <div class="pet-grupo-box mb-3">
+                <MudText Typo="Typo.subtitle2" Class="pet-grupo-titulo">Comportamiento del Movimiento</MudText>
+                <div class="d-flex flex-wrap" style="gap:8px 24px;">
+                    @foreach (var s in _switches)
+                    {
+                        <div class="d-flex align-center gap-2">
+                            <MudIcon Icon="@s.Icon" Size="Size.Small" Style="opacity:.6;" />
+                            <MudText Typo="Typo.body2">@s.Label</MudText>
+                            <MudSwitch T="bool?" Value="@s.Get()" ValueChanged="@s.Set" Color="Color.Primary" Disabled="_readonly" />
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <EstadoCombo DesTabla="LOGISTICA.TIPOS_MOVIMIENTO"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+        </div>
+        <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+            <LeftContent>
+                <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                FecRegistro="@Item?.FEC_REGISTRO"
+                                CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+            </LeftContent>
+        </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposMovimientoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposMovimientoModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _tiposEntidad = new();
+    private List<ComboboxItem> _tiposMovimientoSincronizado = new();
+    private List<ComboboxItem> _tiposMotivo = new();
+    private List<ComboboxItem> _tiposEstado = new();
+    private List<ComboboxItem> _motivos = new();
+
+    /// <summary>"Código - Descripción" de la Clase de Movimiento — en Crear viene de
+    /// _claseSel (ver ClasesMovimiento.razor.AbrirTipo), en Editar/Ver de SHOWBYID.</summary>
+    private string DescripcionClase => string.IsNullOrWhiteSpace(_model.DES_CLASE_MOVIMIENTO)
+        ? _model.COD_CLASE_MOVIMIENTO
+        : $"{_model.COD_CLASE_MOVIMIENTO} - {_model.DES_CLASE_MOVIMIENTO}";
+
+    private (string Icon, string Label, Func<bool?> Get, Action<bool?> Set)[] _switches => new (string, string, Func<bool?>, Action<bool?>)[]
+    {
+        (Icons.Material.Filled.Add,               "Positivo",                        () => _model.FLG_POSITIVO,                      v => _model.FLG_POSITIVO = v),
+        (Icons.Material.Filled.SwapHoriz,          "Transferencia",                   () => _model.FLG_TRANSFERENCIA,                 v => _model.FLG_TRANSFERENCIA = v),
+        (Icons.Material.Filled.Storefront,         "Comercial",                       () => _model.FLG_COMERCIAL,                     v => _model.FLG_COMERCIAL = v),
+        (Icons.Material.Filled.KeyboardReturn,     "Devolución",                      () => _model.FLG_DEVOLUCION,                    v => _model.FLG_DEVOLUCION = v),
+        (Icons.Material.Filled.Cancel,             "Anulación",                       () => _model.FLG_ANULACION,                     v => _model.FLG_ANULACION = v),
+        (Icons.Material.Filled.Inventory2,         "Consignación",                    () => _model.FLG_CONSIGNACION,                  v => _model.FLG_CONSIGNACION = v),
+        (Icons.Material.Filled.Rule,               "Ajuste de Inventario",            () => _model.FLG_AJUSTE_INVENTARIO,             v => _model.FLG_AJUSTE_INVENTARIO = v),
+        (Icons.Material.Filled.ReceiptLong,        "Comprobante Relacionado",         () => _model.FLG_COMPROBANTE_RELACIONADO,       v => _model.FLG_COMPROBANTE_RELACIONADO = v),
+        (Icons.Material.Filled.AttachMoney,        "Valor de Inventario",             () => _model.FLG_VALOR_INVENTARIO,              v => _model.FLG_VALOR_INVENTARIO = v),
+        (Icons.Material.Filled.Work,               "Consigna Proyecto",               () => _model.FLG_CONSIGNA_PROYECTO,             v => _model.FLG_CONSIGNA_PROYECTO = v),
+        (Icons.Material.Filled.AccountBalance,     "Consigna Centro de Costo",        () => _model.FLG_CONSIGNA_CENTRO_COSTO,         v => _model.FLG_CONSIGNA_CENTRO_COSTO = v),
+        (Icons.Material.Filled.Numbers,            "Consigna Lote Control",           () => _model.FLG_CONSIGNA_LOTE_CONTROL,         v => _model.FLG_CONSIGNA_LOTE_CONTROL = v),
+        (Icons.Material.Filled.AutoMode,           "Destino Automático",              () => _model.FLG_DESTINO_AUTOMATICO,            v => _model.FLG_DESTINO_AUTOMATICO = v),
+        (Icons.Material.Filled.TaskAlt,            "Requiere Confirmación Recepción", () => _model.FLG_REQUIERE_CONFIRMACION_RECEPCION, v => _model.FLG_REQUIERE_CONFIRMACION_RECEPCION = v),
+        (Icons.Material.Filled.VerifiedUser,        "Control de Calidad",             () => _model.FLG_CONTROL_CALIDAD,               v => _model.FLG_CONTROL_CALIDAD = v),
+        (Icons.Material.Filled.Assignment,          "Requerimiento",                  () => _model.FLG_REQUERIMIENTO,                 v => _model.FLG_REQUERIMIENTO = v),
+        (Icons.Material.Filled.PrecisionManufacturing, "Producción",                  () => _model.FLG_PRODUCCION,                    v => _model.FLG_PRODUCCION = v),
+    };
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(TiposMovimientoModel m)
+    {
+        _model.COD_CLASE_MOVIMIENTO = m.COD_CLASE_MOVIMIENTO;
+        _model.DES_CLASE_MOVIMIENTO = m.DES_CLASE_MOVIMIENTO;
+        _model.COD_TIPO_MOVIMIENTO = m.COD_TIPO_MOVIMIENTO;
+        _model.DES_TIPO_MOVIMIENTO = m.DES_TIPO_MOVIMIENTO;
+        _model.COD_TIPO_ENTIDAD_ASOCIADA = m.COD_TIPO_ENTIDAD_ASOCIADA;
+        _model.FLG_POSITIVO = m.FLG_POSITIVO;
+        _model.FLG_TRANSFERENCIA = m.FLG_TRANSFERENCIA;
+        _model.FLG_COMERCIAL = m.FLG_COMERCIAL;
+        _model.FLG_DEVOLUCION = m.FLG_DEVOLUCION;
+        _model.FLG_ANULACION = m.FLG_ANULACION;
+        _model.FLG_CONSIGNACION = m.FLG_CONSIGNACION;
+        _model.FLG_AJUSTE_INVENTARIO = m.FLG_AJUSTE_INVENTARIO;
+        _model.FLG_COMPROBANTE_RELACIONADO = m.FLG_COMPROBANTE_RELACIONADO;
+        _model.FLG_VALOR_INVENTARIO = m.FLG_VALOR_INVENTARIO;
+        _model.FLG_CONSIGNA_PROYECTO = m.FLG_CONSIGNA_PROYECTO;
+        _model.FLG_CONSIGNA_CENTRO_COSTO = m.FLG_CONSIGNA_CENTRO_COSTO;
+        _model.FLG_CONSIGNA_LOTE_CONTROL = m.FLG_CONSIGNA_LOTE_CONTROL;
+        _model.FLG_DESTINO_AUTOMATICO = m.FLG_DESTINO_AUTOMATICO;
+        _model.FLG_REQUIERE_CONFIRMACION_RECEPCION = m.FLG_REQUIERE_CONFIRMACION_RECEPCION;
+        _model.FLG_CONTROL_CALIDAD = m.FLG_CONTROL_CALIDAD;
+        _model.FLG_REQUERIMIENTO = m.FLG_REQUERIMIENTO;
+        _model.FLG_PRODUCCION = m.FLG_PRODUCCION;
+        _model.COD_TIPO_MOVIMIENTO_SINCRONIZADO = m.COD_TIPO_MOVIMIENTO_SINCRONIZADO;
+        _model.DES_OBSERVACION = m.DES_OBSERVACION;
+        _model.COD_TIPO_ESTADO_RELACIONADO = m.COD_TIPO_ESTADO_RELACIONADO;
+        _model.COD_TIPO_MOTIVO_DESTINO = m.COD_TIPO_MOTIVO_DESTINO;
+        _model.COD_MOTIVO_DEFECTO = m.COD_MOTIVO_DEFECTO;
+        _model.COD_TIPO_ESTADO = m.COD_TIPO_ESTADO;
+        _model.COD_ESTADO = m.COD_ESTADO;
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID (clave compuesta) — se usa al abrir el
+    /// diálogo (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposMovimientoModel>(
+            $"{LogisticaRoute.TiposMovimiento}/{Uri.EscapeDataString(_model.COD_CLASE_MOVIMIENTO)}/{Uri.EscapeDataString(_model.COD_TIPO_MOVIMIENTO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        _tiposEntidad = await Http.SafeGetAsync<List<ComboboxItem>>(EstandarRoute.TiposEntidadesCombobox) ?? new();
+
+        // El SHOWCOMBOX de este SP no trae la descripción utilizable (ver TiposMovimientoRepository) —
+        // igual que en Motivos, se trae el listado completo (mismo endpoint que usa la grilla de
+        // ClasesMovimiento) y se mapea a ComboboxItem acá.
+        if (!string.IsNullOrEmpty(_model.COD_CLASE_MOVIMIENTO))
+        {
+            var tipos = await Http.SafeGetAsync<List<TiposMovimientoModel>>(
+                $"{LogisticaRoute.TiposMovimiento}?codClaseMovimiento={Uri.EscapeDataString(_model.COD_CLASE_MOVIMIENTO)}") ?? new();
+            _tiposMovimientoSincronizado = tipos
+                .Select(t => new ComboboxItem { Id = t.COD_TIPO_MOVIMIENTO, Texto = t.DES_TIPO_MOVIMIENTO ?? "" })
+                .ToList();
+        }
+
+        _tiposMotivo = await Http.SafeGetAsync<List<ComboboxItem>>(EstandarRoute.TiposMotivosCombobox) ?? new();
+        _tiposEstado = await Http.SafeGetAsync<List<ComboboxItem>>(EstandarRoute.TiposEstadosCombobox) ?? new();
+
+        if (_model.COD_TIPO_MOTIVO_DESTINO is not null)
+            await CargarMotivos(_model.COD_TIPO_MOTIVO_DESTINO.Value);
+    }
+
+    private async Task OnTipoMotivoChanged(string? val)
+    {
+        _model.COD_TIPO_MOTIVO_DESTINO = int.TryParse(val, out var n) ? n : null;
+        _model.COD_MOTIVO_DEFECTO = null;
+        _motivos = new();
+        if (_model.COD_TIPO_MOTIVO_DESTINO is not null)
+            await CargarMotivos(_model.COD_TIPO_MOTIVO_DESTINO.Value);
+    }
+
+    private async Task CargarMotivos(int codTipoMotivo)
+    {
+        // El endpoint MotivosPorTipo devuelve KONSolutions.Shared.Models.Motivo (COD_MOTIVO/DES_MOTIVO),
+        // no ComboboxItem — hay que mapearlo acá o el combo sale con filas en blanco.
+        var motivos = await Http.SafeGetAsync<List<Motivo>>($"{EstandarRoute.MotivosPorTipo}/{codTipoMotivo}") ?? new();
+        _motivos = motivos
+            .Where(m => m.COD_MOTIVO is not null)
+            .Select(m => new ComboboxItem { Id = m.COD_MOTIVO!.Value.ToString(), Texto = m.DES_MOTIVO ?? "" })
+            .ToList();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = LogisticaRoute.TiposMovimiento;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_CLASE_MOVIMIENTO)}/{Uri.EscapeDataString(_model.COD_TIPO_MOVIMIENTO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposMovimientoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // PROC_LOGISTICA_TIPOS_MOVIMIENTO_INSERT es upsert — siempre POST.
+        // Los combos opcionales dejan "" cuando no se selecciona nada; hay que
+        // convertirlos a null para no violar el FK (error 547) en la BD.
+        var dto = new
+        {
+            _model.COD_CLASE_MOVIMIENTO,
+            _model.COD_TIPO_MOVIMIENTO,
+            _model.DES_TIPO_MOVIMIENTO,
+            COD_TIPO_ENTIDAD_ASOCIADA = NullSiVacio(_model.COD_TIPO_ENTIDAD_ASOCIADA),
+            _model.FLG_POSITIVO,
+            _model.FLG_TRANSFERENCIA,
+            _model.FLG_COMERCIAL,
+            _model.FLG_DEVOLUCION,
+            _model.FLG_ANULACION,
+            _model.FLG_CONSIGNACION,
+            _model.FLG_AJUSTE_INVENTARIO,
+            _model.FLG_COMPROBANTE_RELACIONADO,
+            _model.FLG_VALOR_INVENTARIO,
+            _model.FLG_CONSIGNA_PROYECTO,
+            _model.FLG_CONSIGNA_CENTRO_COSTO,
+            _model.FLG_CONSIGNA_LOTE_CONTROL,
+            _model.FLG_DESTINO_AUTOMATICO,
+            _model.FLG_REQUIERE_CONFIRMACION_RECEPCION,
+            _model.FLG_CONTROL_CALIDAD,
+            _model.FLG_REQUERIMIENTO,
+            _model.FLG_PRODUCCION,
+            COD_TIPO_MOVIMIENTO_SINCRONIZADO = NullSiVacio(_model.COD_TIPO_MOVIMIENTO_SINCRONIZADO),
+            DES_OBSERVACION = NullSiVacio(_model.DES_OBSERVACION),
+            _model.COD_TIPO_ESTADO_RELACIONADO,
+            _model.COD_TIPO_MOTIVO_DESTINO,
+            _model.COD_MOTIVO_DEFECTO,
+            _model.COD_TIPO_ESTADO,
+            _model.COD_ESTADO,
+        };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposMovimientoDialog), nameof(Submit));
+    }
+
+    static string? NullSiVacio(string? v) => string.IsNullOrWhiteSpace(v) ? null : v;
+}

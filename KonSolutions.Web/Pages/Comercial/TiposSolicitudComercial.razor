@@ -1,0 +1,481 @@
+@page "/comercial/tipos-solicitud-comercial"
+@attribute [Authorize]
+@using TiposSolicitudComercialModel = KONSolutions.Shared.Models.Comercial.TiposSolicitudComercial
+@using AreasModel = KONSolutions.Shared.Models.Comercial.TiposSolicitudComercialAreas
+@using CargosModel = KONSolutions.Shared.Models.Comercial.TiposSolicitudComercialAreasCargos
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using KONSolutions.Shared.Common
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject MenuService MenuSvc
+@implements IDisposable
+@inject ErrorLogService ErrorLog
+
+<PageTitle>Tipos de Solicitud Comercial · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Solicitud Comercial" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema COMERCIAL · @_visibles.Count de @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_search" OnSearch="Buscar" Placeholder="Buscar tipo de solicitud comercial..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f=>f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);margin-bottom:16px;">
+    <div data-resizable-grid="tipos-solicitud-comercial" data-default-height="280" style="position:relative;">
+    <MudDataGrid T="TiposSolicitudComercialModel" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 RowClick="OnTipoRowClick"
+                 RowClassFunc="@((t, i) => t.COD_TIPO_SOLICITUD_COMERICAL == _tipoSel?.COD_TIPO_SOLICITUD_COMERICAL ? "fila-seleccionada" : "")"
+                 RowStyleFunc="@((t, i) => "cursor:pointer;")"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="90">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_TIPO_SOLICITUD_COMERICAL" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TiposSolicitudComercialModel" ItemsBase="@Base(0)" ValorDe="@(x=>x.COD_TIPO_SOLICITUD_COMERICAL)"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>Filtro(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_SOLICITUD_COMERICAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_TIPO_SOLICITUD_COMERICAL" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TiposSolicitudComercialModel" ItemsBase="@Base(1)" ValorDe="@(x=>x.DES_TIPO_SOLICITUD_COMERICAL ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>Filtro(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_SOLICITUD_COMERICAL</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <div @onclick:stopPropagation="true">
+                        <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrilla(item,b))" />
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TiposSolicitudComercialModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+<div class="d-flex gap-4" style="align-items:stretch;">
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);flex:1;min-width:0;">
+        <div class="d-flex align-center gap-3 pa-3 grid-header-compacto">
+            <div class="grid-header-titulo">
+                <MudText Typo="Typo.h6">Áreas Asignadas</MudText>
+                <MudText Class="mono" Style="opacity:.6;font-size:.78rem;">
+                    @(_tipoSel is null ? "Ningún tipo seleccionado" : $"Tipo: {_tipoSel.COD_TIPO_SOLICITUD_COMERICAL} – {_tipoSel.DES_TIPO_SOLICITUD_COMERICAL}")
+                </MudText>
+            </div>
+            @if (_tipoSel is not null)
+            {
+                <div class="grid-header-divider"></div>
+                <AccionesBotones CodAplicacion="@_codApArea" CodOpcionAplicacion="@_codOpArea"
+                                 Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderArea" />
+            }
+        </div>
+        <div data-resizable-grid="tipos-solicitud-comercial-areas" data-default-height="280" style="position:relative;">
+        <MudDataGrid T="AreasModel" Items="_areas" Dense="true" Hover="true" Striped="true"
+                     RowClick="OnAreaRowClick"
+                     RowClassFunc="@((a, i) => a.COD_AREA == _areaSel?.COD_AREA ? "fila-seleccionada" : "")"
+                     RowStyleFunc="@((a, i) => "cursor:pointer;")"
+                     FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+            <Columns>
+                <TemplateColumn Sortable="false" Title="Código" Width="90">
+                    <CellTemplate>@context.Item.COD_AREA</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Área">
+                    <CellTemplate>@context.Item.DES_AREA</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false">
+                    <CellTemplate>
+                        @{ var item = context.Item; }
+                        <div @onclick:stopPropagation="true">
+                            <AccionesBotones CodAplicacion="@_codApArea" CodOpcionAplicacion="@_codOpArea"
+                                             Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaArea(item,b))" />
+                        </div>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent>
+                <MudText Class="pa-6 mono" Style="opacity:.5;">
+                    @(_tipoSel is null ? "Seleccione un tipo arriba." : "Sin áreas para este tipo.")
+                </MudText>
+            </NoRecordsContent>
+            <PagerContent><MudDataGridPager T="AreasModel" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    </MudPaper>
+
+    <MudPaper Elevation="0" Style="border:1px solid var(--line);flex:1;min-width:0;">
+        <div class="d-flex align-center gap-3 pa-3 grid-header-compacto">
+            <div class="grid-header-titulo">
+                <MudText Typo="Typo.h6">Cargos del Área</MudText>
+                <MudText Class="mono" Style="opacity:.6;font-size:.78rem;">
+                    @(_areaSel is null ? "Ninguna área seleccionada" : $"Área: {_areaSel.COD_AREA} – {_areaSel.DES_AREA}")
+                </MudText>
+            </div>
+            @if (_areaSel is not null)
+            {
+                <div class="grid-header-divider"></div>
+                <AccionesBotones CodAplicacion="@_codApCargo" CodOpcionAplicacion="@_codOpCargo"
+                                 Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderCargo" />
+            }
+        </div>
+        <div data-resizable-grid="tipos-solicitud-comercial-areas-cargos" data-default-height="280" style="position:relative;">
+        <MudDataGrid T="CargosModel" Items="_cargos" Dense="true" Hover="true" Striped="true"
+                     FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+            <Columns>
+                <TemplateColumn Sortable="false" Title="Código" Width="90">
+                    <CellTemplate>@context.Item.COD_CARGO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Cargo">
+                    <CellTemplate>@DesCargo(context.Item.COD_CARGO)</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Sortable="false" Title="Nivel de flujo" CellStyle="text-align:center;" HeaderStyle="text-align:center;" Width="110">
+                    <CellTemplate>@context.Item.NUM_NIVEL_FLUJO</CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Aprobador" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;" Width="90">
+                    <CellTemplate>
+                        @if (context.Item.FLG_APROBADOR == true) { <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" /> }
+                        else { <MudText Typo="Typo.caption" Style="opacity:.25;">—</MudText> }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Notificador" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;" Width="100">
+                    <CellTemplate>
+                        @if (context.Item.FLG_NOTIFICADOR == true) { <MudIcon Icon="@Icons.Material.Filled.NotificationsActive" Color="Color.Info" Size="Size.Small" /> }
+                        else { <MudText Typo="Typo.caption" Style="opacity:.25;">—</MudText> }
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="Acciones" Sortable="false">
+                    <CellTemplate>
+                        @{ var item = context.Item; }
+                        <AccionesBotones CodAplicacion="@_codApCargo" CodOpcionAplicacion="@_codOpCargo"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaCargo(item,b))" />
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent>
+                <MudText Class="pa-6 mono" Style="opacity:.5;">
+                    @(_areaSel is null ? "Seleccione un área a la izquierda." : "Sin cargos para esta área.")
+                </MudText>
+            </NoRecordsContent>
+            <PagerContent><MudDataGridPager T="CargosModel" /></PagerContent>
+        </MudDataGrid>
+        <div class="grid-resize-handle"></div>
+        </div>
+    </MudPaper>
+</div>
+
+@code {
+    private Func<Task>? _onCambio0;
+    private Func<Task>? _onCambio1;
+    private Func<Task>? _onCambio2;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    // Igual que GruposProducto: 3 niveles en 1 pantalla, 3 nodos distintos en el árbol de
+    // Opciones de Aplicaciones (cada uno con sus propios botones/permisos), resueltos por
+    // DES_FORMULARIO (clave estable ante "Mover").
+    private string _codApArea = "", _codOpArea = "";
+    private string _codApCargo = "", _codOpCargo = "";
+
+    private void ResolverCodigosPorSeccion()
+    {
+        (_codApArea, _codOpArea)   = ResolverCod("Comercial/TiposSolicitudComercialAreas.razor");
+        (_codApCargo, _codOpCargo) = ResolverCod("Comercial/TiposSolicitudComercialAreasCargos.razor");
+        // TRACE temporal: para ver si ResolverCod encuentra el nodo real de Cargos o cae al
+        // fallback (CodAplicacion/CodOpcionAplicacion del padre, Tipos de Solicitud Comercial)
+        // — si cae al fallback, los botones que se listan son los del padre, no los de Cargos.
+        Console.WriteLine($"[TRACE] TiposSolicitudComercial: CodAplicacion(padre)='{CodAplicacion}' CodOpcion(padre)='{CodOpcionAplicacion}'");
+        Console.WriteLine($"[TRACE] TiposSolicitudComercial: _codApArea='{_codApArea}' _codOpArea='{_codOpArea}' (¿fallback al padre? {_codApArea == CodAplicacion && _codOpArea == CodOpcionAplicacion})");
+        Console.WriteLine($"[TRACE] TiposSolicitudComercial: _codApCargo='{_codApCargo}' _codOpCargo='{_codOpCargo}' (¿fallback al padre? {_codApCargo == CodAplicacion && _codOpCargo == CodOpcionAplicacion})");
+        var botonesCargo = MenuSvc.GetBotonesPorOpcion(_codApCargo, _codOpCargo);
+        Console.WriteLine($"[TRACE] TiposSolicitudComercial: botones encontrados para Cargos = {botonesCargo.Count} " +
+            $"({string.Join(", ", botonesCargo.Select(b => $"{b.DES_BOTON_OPCION}[Header={b.FLG_HEADER},POST={b.FLG_ACCION_POST},Hab={b.FLG_HABILITADO}]"))})");
+    }
+
+    private (string App, string Opcion) ResolverCod(string formulario)
+    {
+        var r = MenuSvc.BuscarCodigosPorFormulario(formulario);
+        return r is null ? (CodAplicacion, CodOpcionAplicacion) : (r.Value.CodAplicacion, r.Value.CodOpcionAplicacion);
+    }
+
+    private List<TiposSolicitudComercialModel> _items = new();
+    private List<AreasModel>  _areas  = new();
+    private List<CargosModel> _cargos = new();
+    // Todos los cargos (cualquier área/estado) — solo para poder mostrar la descripción de
+    // cargos ya asignados aunque hayan quedado inactivos o de otra área.
+    private List<ComboboxItem> _todosLosCargos = new();
+    // Cargos ACTIVOS del área seleccionada (PROC_ADMINISTRACION_AREAS_CARGOS_TREEVIEW) —
+    // esto es lo que se ofrece para elegir en el diálogo "Nuevo cargo".
+    private List<ComboboxItem> _cargosDelArea = new();
+
+    private TiposSolicitudComercialModel? _tipoSel;
+    private AreasModel? _areaSel;
+
+    private string _search = "";
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<TiposSolicitudComercialModel> Ordenar(List<TiposSolicitudComercialModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_SOLICITUD_COMERICAL).ToList() : items.OrderByDescending(x => x.COD_TIPO_SOLICITUD_COMERICAL).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_SOLICITUD_COMERICAL).ToList() : items.OrderByDescending(x => x.DES_TIPO_SOLICITUD_COMERICAL).ToList(),
+        _ => items
+    };
+    private List<TiposSolicitudComercialModel> _visibles => Ordenar(Aplicar(FiltrarTexto(_items), -1));
+    private List<TiposSolicitudComercialModel> Base(int col) => Aplicar(FiltrarTexto(_items), col);
+
+    private List<TiposSolicitudComercialModel> FiltrarTexto(List<TiposSolicitudComercialModel> src) =>
+        string.IsNullOrWhiteSpace(_search) ? src : src.Where(x =>
+            x.COD_TIPO_SOLICITUD_COMERICAL.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+            (x.DES_TIPO_SOLICITUD_COMERICAL ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private List<TiposSolicitudComercialModel> Aplicar(List<TiposSolicitudComercialModel> src, int ex)
+    {
+        IEnumerable<TiposSolicitudComercialModel> q = src;
+        foreach (var (c, v) in _filtros)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_TIPO_SOLICITUD_COMERICAL)),
+                1 => q.Where(x => v.Contains(x.DES_TIPO_SOLICITUD_COMERICAL ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void Filtro(int c, HashSet<string>? v) { _filtros[c] = v; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private Task Buscar() { StateHasChanged(); return Task.CompletedTask; }
+
+    private string DesCargo(int? codCargo) =>
+        _todosLosCargos.FirstOrDefault(c => c.Id == (codCargo?.ToString() ?? ""))?.Texto ?? "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        ResolverCodigosPorSeccion();
+        await AccessLog.LogNavegacionAsync("COMERCIAL", "TiposSolicitudComercial");
+        await Load();
+
+        var r = await Http.SafeGetAsync<List<ComboboxItem>>($"{ApiRoutes.Administracion.Cargos}/combobox");
+        _todosLosCargos = r ?? new();
+
+        _tipoSel = _items.FirstOrDefault();
+        if (_tipoSel is not null)
+        {
+            await LoadAreasDeTipoSel();
+            _areaSel = _areas.FirstOrDefault();
+            if (_areaSel is not null) await LoadCargosDeAreaSel();
+        }
+
+        _onCambio0 = async () => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+        Cambios.Suscribir("COMERCIAL.TIPOS_SOLICITUD_COMERCIAL", _onCambio0);
+        _onCambio1 = async () => await InvokeAsync(async () => { await LoadAreasDeTipoSel(); StateHasChanged(); });
+        Cambios.Suscribir("COMERCIAL.TIPOS_SOLICITUD_COMERCIAL_AREAS", _onCambio1);
+        _onCambio2 = async () => await InvokeAsync(async () => { await LoadCargosDeAreaSel(); StateHasChanged(); });
+        Cambios.Suscribir("COMERCIAL.TIPOS_SOLICITUD_COMERCIAL_AREAS_CARGOS", _onCambio2);
+    }
+
+    private async Task Load() => _items = await Fetch();
+
+    private async Task<List<TiposSolicitudComercialModel>> Fetch()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<TiposSolicitudComercialModel>>>(ComercialRoute.TiposSolicitudComercial);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(TiposSolicitudComercial), nameof(Fetch));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+            return new();
+        }
+    }
+
+    private async Task LoadAreasDeTipoSel()
+    {
+        if (_tipoSel is null) { _areas = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<AreasModel>>>(
+                $"{ComercialRoute.TiposSolicitudComercialAreas}/{Uri.EscapeDataString(_tipoSel.COD_TIPO_SOLICITUD_COMERICAL)}");
+            _areas = r?.Data ?? new();
+        }
+        catch { _areas = new(); }
+    }
+
+    private async Task LoadCargosDeAreaSel()
+    {
+        if (_tipoSel is null || _areaSel is null || _areaSel.COD_AREA is null) { _cargos = new(); _cargosDelArea = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<CargosModel>>>(
+                $"{ComercialRoute.TiposSolicitudComercialAreasCargos}/{Uri.EscapeDataString(_tipoSel.COD_TIPO_SOLICITUD_COMERICAL)}/{_areaSel.COD_AREA}");
+            _cargos = r?.Data ?? new();
+        }
+        catch { _cargos = new(); }
+
+        // PROC_ADMINISTRACION_AREAS_CARGOS_TREEVIEW: cargos activos de ESTA área — combo del
+        // diálogo "Nuevo cargo" (no todos los cargos del sistema, solo los de esta área).
+        var rc = await Http.SafeGetAsync<List<ComboboxItem>>($"{ApiRoutes.Administracion.Areas}/{_areaSel.COD_AREA}/cargos");
+        _cargosDelArea = rc ?? new();
+    }
+
+    private async Task OnTipoRowClick(DataGridRowClickEventArgs<TiposSolicitudComercialModel> args)
+    {
+        _tipoSel = args.Item;
+        _areaSel = null;
+        _cargos  = new();
+        await LoadAreasDeTipoSel();
+    }
+
+    private async Task OnAreaRowClick(DataGridRowClickEventArgs<AreasModel> args)
+    {
+        _areaSel = args.Item;
+        await LoadCargosDeAreaSel();
+    }
+
+    // ── Tipos ──
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Abrir(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(TiposSolicitudComercialModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return Abrir(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return Abrir(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return Abrir(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task Abrir(TiposSolicitudComercialModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de solicitud comercial",
+            CrudModo.Delete => $"Eliminar · {item?.DES_TIPO_SOLICITUD_COMERICAL}",
+            CrudModo.Read   => $"Consultar · {item?.DES_TIPO_SOLICITUD_COMERICAL}",
+            _               => $"Editar · {item?.DES_TIPO_SOLICITUD_COMERICAL}"
+        };
+        var dlg = await DialogService.ShowAsync<TiposSolicitudComercialDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    // ── Áreas ──
+    private Task OnAccionHeaderArea(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirArea(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaArea(AreasModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_DELETE == true) return AbrirArea(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirArea(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirArea(AreasModel? item, CrudModo modo)
+    {
+        if (_tipoSel is null) return;
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Agregar área",
+            CrudModo.Delete => $"Quitar · {item?.DES_AREA}",
+            _               => $"Consultar · {item?.DES_AREA}"
+        };
+        var dlg = await DialogService.ShowAsync<TiposSolicitudComercialAreasDialog>(titulo,
+            new DialogParameters
+            {
+                ["Item"] = item,
+                ["Modo"] = modo,
+                ["CodTipoSolicitudComercial"] = _tipoSel.COD_TIPO_SOLICITUD_COMERICAL,
+                ["DesTipoSolicitudComercial"] = _tipoSel.DES_TIPO_SOLICITUD_COMERICAL ?? "",
+                ["AreasYaAsignadas"] = _areas
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadAreasDeTipoSel();
+    }
+
+    // ── Cargos ──
+    private Task OnAccionHeaderCargo(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirCargo(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaCargo(CargosModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirCargo(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirCargo(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirCargo(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirCargo(CargosModel? item, CrudModo modo)
+    {
+        if (_tipoSel is null || _areaSel is null || _areaSel.COD_AREA is null) return;
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo cargo",
+            CrudModo.Delete => $"Quitar · {DesCargo(item?.COD_CARGO)}",
+            CrudModo.Read   => $"Consultar · {DesCargo(item?.COD_CARGO)}",
+            _               => $"Modificar · {DesCargo(item?.COD_CARGO)}"
+        };
+        var dlg = await DialogService.ShowAsync<TiposSolicitudComercialAreasCargosDialog>(titulo,
+            new DialogParameters
+            {
+                ["Item"] = item,
+                ["Modo"] = modo,
+                ["CodTipoSolicitudComercial"] = _tipoSel.COD_TIPO_SOLICITUD_COMERICAL,
+                ["CodArea"] = _areaSel.COD_AREA.Value,
+                ["DesArea"] = _areaSel.DES_AREA ?? "",
+                ["CargosDisponibles"] = _cargosDelArea,
+                ["CargosYaAsignados"] = _cargos
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadCargosDeAreaSel();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("COMERCIAL.TIPOS_SOLICITUD_COMERCIAL", _onCambio0 ?? (() => Task.CompletedTask));
+        Cambios.Desuscribir("COMERCIAL.TIPOS_SOLICITUD_COMERCIAL_AREAS", _onCambio1 ?? (() => Task.CompletedTask));
+        Cambios.Desuscribir("COMERCIAL.TIPOS_SOLICITUD_COMERCIAL_AREAS_CARGOS", _onCambio2 ?? (() => Task.CompletedTask));
+    }
+}

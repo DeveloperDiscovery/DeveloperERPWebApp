@@ -1,0 +1,378 @@
+@page "/controlcalidad/clases-defectos-tecnicos"
+@attribute [Authorize]
+@using ClasesDefectosTecnicosModel = KONSolutions.Shared.Models.Controlcalidad.ClasesDefectosTecnicos
+@using TiposDefectosTecnicosModel = KONSolutions.Shared.Models.Controlcalidad.TiposDefectosTecnicos
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject ShortcutService ShortcutSvc
+@inject MenuService MenuSvc
+@implements IDisposable
+
+<PageTitle>Clases y Tipos de Defectos Técnicos · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Clases de Defectos Técnicos" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema CONTROLCALIDAD · @_clases.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchClase" OnSearch="BuscarClases" Placeholder="Buscar clase de defecto técnico..." DebounceInterval="400" MaxWidth="719px" Class="grid-header-search" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="LoadClases" />
+        <AccionesBotones CodAplicacion="@_codApClase" CodOpcionAplicacion="@_codOpClase"
+                         Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderClase" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);margin-bottom:16px;">
+    <div data-resizable-grid="clases-defectos-tecnicos" data-default-height="280" style="position:relative;">
+    <MudDataGrid T="ClasesDefectosTecnicosModel" Items="_clasesVisibles" Dense="true" Hover="true" Striped="true"
+                 RowClick="OnClaseRowClick"
+                 RowClassFunc="@((c, i) => c.COD_CLASE_DEFECTO_TECNICO == _claseSel?.COD_CLASE_DEFECTO_TECNICO ? "fila-seleccionada" : "")"
+                 RowStyleFunc="@((c, i) => "cursor:pointer;")"
+                 FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaPadre">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="100">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_CLASE_DEFECTO_TECNICO" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="ClasesDefectosTecnicosModel" ItemsBase="@BaseClase(0)" ValorDe="@(x=>x.COD_CLASE_DEFECTO_TECNICO ?? "")"
+                                            ValoresActivos="_filtrosClase.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroClase(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_CLASE_DEFECTO_TECNICO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_CLASE_DEFECTO_TECNICO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="ClasesDefectosTecnicosModel" ItemsBase="@BaseClase(1)" ValorDe="@(x=>x.DES_CLASE_DEFECTO_TECNICO ?? "")"
+                                            ValoresActivos="_filtrosClase.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroClase(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_CLASE_DEFECTO_TECNICO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <div @onclick:stopPropagation="true">
+                        <AccionesBotones CodAplicacion="@_codApClase" CodOpcionAplicacion="@_codOpClase"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaClase(item,b))" />
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin registros.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="ClasesDefectosTecnicosModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div class="d-flex align-center gap-3 pa-3 grid-header-compacto">
+        <div class="grid-header-titulo">
+            <MudText Typo="Typo.h6">Tipos de Defectos Técnicos</MudText>
+            <MudText Class="mono" Style="opacity:.6;font-size:.78rem;">
+                @(_claseSel is null ? "Ninguna clase seleccionada" : $"Clase: {_claseSel.COD_CLASE_DEFECTO_TECNICO} – {_claseSel.DES_CLASE_DEFECTO_TECNICO}")
+            </MudText>
+        </div>
+        <BarraBusqueda @bind-Value="_searchTipo" OnSearch="@(() => Task.CompletedTask)" Placeholder="Buscar tipo de defecto técnico..." DebounceInterval="300" MaxWidth="719px" Class="grid-header-search" />
+        @if (_claseSel is not null)
+        {
+            <div class="grid-header-divider"></div>
+            <AccionesBotones CodAplicacion="@_codApTipo" CodOpcionAplicacion="@_codOpTipo"
+                             Zona="@AccionesBotones.ZonaBotones.Header" OnAccion="OnAccionHeaderTipo" />
+        }
+    </div>
+    <div data-resizable-grid="tipos-defectos-tecnicos" data-default-height="320" style="position:relative;">
+    <MudDataGrid T="TiposDefectosTecnicosModel" Items="_tiposVisibles" Dense="true" Hover="true" Striped="true"
+                 FixedHeader="true" Height="100%" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaHijo">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Código" Width="90">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="COD_TIPO_DEFECTO_TECNICO" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="TiposDefectosTecnicosModel" ItemsBase="@BaseTipo(0)" ValorDe="@(x=>x.COD_TIPO_DEFECTO_TECNICO ?? "")"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(0)" ValoresActivosChanged="@(v=>FiltroTipo(0,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_DEFECTO_TECNICO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Campo="DES_DEFECTO_TECNICO" Activo="@(_ordenColumna == 3)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(3))" />
+                        <FiltroExcelColumna T="TiposDefectosTecnicosModel" ItemsBase="@BaseTipo(1)" ValorDe="@(x=>x.DES_DEFECTO_TECNICO ?? "")"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(1)" ValoresActivosChanged="@(v=>FiltroTipo(1,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_DEFECTO_TECNICO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Observación" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;" Width="100">
+                <CellTemplate>
+                    <MudTooltip Text="Requiere observación">
+                        <MudIcon Icon="@Icons.Material.Filled.Visibility" Color="@(context.Item.FLG_OBSERVACION == true ? Color.Success : Color.Error)"
+                                 Style="@(context.Item.FLG_OBSERVACION == true ? "" : "opacity:.15;")" Size="Size.Small" />
+                    </MudTooltip>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Estado" Width="110">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1"><EncabezadoOrdenable Texto="Estado" Activo="@(_ordenColumna == 4)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(4))" />
+                        <FiltroExcelColumna T="TiposDefectosTecnicosModel" ItemsBase="@BaseTipo(2)" ValorDe="@(x=>x.DES_ESTADO ?? "")"
+                                            ValoresActivos="_filtrosTipo.GetValueOrDefault(2)" ValoresActivosChanged="@(v=>FiltroTipo(2,v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>
+                    @if (!string.IsNullOrEmpty(context.Item.DES_ESTADO))
+                    {
+                        <EstadoChip Estado="@context.Item.DES_ESTADO" BackColor="@context.Item.DES_BACKCOLOR" ForeColor="@context.Item.DES_FORECOLOR" />
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <div @onclick:stopPropagation="true">
+                        <AccionesBotones CodAplicacion="@_codApTipo" CodOpcionAplicacion="@_codOpTipo"
+                                         Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccionGrillaTipo(item,b))" />
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-6 mono" Style="opacity:.5;">
+                @(_claseSel is null ? "Seleccione una clase arriba." : "Sin tipos para esta clase.")
+            </MudText>
+        </NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TiposDefectosTecnicosModel" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio0;
+    private Func<Task>? _onCambio1;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    // ── Códigos de seguridad por nivel (ver ClasesOperacion.razor para el detalle) ──
+    private string _codApClase = "", _codOpClase = "";
+    private string _codApTipo = "", _codOpTipo = "";
+
+    private void ResolverCodigosPorSeccion()
+    {
+        (_codApClase, _codOpClase) = ResolverCod("Controlcalidad/ClasesDefectosTecnicos.razor");
+        (_codApTipo, _codOpTipo)   = ResolverCod("Controlcalidad/TiposDefectosTecnicos.razor");
+    }
+
+    private (string App, string Opcion) ResolverCod(string formulario)
+    {
+        var r = MenuSvc.BuscarCodigosPorFormulario(formulario);
+        return r is null ? (CodAplicacion, CodOpcionAplicacion) : (r.Value.CodAplicacion, r.Value.CodOpcionAplicacion);
+    }
+
+    private List<ClasesDefectosTecnicosModel> _clases = new();
+    private List<TiposDefectosTecnicosModel>  _tipos   = new();
+    private ClasesDefectosTecnicosModel? _claseSel;
+    private string _searchClase = "";
+    private string _searchTipo  = "";
+
+    private List<TiposDefectosTecnicosModel> _tiposBuscados =>
+        string.IsNullOrWhiteSpace(_searchTipo) ? _tipos
+        : _tipos.Where(t => (t.COD_TIPO_DEFECTO_TECNICO?.Contains(_searchTipo, StringComparison.OrdinalIgnoreCase) ?? false)
+                          || (t.DES_DEFECTO_TECNICO?.Contains(_searchTipo, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosClase = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<ClasesDefectosTecnicosModel> Ordenar_g0(List<ClasesDefectosTecnicosModel> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_CLASE_DEFECTO_TECNICO).ToList() : items.OrderByDescending(x => x.COD_CLASE_DEFECTO_TECNICO).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_CLASE_DEFECTO_TECNICO).ToList() : items.OrderByDescending(x => x.DES_CLASE_DEFECTO_TECNICO).ToList(),
+        _ => items
+    };
+    private List<TiposDefectosTecnicosModel> Ordenar_g1(List<TiposDefectosTecnicosModel> items) => _ordenColumna switch
+    {
+        2 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_DEFECTO_TECNICO).ToList() : items.OrderByDescending(x => x.COD_TIPO_DEFECTO_TECNICO).ToList(),
+        3 => _ordenAscendente ? items.OrderBy(x => x.DES_DEFECTO_TECNICO).ToList() : items.OrderByDescending(x => x.DES_DEFECTO_TECNICO).ToList(),
+        4 => _ordenAscendente ? items.OrderBy(x => x.DES_ESTADO).ToList() : items.OrderByDescending(x => x.DES_ESTADO).ToList(),
+        _ => items
+    };
+    private List<ClasesDefectosTecnicosModel> _clasesVisibles => Ordenar_g0(AplicarClase(_clases, -1));
+    private List<ClasesDefectosTecnicosModel> BaseClase(int col) => AplicarClase(_clases, col);
+    private List<ClasesDefectosTecnicosModel> AplicarClase(List<ClasesDefectosTecnicosModel> src, int ex)
+    {
+        IEnumerable<ClasesDefectosTecnicosModel> q = src;
+        foreach (var (c, v) in _filtrosClase)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_CLASE_DEFECTO_TECNICO ?? "")),
+                1 => q.Where(x => v.Contains(x.DES_CLASE_DEFECTO_TECNICO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroClase(int c, HashSet<string>? v) { _filtrosClase[c] = v; StateHasChanged(); }
+
+    private readonly Dictionary<int, HashSet<string>?> _filtrosTipo = new();
+    private List<TiposDefectosTecnicosModel> _tiposVisibles => Ordenar_g1(AplicarTipo(_tiposBuscados, -1));
+    private List<TiposDefectosTecnicosModel> BaseTipo(int col) => AplicarTipo(_tiposBuscados, col);
+    private List<TiposDefectosTecnicosModel> AplicarTipo(List<TiposDefectosTecnicosModel> src, int ex)
+    {
+        IEnumerable<TiposDefectosTecnicosModel> q = src;
+        foreach (var (c, v) in _filtrosTipo)
+        {
+            if (c == ex || v is null) continue;
+            q = c switch
+            {
+                0 => q.Where(x => v.Contains(x.COD_TIPO_DEFECTO_TECNICO ?? "")),
+                1 => q.Where(x => v.Contains(x.DES_DEFECTO_TECNICO ?? "")),
+                2 => q.Where(x => v.Contains(x.DES_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+    private void FiltroTipo(int c, HashSet<string>? v) { _filtrosTipo[c] = v; StateHasChanged(); }
+
+    protected override async Task OnInitializedAsync()
+    {
+        ResolverCodigosPorSeccion();
+        await AccessLog.LogNavegacionAsync("CONTROLCALIDAD", "ClasesDefectosTecnicos");
+        await LoadClases();
+
+        _claseSel = _clases.FirstOrDefault();
+        if (_claseSel is not null) await LoadTipos();
+
+        _onCambio0 = async () => await InvokeAsync(async () => { await LoadClases(); StateHasChanged(); });
+        Cambios.Suscribir("CONTROLCALIDAD.CLASES_DEFECTOS_TECNICOS", _onCambio0);
+        _onCambio1 = async () => await InvokeAsync(async () => { await LoadTipos();  StateHasChanged(); });
+        Cambios.Suscribir("CONTROLCALIDAD.TIPOS_DEFECTOS_TECNICOS", _onCambio1);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => AbrirClase(null, CrudModo.Create));
+
+    private async Task LoadClases()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ClasesDefectosTecnicosModel>>>(ApiRoutes.Controlcalidad.ClasesDefectosTecnicos);
+            _clases = r?.Data ?? new();
+        }
+        catch { _clases = new(); }
+    }
+
+    private async Task LoadTipos()
+    {
+        if (_claseSel is null) { _tipos = new(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<TiposDefectosTecnicosModel>>>(
+                $"{ApiRoutes.Controlcalidad.TiposDefectosTecnicos}?codClaseDefectoTecnico={Uri.EscapeDataString(_claseSel.COD_CLASE_DEFECTO_TECNICO)}");
+            _tipos = r?.Data ?? new();
+        }
+        catch { _tipos = new(); }
+    }
+
+    private async Task BuscarClases()
+    {
+        if (string.IsNullOrWhiteSpace(_searchClase)) { await LoadClases(); return; }
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ClasesDefectosTecnicosModel>>>(
+                $"{ApiRoutes.Controlcalidad.ClasesDefectosTecnicos}/search?search={Uri.EscapeDataString(_searchClase)}");
+            _clases = r?.Data ?? new();
+        }
+        catch { _clases = new(); }
+    }
+
+    private async Task OnClaseRowClick(DataGridRowClickEventArgs<ClasesDefectosTecnicosModel> args)
+    {
+        _claseSel = args.Item;
+        await LoadTipos();
+    }
+
+    // ── Clases ──
+    private Task OnAccionHeaderClase(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirClase(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaClase(ClasesDefectosTecnicosModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirClase(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirClase(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirClase(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirClase(ClasesDefectosTecnicosModel? item, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva clase de defecto técnico",
+            CrudModo.Delete => $"Eliminar · {item?.DES_CLASE_DEFECTO_TECNICO}",
+            CrudModo.Read   => $"Consultar · {item?.DES_CLASE_DEFECTO_TECNICO}",
+            _               => $"Editar · {item?.DES_CLASE_DEFECTO_TECNICO}"
+        };
+        var dlg = await DialogService.ShowAsync<ClasesDefectosTecnicosDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadClases();
+    }
+
+    // ── Tipos ──
+    private Task OnAccionHeaderTipo(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return AbrirTipo(null, CrudModo.Create);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrillaTipo(TiposDefectosTecnicosModel item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_PUT    == true) return AbrirTipo(item, CrudModo.Update);
+        if (b.FLG_ACCION_DELETE == true) return AbrirTipo(item, CrudModo.Delete);
+        if (b.FLG_ACCION_GET    == true) return AbrirTipo(item, CrudModo.Read);
+        return Task.CompletedTask;
+    }
+
+    private async Task AbrirTipo(TiposDefectosTecnicosModel? item, CrudModo modo)
+    {
+        if (modo == CrudModo.Create && _claseSel is not null)
+            item = new TiposDefectosTecnicosModel { COD_CLASE_DEFECTO_TECNICO = _claseSel.COD_CLASE_DEFECTO_TECNICO };
+
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de defecto técnico",
+            CrudModo.Delete => $"Eliminar · {item?.DES_DEFECTO_TECNICO}",
+            CrudModo.Read   => $"Consultar · {item?.DES_DEFECTO_TECNICO}",
+            _               => $"Editar · {item?.DES_DEFECTO_TECNICO}"
+        };
+        var dlg = await DialogService.ShowAsync<TiposDefectosTecnicosDialog>(titulo,
+            new DialogParameters { ["Item"] = item, ["Modo"] = modo },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await LoadTipos();
+    }
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("CONTROLCALIDAD.CLASES_DEFECTOS_TECNICOS", _onCambio0 ?? (() => Task.CompletedTask));
+        Cambios.Desuscribir("CONTROLCALIDAD.TIPOS_DEFECTOS_TECNICOS", _onCambio1 ?? (() => Task.CompletedTask));
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

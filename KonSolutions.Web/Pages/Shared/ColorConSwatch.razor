@@ -1,0 +1,185 @@
+@*
+    ColorConSwatch.razor
+    --------------------------------------------------------------------------
+    Selector de color (MudColorPicker) con un cuadrito visual del color
+    a la izquierda. Reutilizable en toda la pantalla de Configuración.
+    Punto 7 (v3): mostrar el color visualmente, no solo el código hex.
+    El Banco de Colores (ENTORNO.BANCO_COLORES) aparece SOLO al hacer clic para
+    elegir un color — pegado justo debajo del picker nativo de MudBlazor — y se
+    oculta de nuevo al cerrar (clic afuera). No ocupa espacio con el campo cerrado.
+*@
+@using System.Text.RegularExpressions
+@using KONSolutions.Shared.Models.Entorno
+@inject ColorClipboardService Clipboard
+@inject CatalogoService<BancoColor, BancoColorDto> BancoSvc
+@inject IJSRuntime JS
+@implements IDisposable
+
+<div class="d-flex align-center gap-2 @Class color-con-swatch">
+    <div class="cs-picker-wrap" @onclick="Abrir">
+        <div style="@($"width:36px;height:36px;border-radius:6px;border:1px solid var(--line);flex-shrink:0;background:{(string.IsNullOrWhiteSpace(Text) ? "transparent" : Text)};")"></div>
+        <MudColorPicker Text="@Text" TextChanged="OnTextChanged" Label="@Label"
+                        Variant="Variant.Outlined" Style="flex:1;" Disabled="Disabled"
+                        Editable="true" />
+
+        @if (_abierto)
+        {
+            <div class="cs-banco-attached" @onclick:stopPropagation="true">
+                <div class="cs-banco-head">
+                    <span>Banco de colores</span>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _agregando = !_agregando)">
+                        Agregar actual
+                    </MudButton>
+                </div>
+                @if (_agregando)
+                {
+                    <div class="cs-banco-agregar" @onclick:stopPropagation="true">
+                        <div class="cs-banco-preview" style="@($"background:{Text};")"></div>
+                        <CampoTextoEstable @bind-Value="_nuevaDescripcion" Placeholder="Descripción" Immediate="true"
+                                      Margin="Margin.Dense" Variant="Variant.Outlined" Style="flex:1;" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Check" Size="Size.Small" OnClick="GuardarEnBanco"
+                                       Disabled="@(string.IsNullOrWhiteSpace(_nuevaDescripcion) || _guardando)" Style="color:var(--rust);" />
+                    </div>
+                }
+                @if (_cargando)
+                {
+                    <div class="cs-banco-vacio">Cargando…</div>
+                }
+                else if (_bancoItems.Count == 0)
+                {
+                    <div class="cs-banco-vacio">Sin colores guardados.</div>
+                }
+                else
+                {
+                    <div class="cs-banco-swatches">
+                        @foreach (var c in _bancoItems)
+                        {
+                            <div class="cs-banco-sw @(EsIgual(c.DES_CODIGO_COLOR) ? "selected" : "")"
+                                 style="@($"background:{c.DES_CODIGO_COLOR};")"
+                                 title="@c.DES_BANCO_COLOR"
+                                 @onclick="@(() => SeleccionarDelBanco(c.DES_CODIGO_COLOR))" @onclick:stopPropagation="true"></div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small"
+                   Title="Copiar color" OnClick="Copiar" Disabled="@(Disabled || string.IsNullOrWhiteSpace(Text))" Style="color:var(--ink);" />
+    <MudIconButton Icon="@Icons.Material.Filled.ContentPaste" Size="Size.Small"
+                   Title="Pegar color" OnClick="Pegar" Disabled="@(Disabled || string.IsNullOrWhiteSpace(Clipboard.Color))" Style="color:var(--ink);" />
+</div>
+
+@if (_abierto)
+{
+    <div class="cs-banco-overlay" @onclick="Cerrar"></div>
+}
+
+@code {
+    /// <summary>Color en formato texto (hex). Enlazado con @bind-Text.</summary>
+    [Parameter] public string Text { get; set; } = "";
+    [Parameter] public EventCallback<string> TextChanged { get; set; }
+    [Parameter] public string Label { get; set; } = "Color";
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    private bool _abierto, _agregando, _cargando, _guardando;
+    private string _nuevaDescripcion = "";
+    private List<BancoColor> _bancoItems = new();
+
+    protected override void OnInitialized() => Clipboard.OnChange += Refrescar;
+
+    private void Refrescar() => InvokeAsync(StateHasChanged);
+
+    private static readonly Regex _hex8 = new(@"^#[0-9A-Fa-f]{8}$", RegexOptions.Compiled);
+    private static readonly Regex _hexValido = new(@"^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$", RegexOptions.Compiled);
+
+    private async Task OnTextChanged(string v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) { Text = ""; await TextChanged.InvokeAsync(""); return; }
+
+        var val = v.Trim();
+        // El picker nativo de MudBlazor sigue emitiendo el color con canal alfa
+        // (#RRGGBBAA) aunque DisableAlpha oculte el slider — se recorta a 6 dígitos.
+        if (_hex8.IsMatch(val)) val = val.Substring(0, 7);
+
+        if (_hexValido.IsMatch(val))
+        {
+            Text = val;
+            await TextChanged.InvokeAsync(val);
+        }
+        else if (val.Length >= 7)
+        {
+            // Ya se escribió/pegó algo completo y no es un hex válido: se deja en blanco.
+            Text = "";
+            await TextChanged.InvokeAsync("");
+        }
+        // Si el usuario todavía está escribiendo (texto incompleto), no se toca nada aún.
+    }
+
+    private async Task Copiar()
+    {
+        if (string.IsNullOrWhiteSpace(Text)) return;
+        Clipboard.Copiar(Text);
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", Text); } catch { }
+    }
+
+    private async Task Pegar()
+    {
+        if (Disabled || string.IsNullOrWhiteSpace(Clipboard.Color)) return;
+        Text = Clipboard.Color;
+        await TextChanged.InvokeAsync(Clipboard.Color);
+    }
+
+    private async Task Abrir()
+    {
+        if (Disabled || _abierto) return;
+        _abierto = true;
+        await CargarBanco();
+    }
+
+    private void Cerrar()
+    {
+        _abierto = false;
+        _agregando = false;
+    }
+
+    private async Task CargarBanco()
+    {
+        _cargando = true;
+        StateHasChanged();
+        _bancoItems = await BancoSvc.GetAllAsync();
+        _cargando = false;
+    }
+
+    private bool EsIgual(string colorBanco) =>
+        !string.IsNullOrWhiteSpace(Text) && string.Equals(colorBanco, Text, StringComparison.OrdinalIgnoreCase);
+
+    private async Task SeleccionarDelBanco(string color)
+    {
+        Text = color;
+        await TextChanged.InvokeAsync(color);
+    }
+
+    private async Task GuardarEnBanco()
+    {
+        if (string.IsNullOrWhiteSpace(_nuevaDescripcion) || string.IsNullOrWhiteSpace(Text)) return;
+        _guardando = true;
+        var (ok, _) = await BancoSvc.GuardarAsync(new BancoColorDto
+        {
+            COD_BANCO_COLOR = 0,
+            DES_BANCO_COLOR = _nuevaDescripcion,
+            DES_CODIGO_COLOR = Text
+        });
+        _guardando = false;
+        if (ok)
+        {
+            _nuevaDescripcion = "";
+            _agregando = false;
+            await CargarBanco();
+        }
+    }
+
+    public void Dispose() => Clipboard.OnChange -= Refrescar;
+}

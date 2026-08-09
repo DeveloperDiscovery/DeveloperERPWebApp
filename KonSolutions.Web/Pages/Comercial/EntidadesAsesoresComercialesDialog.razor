@@ -1,0 +1,78 @@
+@* Alta/baja de un Asesor Comercial asignado a un Cliente (COMERCIAL.ENTIDADES_ASESORES_
+   COMERCIALES). El combo de asesores disponibles viene de PROC_ADMINISTRACION_AREAS_CARGOS_
+   ENTIDADES(@COD_ETIQUETA_BUSQUEDA = 'EJECUTIVO_VENTAS_GENERAL') — las personas asignadas
+   al Área enlazada a esa Etiqueta de Búsqueda (ver EntidadesDialog.razor → tab "Asesores
+   Comerciales"). *@
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using AdministracionRoute = KONSolutions.Web.Services.ApiRoutes.Administracion
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(520px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="CrudModo.Create" Descripcion="Asesor Comercial" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="this" OnValidSubmit="Submit">
+            @if (_cargando)
+            {
+                <MudProgressLinear Indeterminate="true" Class="mb-3" />
+            }
+            else if (_asesoresDisponibles.Count == 0)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">
+                    No hay personas asignadas al Área enlazada a la etiqueta "EJECUTIVO_VENTAS_GENERAL" todavía
+                    (ESTANDAR.ETIQUETAS_BUSQUEDA_AREAS → ADMINISTRACION.AREAS_CARGOS_ENTIDADES).
+                </MudAlert>
+            }
+            else
+            {
+                <AriaCombo TItem="ComboboxItem" Items="_asesoresDisponibles"
+                           TextFunc="@(a => a.Texto)" ValueFunc="@(a => a.Id)"
+                           @bind-Value="_codAsesorSeleccionado"
+                           Label="Asesor comercial" Obligatorio="true" Class="mb-3" />
+            }
+            <CrudDialogActions Modo="CrudModo.Create" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public decimal CodEntidadCliente { get; set; }
+    [Parameter] public List<string> YaAsignados { get; set; } = new();
+
+    // Etiqueta de Búsqueda fija de este diálogo (tab "Asesores Comerciales" de Entidades) —
+    // resuelve el Área/personas asignables vía PROC_ADMINISTRACION_AREAS_CARGOS_ENTIDADES.
+    private const string CodEtiquetaBusqueda = "EJECUTIVO_VENTAS_GENERAL";
+
+    private List<ComboboxItem> _asesoresDisponibles = new();
+    private string? _codAsesorSeleccionado;
+    private bool _cargando = true;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var url = $"{AdministracionRoute.AsesoresPorEtiqueta}?codEtiquetaBusqueda={Uri.EscapeDataString(CodEtiquetaBusqueda)}";
+            var todos = await Http.SafeGetAsync<List<ComboboxItem>>(url) ?? new();
+            _asesoresDisponibles = todos.Where(a => !YaAsignados.Contains(a.Id)).ToList();
+        }
+        catch (Exception ex) { await ErrorLog.LogAsync(ex, nameof(EntidadesAsesoresComercialesDialog), nameof(OnInitializedAsync)); }
+        finally { _cargando = false; }
+    }
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_codAsesorSeleccionado) || !decimal.TryParse(_codAsesorSeleccionado, out var codAsesor)) return;
+        _saving = true;
+        var dto = new { COD_ENTIDAD_CLIENTE = CodEntidadCliente, COD_ENTIDAD_ASESOR_COMERCIAL = codAsesor };
+        var resp = await Http.PostAsJsonAsync(ComercialRoute.EntidadesAsesoresComerciales, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add("Asesor asignado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EntidadesAsesoresComercialesDialog), nameof(Submit));
+    }
+}

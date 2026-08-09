@@ -1,0 +1,99 @@
+@using TiposPosModel = KONSolutions.Shared.Models.Comercial.TiposPos
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_POS" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="COMERCIAL.TIPOS_POS" Columna="COD_TIPO_POS"
+                        @bind-Value="_model.COD_TIPO_POS"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="COMERCIAL.TIPOS_POS" Columna="DES_TIPO_POS"
+                        @bind-Value="_model.DES_TIPO_POS"
+                        Disabled="_readonly" Obligatorio="true" />
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.Storefront" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_VENTA_MENUDEO" Color="Color.Primary" Label="Venta al menudeo" Disabled="_readonly" /></div>
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.Restaurant" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_PEDIDO_VENTA_RESTAURANTE" Color="Color.Secondary" Label="Pedido de venta restaurante" Disabled="_readonly" /></div>
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.Warehouse" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_PEDIDO_VENTA_POR_MAYOR" Color="Color.Tertiary" Label="Pedido de venta por mayor" Disabled="_readonly" /></div>
+            <ImagePicker Image="_model.IMG_PICTURE" ImageChanged="@(v => _model.IMG_PICTURE = v)" Label="Imagen" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposPosModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposPosModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        // Mapeo inicial desde el Item que pasó la grilla — se usa como fallback mientras
+        // se resuelve el viaje a SHOWBYID (en OnInitializedAsync) o si ese viaje falla; una
+        // vez que responde, MapearDesdeModelo() pisa estos valores con los frescos de la BD.
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de SHOWBYID) hacia _model.</summary>
+    private void MapearDesdeModelo(TiposPosModel m)
+    {
+        _model.COD_TIPO_POS = m.COD_TIPO_POS;
+        _model.DES_TIPO_POS = m.DES_TIPO_POS;
+        _model.FLG_VENTA_MENUDEO = m.FLG_VENTA_MENUDEO;
+        _model.FLG_PEDIDO_VENTA_RESTAURANTE = m.FLG_PEDIDO_VENTA_RESTAURANTE;
+        _model.FLG_PEDIDO_VENTA_POR_MAYOR = m.FLG_PEDIDO_VENTA_POR_MAYOR;
+        _model.IMG_PICTURE = m.IMG_PICTURE;
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear), para no mostrar datos desactualizados de la
+    /// grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposPosModel>($"{ApiRoutes.Comercial.TiposPos}/{Uri.EscapeDataString(_model.COD_TIPO_POS)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Comercial.TiposPos;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_TIPO_POS)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposPosDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposPosDialog), nameof(Submit));
+    }
+}

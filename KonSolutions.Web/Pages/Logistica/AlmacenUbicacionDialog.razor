@@ -1,0 +1,188 @@
+@using UbicacionModel = KONSolutions.Shared.Models.Logistica.AlmacenesUbicacionesAlmacen
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="_modoEfectivo" Descripcion="@Item?.DES_UBICACION_ALMACEN" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="4">
+                    @* El SP ya no genera correlativo: el código se escribe al crear y queda
+                       fijo después, porque es parte de la PK. *@
+                    <CampoTexto Tabla="LOGISTICA.ALMACENES_UBICACIONES_ALMACEN" Columna="COD_UBICACION_ALMACEN"
+                                @bind-Value="_model.COD_UBICACION_ALMACEN"
+                                Disabled="@(!_esNuevo || _soloLectura)" Obligatorio="@_esNuevo"
+                                Margin="Margin.Dense" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    @* Mismo componente que el campo de al lado, y no un MudTextField suelto:
+                       CampoTexto agrega sus propias clases de alto y margen, así que mezclar
+                       los dos dejaba una caja más alta que la otra. *@
+                    <CampoTexto Tabla="LOGISTICA.ALMACENES" Columna="DES_ALMACEN"
+                                Value="@_desAlmacen" Label="Almacén"
+                                Disabled="true" Margin="Margin.Dense" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12">
+                    <CampoTexto Tabla="LOGISTICA.ALMACENES_UBICACIONES_ALMACEN" Columna="DES_UBICACION_ALMACEN"
+                                @bind-Value="_model.DES_UBICACION_ALMACEN"
+                                Disabled="_soloLectura" Obligatorio="true"
+                                Margin="Margin.Dense" Class="mb-3" />
+                </MudItem>
+
+                <MudItem xs="12" sm="6">
+                    @* SIEMPRE deshabilitado: lo marca el generador de casilleros, nunca una
+                       persona. Se muestra para entender de dónde salió la ubicación. *@
+                    <div class="d-flex align-center gap-2 mb-3" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.AutoAwesome"
+                                 Color="@(_model.FLG_CREACION_AUTOMATICA == true ? Color.Primary : Color.Default)"
+                                 Style="@(_model.FLG_CREACION_AUTOMATICA == true ? "" : "opacity:.35;")" />
+                        <MudSwitch T="bool?" Value="_model.FLG_CREACION_AUTOMATICA" ReadOnly="true" Disabled="true"
+                                   Color="Color.Primary" Label="Creación automática" />
+                    </div>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @* El polígono se dibuja en el Plano de Zonificación, no acá. En las
+                       ubicaciones de casillero queda vacío: se deriva del contenedor. *@
+                    <div class="d-flex align-center gap-2 mb-3" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Polyline"
+                                 Color="@(Poligono.TienePoligono(_model.DES_POLIGONO) ? Color.Success : Color.Default)"
+                                 Style="@(Poligono.TienePoligono(_model.DES_POLIGONO) ? "" : "opacity:.3;")" />
+                        <MudText Typo="Typo.body2" Style="opacity:.7;">
+                            @(Poligono.TienePoligono(_model.DES_POLIGONO)
+                                ? "Dibujada en el plano"
+                                : _model.FLG_CREACION_AUTOMATICA == true
+                                    ? "Se dibuja desde su contenedor"
+                                    : "Sin dibujar en el plano")
+                        </MudText>
+                    </div>
+                </MudItem>
+                @if (_generada)
+                {
+                    <MudItem xs="12">
+                        @* Se dice explícitamente por qué está bloqueada: sin esto, el diálogo
+                           parece roto —todo gris y sin botón de guardar— y no hay forma de
+                           saber que es a propósito. *@
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                            Esta ubicación la creó el generador de casilleros. Se administra desde su
+                            contenedor: si necesita cambiarla, vuelva a generar los casilleros en
+                            Contenedores de Almacenaje.
+                        </MudAlert>
+                    </MudItem>
+                }
+            </MudGrid>
+            <CrudDialogActions Modo="_modoEfectivo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public UbicacionModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    /// <summary>Almacén padre — obligatorio: la PK es compuesta y el SP filtra por él.</summary>
+    [Parameter] public string CodAlmacen { get; set; } = "";
+    [Parameter] public string DesAlmacen { get; set; } = "";
+
+    private UbicacionModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    /// <summary>Una ubicación creada por el generador de casilleros no se edita a mano: la
+    /// manda su contenedor. Editarla dejaría el casillero apuntando a algo que ya no
+    /// corresponde, sin ninguna señal de que eso pasó.</summary>
+    private bool _soloLectura => _readonly || _generada;
+
+    /// <summary>La creó el generador de casilleros, no una persona.</summary>
+    private bool _generada => !_esNuevo && _model.FLG_CREACION_AUTOMATICA == true;
+
+    /// <summary>Modo con el que se dibuja el diálogo. Una ubicación generada se muestra SIEMPRE
+    /// como consulta, aunque se haya entrado por Modificar o Eliminar: así no queda un botón
+    /// «Modificar» que después no va a hacer nada, ni uno de «Eliminar» que dejaría al
+    /// casillero apuntando a una dirección inexistente.</summary>
+    private CrudModo _modoEfectivo => _generada ? CrudModo.Read : Modo;
+
+    private string _desAlmacen => string.IsNullOrWhiteSpace(DesAlmacen) ? CodAlmacen : $"{CodAlmacen} · {DesAlmacen}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        _model.COD_ALMACEN = CodAlmacen;
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private void MapearDesdeModelo(UbicacionModel m)
+    {
+        _model = new UbicacionModel
+        {
+            COD_ALMACEN             = m.COD_ALMACEN,
+            COD_UBICACION_ALMACEN   = m.COD_UBICACION_ALMACEN,
+            DES_UBICACION_ALMACEN   = m.DES_UBICACION_ALMACEN,
+            // Ambos se arrastran aunque no se editen: si no viajaran en el POST, guardar
+            // desde el CRUD borraría el polígono y la marca de creación automática.
+            DES_POLIGONO            = m.DES_POLIGONO,
+            FLG_CREACION_AUTOMATICA = m.FLG_CREACION_AUTOMATICA
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID — evita mostrar datos desactualizados
+    /// de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<UbicacionModel>(
+            $"{ApiRoutes.Logistica.AlmacenesUbicaciones}/{Uri.EscapeDataString(_model.COD_ALMACEN)}/{Uri.EscapeDataString(_model.COD_UBICACION_ALMACEN)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    private async Task OnInvalidSubmit(EditContext ctx)
+    {
+        var errores = string.Join(" · ", ctx.GetValidationMessages());
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"]  = "Faltan datos obligatorios",
+                ["Mensaje"] = string.IsNullOrWhiteSpace(errores) ? "Hay campos obligatorios sin completar." : errores
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task Submit()
+    {
+        // Última barrera: el formulario ya está deshabilitado, pero un Enter sobre el campo
+        // podría disparar el submit igual.
+        if (_generada) { MudDialog.Cancel(); return; }
+
+        _saving = true;
+        var ruta = ApiRoutes.Logistica.AlmacenesUbicaciones;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_ALMACEN)}/{Uri.EscapeDataString(_model.COD_UBICACION_ALMACEN)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(AlmacenUbicacionDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        // El SP INSERT hace upsert por (almacén, ubicación): Crear y Modificar usan el mismo POST.
+        var resp = await Http.PostAsJsonAsync(ruta, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(AlmacenUbicacionDialog), nameof(Submit));
+    }
+}

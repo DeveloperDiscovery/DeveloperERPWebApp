@@ -1,0 +1,111 @@
+@*
+    CampoTextoEstable.razor
+    --------------------------------------------------------------------------
+    Envoltorio "drop-in" de MudTextField (T=string) que arregla el salto de
+    cursor al final de la cadena al escribir/corregir un carácter a mitad de
+    texto. Mismo mecanismo que ya se usa en CampoTexto.razor: un campo local
+    (_val) que solo se resincroniza con el parámetro Value cuando realmente
+    cambia desde AFUERA (ej. al recargar el modelo con datos frescos del
+    servidor) — nunca como reacción al propio tipeo del usuario, que es lo que
+    rompía la protección de MudBlazor contra el reseteo del cursor.
+
+    A diferencia de CampoTexto.razor, este NO depende de Tabla/Columna (no
+    busca MaxLength/Obligatorio en LimitesService) — es un reemplazo directo
+    de <MudTextField @bind-Value="..."> para los casos que no están atados a
+    una columna real de la base de datos (búsquedas, campos de configuración,
+    contraseñas, etc.). Reenvía los parámetros de MudTextField más usados en
+    la app; si hace falta alguno más, agregarlo acá siguiendo el mismo patrón.
+
+    Uso: igual que MudTextField, solo cambiando el nombre de la etiqueta.
+      <CampoTextoEstable @bind-Value="_model.DES_OBSERVACIONES" Label="Observaciones" Lines="3" />
+
+    Los parámetros con delegados (OnBlur, OnKeyDown, OnDebounceIntervalElapsed,
+    OnClearButtonClick, For) necesitan declararse explícitos con su tipo real — si se
+    reenvían solo vía @attributes (CaptureUnmatchedValues), el compilador no puede inferir
+    el tipo de la lambda en el sitio de uso (error CS8917). Cualquier otro parámetro no
+    tipado-a-delegado que no esté declarado abajo sí se reenvía automáticamente vía
+    @attributes.
+*@
+<MudTextField @attributes="AdditionalAttributes" T="string" Value="_val" ValueChanged="OnChanged" Label="@Label"
+              Variant="@Variant" Disabled="@Disabled" ReadOnly="@ReadOnly"
+              Class="@($"{Class} campo-texto-mt")" Style="@Style" Placeholder="@Placeholder"
+              Lines="@Lines" InputType="@InputType" MaxLength="@MaxLength"
+              Immediate="@Immediate" Margin="@Margin"
+              Required="@Required" RequiredError="@RequiredError"
+              Adornment="@Adornment" AdornmentIcon="@AdornmentIcon" AdornmentText="@AdornmentText"
+              OnAdornmentClick="@OnAdornmentClick"
+              HelperText="@HelperText" Error="@Error" ErrorText="@ErrorText"
+              UserAttributes="@UserAttributes" For="@For"
+              DebounceInterval="@DebounceInterval" OnDebounceIntervalElapsed="@OnDebounceIntervalElapsed"
+              Clearable="@(Clearable && !Disabled && !ReadOnly)" ClearIcon="@ClearIcon" OnClearButtonClick="Limpiar"
+              OnBlur="@OnBlur" OnKeyDown="@OnKeyDown" />
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public Variant Variant { get; set; } = Variant.Outlined;
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public string Class { get; set; } = "";
+    [Parameter] public string? Style { get; set; }
+    [Parameter] public string? Placeholder { get; set; }
+    [Parameter] public int Lines { get; set; } = 1;
+    [Parameter] public InputType InputType { get; set; } = InputType.Text;
+    [Parameter] public int MaxLength { get; set; } = 524288;   // Mismo default que MudTextField
+    [Parameter] public bool Immediate { get; set; } = true;
+    [Parameter] public Margin Margin { get; set; } = Margin.None;
+    [Parameter] public bool Required { get; set; }
+    [Parameter] public string? RequiredError { get; set; }
+    [Parameter] public Adornment Adornment { get; set; } = Adornment.None;
+    [Parameter] public string? AdornmentIcon { get; set; }
+    [Parameter] public string? AdornmentText { get; set; }
+    [Parameter] public EventCallback OnAdornmentClick { get; set; }
+
+    [Parameter] public string? HelperText { get; set; }
+    [Parameter] public bool Error { get; set; }
+    [Parameter] public string? ErrorText { get; set; }
+    // Default vacío (no null): MudTextField internamente itera este diccionario (ej. para
+    // buscar "id" con FirstOrDefault) — pasarle null explícito, en vez de dejarlo en su
+    // propio default interno, tira ArgumentNullException al renderizar CUALQUIER instancia
+    // que no pase UserAttributes (la gran mayoría), rompiendo la página entera.
+    [Parameter] public Dictionary<string, object> UserAttributes { get; set; } = new();
+    [Parameter] public System.Linq.Expressions.Expression<Func<string>>? For { get; set; }
+    [Parameter] public double DebounceInterval { get; set; }
+    [Parameter] public EventCallback<string> OnDebounceIntervalElapsed { get; set; }
+    /// <summary>Papelera para vaciar el campo de un clic — activada por defecto (a
+    /// diferencia de MudTextField, que la deja apagada) para que todo input de la app la
+    /// tenga sin tener que pasarla explícitamente en cada uso.</summary>
+    [Parameter] public bool Clearable { get; set; } = true;
+    [Parameter] public string ClearIcon { get; set; } = Icons.Material.Filled.DeleteOutline;
+    [Parameter] public EventCallback<Microsoft.AspNetCore.Components.Web.MouseEventArgs> OnClearButtonClick { get; set; }
+    [Parameter] public EventCallback<Microsoft.AspNetCore.Components.Web.FocusEventArgs> OnBlur { get; set; }
+    [Parameter] public EventCallback<Microsoft.AspNetCore.Components.Web.KeyboardEventArgs> OnKeyDown { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    // Igual patrón que CampoTexto.razor: campo local en vez de leer/escribir directo el
+    // parámetro Value — evita que MudBlazor pierda la posición del cursor al reemplazar
+    // texto a mitad de la cadena.
+    private string? _val;
+
+    protected override void OnParametersSet()
+    {
+        if (_val != Value) _val = Value;
+    }
+
+    private async Task OnChanged(string? v)
+    {
+        _val = v;
+        await ValueChanged.InvokeAsync(v);
+    }
+
+    private async Task Limpiar(Microsoft.AspNetCore.Components.Web.MouseEventArgs e)
+    {
+        _val = null;
+        await ValueChanged.InvokeAsync(null);
+        if (OnClearButtonClick.HasDelegate) await OnClearButtonClick.InvokeAsync(e);
+    }
+}

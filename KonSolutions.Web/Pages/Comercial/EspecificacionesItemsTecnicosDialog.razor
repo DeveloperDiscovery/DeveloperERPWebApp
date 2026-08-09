@@ -1,0 +1,251 @@
+@using TreeListModel = KONSolutions.Shared.Models.Comercial.EspecificacionesItemsTecnicosTreeList
+@using EspecificacionesTecnicasModel = KONSolutions.Shared.Models.Ingenieria.EspecificacionesTecnicas
+@using EstandarRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@using IngenieriaRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_KEY" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="6">
+                    <MudTextField T="string" Label="Especificación Técnica Padre" Value="@_padreEpTexto" ValueChanged="@((string _) => { })"
+                                  Variant="Variant.Outlined" Disabled="true" Class="mb-3" ReadOnly="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField T="string" Label="Ítem Técnico Padre" Value="@_padreItemTexto" ValueChanged="@((string _) => { })"
+                                  Variant="Variant.Outlined" Disabled="true" Class="mb-3" ReadOnly="true" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="6">
+                    <MudTextField T="string" Label="Especificación Técnica" Value="@(_model.COD_ESPECIFICACION_TECNICA)"
+                                  ValueChanged="@((string _) => { })" Variant="Variant.Outlined" Disabled="true" Class="mb-3" ReadOnly="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField T="string" Label="Descripción de Especificación Técnica" Value="@_desEp"
+                                  ValueChanged="@((string _) => { })" Variant="Variant.Outlined" Disabled="true" Class="mb-3" ReadOnly="true" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="6">
+                    @* COD_ITEM_TECNICO es IDENTITY en la BD: nunca lo escribe el usuario,
+                       ni al crear (lo asigna el INSERT) ni al modificar. *@
+                    <MudTextField T="string" Label="Ítem Técnico" Value="@(_esCreacion ? "(automático)" : _model.COD_ITEM_TECNICO)"
+                                  ValueChanged="@((string _) => { })" Variant="Variant.Outlined" Disabled="true" Class="mb-3" ReadOnly="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="INGENIERIA.ESPECIFICACIONES_ITEMS_TECNICOS" Columna="DES_ITEM_TECNICO"
+                                @bind-Value="_model.DES_ITEM_TECNICO"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="6">
+                    <MudNumericField T="decimal?" Label="Valor" @bind-Value="_model.VAL_NUMERICO"
+                                     Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.AttachMoney"
+                                     Variant="Variant.Outlined" Disabled="@(_readonly || !_habilitaValor)" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField T="string" Label="Unidad de Medida" Value="@_desUnidadMedidaItem"
+                                  ValueChanged="@((string _) => { })" Variant="Variant.Outlined" Disabled="true" Class="mb-3" ReadOnly="true" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid>
+                <MudItem xs="12" sm="2" Class="d-flex align-center gap-1" Style="margin-top:24px;">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small" Style="opacity:.7;" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_HABILITADO ?? false)" ValueChanged="@(v => _model.FLG_HABILITADO = v)"
+                               Color="Color.Primary" Disabled="_readonly">Habilitado</MudSwitch>
+                </MudItem>
+                <MudItem xs="12" sm="2" Class="d-flex align-center gap-1" Style="margin-top:24px;">
+                    <MudIcon Icon="@Icons.Material.Filled.Star" Size="Size.Small" Style="opacity:.7;" />
+                    <MudSwitch T="bool" Value="@(_model.FLG_DEFAULT ?? false)" ValueChanged="@(v => _model.FLG_DEFAULT = v)"
+                               Color="Color.Primary" Disabled="_readonly">Default</MudSwitch>
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudNumericField T="int?" Label="Orden de Presentación" @bind-Value="_model.NUM_ORDEN_PRESENTACION"
+                                     Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.LowPriority"
+                                     Variant="Variant.Outlined" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="5" Class="d-flex align-center gap-1">
+                    <MudIcon Icon="@Icons.Material.Filled.Palette" Size="Size.Small" Style="opacity:.7;flex-shrink:0;" />
+                    <ColorConSwatch Label="Color" @bind-Text="_colorTexto" Disabled="@(_readonly || !_habilitaColor)" Class="flex-grow-1" />
+                </MudItem>
+            </MudGrid>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@_auditoria?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@_auditoria?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@_auditoria?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@_auditoria?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@_auditoria?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@_auditoria?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TreeListModel? Item { get; set; }
+    [Parameter] public decimal? CodEntidad { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Update;
+
+    private KONSolutions.Shared.Models.Comercial.EspecificacionesItemsTecnicosUpdateDto _model = new();
+    private bool _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+    private bool _esCreacion => Modo == CrudModo.Create;
+
+    // Nodo "anidado" (Especificación Técnica repetida bajo un Ítem Técnico dependiente):
+    // en esta fila del SP, COD_EP no trae el código real de la especificación que
+    // representa la fila — hay que sacarlo de COD_KEY ('E' + código de 5 + resto).
+    private bool _esNodoAnidado => Item?.FLG_IS_CHILDREN == true;
+
+    private string _desEp => (_esCreacion && _esNodoAnidado) ? (Item?.DES_KEY ?? "") : (Item?.DES_EP ?? "");
+
+    private string _colorTexto
+    {
+        get => _model.DES_COLOR ?? "";
+        set => _model.DES_COLOR = value;
+    }
+
+    // En modo Nueva, Item es el nodo (tipo 1) sobre el que se hizo clic derecho. Normalmente
+    // no tiene jerarquía de "dependiente" propia (nace como raíz bajo esa Especificación
+    // Técnica) — salvo cuando el nodo es "anidado" (FLG_IS_CHILDREN=true), donde hereda como
+    // padre la Especificación/Ítem Técnico "externos" de la propia fila: COD_EP/DES_EP y
+    // COD_ITEM/DES_ITEM (NO los campos _FATHER, que en esta fila apuntan más arriba todavía).
+    private string _padreEpTexto => _esCreacion
+        ? (_esNodoAnidado ? $"{Item!.COD_EP} – {Item.DES_EP}" : "— Ninguna —")
+        : (string.IsNullOrEmpty(Item?.COD_EP_FATHER) ? "— Ninguna —" : $"{Item!.COD_EP_FATHER} – {Item.DES_EP_FATHER}");
+    private string _padreItemTexto => _esCreacion
+        ? (_esNodoAnidado ? $"{Item!.COD_ITEM} – {Item.DES_ITEM}" : "— Ninguno —")
+        : (string.IsNullOrEmpty(Item?.COD_ITEM_FATHER) ? "— Ninguno —" : $"{Item!.COD_ITEM_FATHER} – {Item.DES_ITEM_FATHER}");
+
+    // El TREELIST (por Entidad) no llena FLG_VALOR/FLG_COLOR/DES_UNIDAD_MEDIDA para las filas
+    // de Especificación Técnica (solo para las de Ítem) — al crear un Ítem nuevo se resuelve
+    // directo desde la Especificación Técnica real (FLG_ITEMS_WITH_VALUE/FLG_IS_COLOR/
+    // COD_UNIDAD_MEDIDA_ITEM) en vez de confiar en esos campos del nodo del árbol.
+    private EspecificacionesTecnicasModel? _especTecnica;
+    private string? _desUnidadMedidaItem;
+
+    private bool _habilitaColor => _esCreacion ? (_especTecnica?.FLG_IS_COLOR == true) : Item?.FLG_COLOR == true;
+    private bool _habilitaValor => _esCreacion ? (_especTecnica?.FLG_ITEMS_WITH_VALUE == true) : Item?.FLG_VALOR == true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Item is null) return;
+
+        if (_esCreacion)
+        {
+            // Nodo anidado (FLG_IS_CHILDREN=true): la Especificación Técnica propia no es
+            // Item.COD_EP (viene con el valor equivocado en esta fila del SP), sino que se
+            // saca de COD_KEY ('E' + código de 5 posiciones), y sí hereda Especificación/
+            // Ítem Técnico padre — a diferencia del caso normal, que nace como raíz.
+            var codEpPropia = _esNodoAnidado && Item.COD_KEY.Length >= 6
+                ? Item.COD_KEY.Substring(1, 5)
+                : (Item.COD_EP ?? "");
+
+            _model = new KONSolutions.Shared.Models.Comercial.EspecificacionesItemsTecnicosUpdateDto
+            {
+                COD_ESPECIFICACION_TECNICA = codEpPropia,
+                COD_ITEM_TECNICO = "",
+                DES_ITEM_TECNICO = "",
+                COD_ENTIDAD_DEPENDIENTE = CodEntidad,
+                COD_ESPECIFICACION_TECNICA_DEPENDIENTE = _esNodoAnidado ? Item.COD_EP : null,
+                COD_ITEM_TECNICO_DEPENDIENTE = _esNodoAnidado ? Item.COD_ITEM : null,
+                FLG_HABILITADO = true,
+                FLG_DEFAULT = false,
+                VAL_NUMERICO = null,
+                DES_COLOR = null,
+                NUM_ORDEN_PRESENTACION = null,
+            };
+
+            try
+            {
+                var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<EspecificacionesTecnicasModel>>(
+                    $"{IngenieriaRoute.EspecificacionesTecnicas}/{Uri.EscapeDataString(codEpPropia)}");
+                _especTecnica = r?.Data;
+            }
+            catch { _especTecnica = null; }
+
+            if (!string.IsNullOrEmpty(_especTecnica?.COD_UNIDAD_MEDIDA_ITEM))
+            {
+                try
+                {
+                    var ru = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(EstandarRoute.UnidadesMedidaCombobox);
+                    _desUnidadMedidaItem = ru?.Data?.FirstOrDefault(u => u.Id == _especTecnica!.COD_UNIDAD_MEDIDA_ITEM)?.Texto;
+                }
+                catch { _desUnidadMedidaItem = null; }
+            }
+        }
+        else
+        {
+            _model = new KONSolutions.Shared.Models.Comercial.EspecificacionesItemsTecnicosUpdateDto
+            {
+                COD_ESPECIFICACION_TECNICA = Item.COD_EP ?? "",
+                COD_ITEM_TECNICO = Item.COD_ITEM ?? "",
+                DES_ITEM_TECNICO = Item.DES_ITEM,
+                COD_ENTIDAD_DEPENDIENTE = CodEntidad,
+                COD_ESPECIFICACION_TECNICA_DEPENDIENTE = Item.COD_EP_FATHER,
+                COD_ITEM_TECNICO_DEPENDIENTE = Item.COD_ITEM_FATHER,
+                FLG_HABILITADO = Item.FLG_HABILITADO,
+                FLG_DEFAULT = Item.FLG_DEFAULT,
+                VAL_NUMERICO = Item.VAL_NUMERICO,
+                DES_COLOR = Item.DES_COLOR,
+                NUM_ORDEN_PRESENTACION = Item.NUM_ORDEN_PRESENTACION,
+            };
+            _desUnidadMedidaItem = Item.DES_UNIDAD_MEDIDA;
+            await CargarAuditoriaAsync();
+        }
+    }
+
+    // El treelist (Item) no trae auditoría — se pide aparte con el mismo par de códigos
+    // (COD_ESPECIFICACION_TECNICA / COD_ITEM_TECNICO) contra el SHOWBYID que sí la tiene.
+    private KONSolutions.Shared.Models.Ingenieria.EspecificacionesTecnicasItemsAuditoria? _auditoria;
+
+    private async Task CargarAuditoriaAsync()
+    {
+        if (Item is null || string.IsNullOrEmpty(Item.COD_EP) || string.IsNullOrEmpty(Item.COD_ITEM)) return;
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<KONSolutions.Shared.Models.Ingenieria.EspecificacionesTecnicasItemsAuditoria>>(
+                $"{IngenieriaRoute.EspecificacionesTecnicasItems}/{Uri.EscapeDataString(Item.COD_EP)}/{Uri.EscapeDataString(Item.COD_ITEM)}");
+            _auditoria = r?.Data;
+        }
+        catch { _auditoria = null; }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = IngenieriaRoute.EspecificacionesItemsTecnicosUpdate;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{IngenieriaRoute.EspecificacionesItemsTecnicosDelete}/{_model.COD_ESPECIFICACION_TECNICA}/{_model.COD_ITEM_TECNICO}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(EspecificacionesItemsTecnicosDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var resp = await Http.PutAsJsonAsync(ruta, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esCreacion ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EspecificacionesItemsTecnicosDialog), nameof(Submit));
+    }
+}

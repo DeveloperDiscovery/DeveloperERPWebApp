@@ -1,0 +1,131 @@
+@using KONSolutions.Shared.Models.Estandar
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_PAIS" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            <CampoTexto Tabla="ESTANDAR.PAISES" Columna="COD_PAIS"
+                        @bind-Value="_model.COD_PAIS"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+
+            <CampoTexto Tabla="ESTANDAR.PAISES" Columna="DES_PAIS"
+                        @bind-Value="_model.DES_PAIS"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            <CampoTexto Tabla="ESTANDAR.PAISES" Columna="COD_PAIS_3"
+                        @bind-Value="_model.COD_PAIS_3"
+                        Disabled="_readonly" Obligatorio="false" />
+
+            <CampoTexto Tabla="ESTANDAR.PAISES" Columna="DES_PAIS_INGLES"
+                        @bind-Value="_model.DES_PAIS_INGLES"
+                        Disabled="_readonly" Obligatorio="false" />
+
+            <CampoTexto Tabla="ESTANDAR.PAISES" Columna="DES_PAIS_NATIVO"
+                        @bind-Value="_model.DES_PAIS_NATIVO"
+                        Disabled="_readonly" Obligatorio="false" />
+
+            <CampoTexto Tabla="ESTANDAR.PAISES" Columna="DES_CAPITAL"
+                        @bind-Value="_model.DES_CAPITAL"
+                        Disabled="_readonly" Obligatorio="false" />
+
+            <CampoTexto Tabla="ESTANDAR.PAISES" Columna="DES_REGION"
+                        @bind-Value="_model.DES_REGION"
+                        Disabled="_readonly" Obligatorio="false" />
+
+            <CampoTexto Tabla="ESTANDAR.PAISES" Columna="DES_SUBREGION"
+                        @bind-Value="_model.DES_SUBREGION"
+                        Disabled="_readonly" Obligatorio="false" />
+
+            <MudNumericField T="long?" @bind-Value="_model.NUM_POBLACION"
+                             Label="Población" Variant="Variant.Outlined"
+                             Format="N0" Class="mb-3" Disabled="_readonly"
+                             Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+
+            @if (!string.IsNullOrEmpty(_model.DES_BANDERA_EMOJI))
+            {
+                <MudText Class="mb-1" Typo="Typo.caption">Bandera</MudText>
+                <MudText Class="mb-3" Style="font-size:2rem;">@_model.DES_BANDERA_EMOJI</MudText>
+            }
+
+            <div class="my-3">
+                <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)"
+                             Label="Bandera PNG" ReadOnly="_readonly" RemoveBackground="false" />
+            </div>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Pais? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private Pais _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(Pais m) =>
+        _model = new Pais
+        {
+            COD_PAIS          = m.COD_PAIS,
+            DES_PAIS          = m.DES_PAIS,
+            COD_PAIS_3        = m.COD_PAIS_3,
+            DES_PAIS_INGLES   = m.DES_PAIS_INGLES,
+            DES_PAIS_NATIVO   = m.DES_PAIS_NATIVO,
+            DES_REGION        = m.DES_REGION,
+            DES_SUBREGION     = m.DES_SUBREGION,
+            DES_CAPITAL       = m.DES_CAPITAL,
+            DES_BANDERA_EMOJI = m.DES_BANDERA_EMOJI,
+            URL_BANDERA_PNG   = m.URL_BANDERA_PNG,
+            URL_BANDERA_SVG   = m.URL_BANDERA_SVG,
+            IMG_ICONO         = m.IMG_ICONO,
+            IMG_ICONO_SVG     = m.IMG_ICONO_SVG,
+            NUM_POBLACION     = m.NUM_POBLACION
+        };
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<Pais>($"{ApiRoutes.Estandar.Paises}/{Uri.EscapeDataString(_model.COD_PAIS)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Estandar.Paises}/{Uri.EscapeDataString(_model.COD_PAIS)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(PaisesDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // PROC_ESTANDAR_PAISES_INSERT es upsert — el Controller nunca tuvo endpoint PUT,
+        // siempre se llama al mismo POST.
+        var resp = await Http.GuardarAsync(ApiRoutes.Estandar.Paises, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(PaisesDialog), nameof(Submit));
+    }
+}

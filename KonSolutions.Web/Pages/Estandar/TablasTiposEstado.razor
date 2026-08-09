@@ -1,0 +1,190 @@
+@page "/estandar/tablas-tipos-estado"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Estandar
+@inject CatalogoService<TablaTipoEstado, TablaTipoEstadoDto> Service
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject ConfigService ConfigSvc
+@implements IDisposable
+
+<PageTitle>Tablas x Tipo de Estado · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tablas x Tipo de Estado" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ESTANDAR · @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTerm" OnSearch="HandleSearch" Placeholder="Buscar tabla..." DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Tablas x Tipo de Estado" Headers="@_printHeaders" Rows="@PrintRows()" />
+        <AccionesBotones CodAplicacion="@CodAplicacion"
+                         CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header"
+                         OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="tablas-tipos-estado" style="position:relative;">
+    <MudDataGrid T="TablaTipoEstado" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Sortable="false" Title="Tabla" Width="@Limites.ColWidth("ESTANDAR.TABLAS_TIPOS_ESTADO","DES_TABLA",160,320)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TABLA" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TablaTipoEstado" ItemsBase="@BaseSinEstaColumna(0)"
+                                            ValorDe="@(x => x.DES_TABLA ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.DES_TABLA</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo de estado" Width="@Limites.ColWidth("ESTANDAR.TABLAS_TIPOS_ESTADO","COD_TIPO_ESTADO",120,260)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TIPO_ESTADO" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TablaTipoEstado" ItemsBase="@BaseSinEstaColumna(1)"
+                                            ValorDe="@(x => x.DES_TIPO_ESTADO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_ESTADO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion"
+                                     CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                     OnAccion="@(b => OnAccionGrilla(item, b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin tablas configuradas.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TablaTipoEstado" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<TablaTipoEstado> _items = new();
+    private string _searchTerm = string.Empty;
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<TablaTipoEstado> Ordenar(List<TablaTipoEstado> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.DES_TABLA).ToList() : items.OrderByDescending(x => x.DES_TABLA).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_ESTADO).ToList() : items.OrderByDescending(x => x.COD_TIPO_ESTADO).ToList(),
+        _ => items
+    };
+
+    private List<TablaTipoEstado> _visibles => Ordenar(AplicarTodos(_items, -1));
+    private List<TablaTipoEstado> BaseSinEstaColumna(int col) => AplicarTodos(_items, col);
+
+    private List<TablaTipoEstado> AplicarTodos(List<TablaTipoEstado> origen, int excluir)
+    {
+        IEnumerable<TablaTipoEstado> q = origen;
+        foreach (var (col, vals) in _filtros)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.DES_TABLA ?? "")),
+                1 => q.Where(x => vals.Contains(x.DES_TIPO_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltro(int col, HashSet<string>? vals) { _filtros[col] = vals; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private readonly List<string> _printHeaders = new() { "Tabla", "Tipo de estado" };
+    private List<List<string>> PrintRows() => _items.Select(b => new List<string>
+    {
+        b.DES_TABLA ?? "", b.DES_TIPO_ESTADO ?? ""
+    }).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ESTANDAR", "TablasTiposEstado");
+        await Load();
+        Cambios.Suscribir("ESTANDAR.TABLAS_TIPOS_ESTADO", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Open(null));
+
+    private async Task Load() => _items = await Service.GetAllAsync();
+
+    private async Task HandleSearch()
+    {
+        _items = string.IsNullOrWhiteSpace(_searchTerm)
+            ? await Service.GetAllAsync()
+            : await Service.SearchAsync(_searchTerm);
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Open(null);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(TablaTipoEstado item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Ver(item);
+        if (b.FLG_ACCION_PUT    == true) return Open(item);
+        if (b.FLG_ACCION_DELETE == true) return Delete(item);
+        return Task.CompletedTask;
+    }
+
+    private async Task Ver(TablaTipoEstado item)    => await AbrirDialog(item, CrudModo.Read);
+    private async Task Open(TablaTipoEstado? b)     => await AbrirDialog(b, b is null ? CrudModo.Create : CrudModo.Update);
+    private async Task Delete(TablaTipoEstado b)    => await AbrirDialog(b, CrudModo.Delete);
+
+    private async Task AbrirDialog(TablaTipoEstado? b, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nueva tabla",
+            CrudModo.Read   => $"Ver · {b?.DES_TABLA}",
+            CrudModo.Update => $"Editar · {b?.DES_TABLA}",
+            CrudModo.Delete => $"Eliminar · {b?.DES_TABLA}",
+            _ => "Tabla x Tipo de Estado"
+        };
+        var parameters = new DialogParameters { ["Item"] = b, ["Modo"] = modo };
+        var dlg = await DialogService.ShowAsync<TablaTipoEstadoDialog>(titulo, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ESTANDAR.TABLAS_TIPOS_ESTADO", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

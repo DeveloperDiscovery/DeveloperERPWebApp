@@ -1,0 +1,2629 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject IAuthService AuthService
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject ConfigService ConfigSvc
+@inject EtiquetasService EtiquetasSvc
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject MenuService MenuService
+@inject MenuEstadoService MenuEstado
+@inject FavoritoService FavoritoService
+@inject FavoritosCacheService FavoritosCache
+@inject WorkspaceTabService TabService
+@inject ISnackbar Snackbar
+@inject AccessLogService AccessLog
+@inject ErrorLogService ErrorLog
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+@inject IDialogService DialogService
+@inject UsuarioService UsuarioSvc
+@inject FotoUsuarioService FotoSvc
+@inject CatalogoService<Perfil, PerfilDto> PerfilSvc
+@inject HttpClient Http
+@inject ConfiguracionGeneralService CfgGeneralSvc
+@inject ConfiguracionUsuarioService CfgUsuarioSvc
+@inject CatalogoService<KONSolutions.Shared.Models.Estandar.TipoMenuOpciones, KONSolutions.Shared.Models.Estandar.TipoMenuOpcionesDto> TiposMenuSvc
+@inject ShortcutService ShortcutSvc
+@inject TransicionMenuService TransicionSvc
+@inject NotificacionesFlujoService NotifSvc
+@inject NotificacionesAprobacionesService AprobSvc
+@using KONSolutions.Web.Pages.Developer
+
+<MudThemeProvider Theme="_theme" />
+@* MudPopoverProvider ahora vive fuera de #app (ver index.html/Program.cs) para que el
+   zoom (transform:scale) no desalinee combos, menús contextuales y tooltips. *@
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<style>
+    /* ── Splash screen ── */
+    .splash-overlay {
+        position: fixed; inset: 0; z-index: 10000;
+        background: #1a1714;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 28px;
+        transition: opacity .4s ease;
+    }
+    .splash-logo {
+        width: 110px; height: 110px; object-fit: contain; border-radius: 12px;
+        animation: splashPulse 1.5s ease-in-out infinite;
+    }
+    .splash-icon-wrap {
+        font-size: 90px !important; color: #b8472d;
+        animation: splashPulse 1.5s ease-in-out infinite;
+        display: flex;
+    }
+    .splash-appname {
+        font-family: 'Archivo', sans-serif;
+        font-weight: 800; letter-spacing: .16em;
+        font-size: 1.2rem; color: rgba(255,255,255,.55);
+        text-transform: uppercase;
+    }
+    .splash-dots {
+        display: flex; gap: 8px;
+    }
+    .splash-dots span {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: #b8472d; opacity: .3;
+        animation: splashDot 1.2s ease-in-out infinite;
+    }
+    .splash-dots span:nth-child(2) { animation-delay: .2s; }
+    .splash-dots span:nth-child(3) { animation-delay: .4s; }
+    @@keyframes splashPulse {
+        0%, 100% { transform: scale(1);    opacity: 1; }
+        50%       { transform: scale(1.18); opacity: .75; }
+    }
+    @@keyframes splashDot {
+        0%, 100% { opacity: .3; transform: translateY(0); }
+        50%       { opacity: 1;  transform: translateY(-5px); }
+    }
+
+    /* ── Persiana horizontal de apertura al terminar la carga del menú:
+       franjas apiladas (una encima de otra) que se encogen en ancho (scaleX) desde
+       su propio centro, en cascada desde la franja central hacia arriba y abajo. ── */
+    .blind-overlay {
+        position: fixed; inset: 0; z-index: 9999;
+        display: flex; flex-direction: column; pointer-events: none;
+    }
+    .blind-slat {
+        flex: 1 1 0;
+        background: #1a1714;
+        transform-origin: center;
+        animation: blindOpen .6s cubic-bezier(.6,0,.35,1) forwards;
+    }
+    @@keyframes blindOpen {
+        from { transform: scaleX(1); }
+        to   { transform: scaleX(0); }
+    }
+    @@media (prefers-reduced-motion: reduce) {
+        .blind-slat { animation-duration: .01ms; animation-delay: 0ms !important; }
+    }
+
+    .sidebar {
+        position: fixed;
+        top: 0; left: 0; bottom: 40px;
+        width: 60px;
+        background: var(--env-back, #1a1714);
+        border-right: 1px solid rgba(255,255,255,.08);
+        display: flex;
+        flex-direction: column;
+        z-index: 1100;
+        transition: width .22s cubic-bezier(.4,0,.2,1);
+        overflow: hidden;
+    }
+    /* Expandido solo cuando está fijado con pin */
+    .sidebar.pinned { width: var(--sidebar-w, 280px); }
+    /* Ocultar tooltip cuando el sidebar está expandido (solo pin) */
+    .sidebar.pinned .sidebar-tooltip { display: none !important; }
+    /* Modo menú circular: sidebar completamente oculto — empresa aparece en el AppBar */
+    .sidebar.oculto { width: 0 !important; border: none !important; overflow: hidden !important; }
+    /* Usuario zurdo: sidebar a la derecha */
+    .sidebar.zurdo { left: auto; right: 0; border-right: none; border-left: 1px solid rgba(255,255,255,.08); }
+
+    /* Header del sidebar */
+    .sidebar-header {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        height: 92px; /* igual a .app-bar, para que ambas franjas queden a la misma altura */
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        flex-shrink: 0;
+        overflow: visible;
+    }
+    .sidebar-logo-text {
+        font-family: 'Archivo', sans-serif;
+        font-weight: 800;
+        letter-spacing: .08em;
+        /* Tamaño base — sidebarTextFit.js lo reduce en tiempo real (con JS, no con calc())
+           hasta que el texto entre en el ancho real del sidebar, sin recortarlo con "...". */
+        font-size: 1.35rem;
+        line-height: 1.1;
+        color: var(--env-fore, #fff);
+        opacity: 1;
+        transition: opacity .15s;
+        white-space: nowrap;
+        overflow: hidden;
+        flex: 1;
+        min-width: 0;
+    }
+    .sidebar:not(.pinned) .sidebar-logo-text { opacity: 0; pointer-events: none; }
+
+    /* Scroll area */
+    .sidebar-scroll {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 8px 0;
+    }
+    .sidebar-scroll::-webkit-scrollbar { width: 4px; }
+    .sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 2px; }
+
+    /* Sección label */
+    .sidebar-section {
+        padding: 12px 14px 4px;
+        font-size: .68rem;
+        letter-spacing: .1em;
+        color: #FFB74D;
+        font-family: monospace;
+        white-space: nowrap;
+        overflow: hidden;
+        transition: opacity .15s;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        user-select: none;
+    }
+    .sidebar-section:hover { color: #FFE082; }
+    .sidebar-section .section-chevron {
+        font-size: .75rem;
+        transition: transform .2s;
+        opacity: .7;
+    }
+    .sidebar-section.colapsada .section-chevron { transform: rotate(-90deg); }
+    .sidebar:not(.pinned) .sidebar-section { opacity: 0; pointer-events: none; }
+
+    /* Ítem de menú */
+    .sidebar-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 14px;
+        cursor: pointer;
+        border-radius: 6px;
+        margin: 1px 6px;
+        color: var(--env-fore, rgba(255,255,255,.70));
+        opacity: .85;
+        font-size: .84rem;
+        transition: background .14s, color .14s, opacity .14s;
+        white-space: nowrap;
+        overflow: hidden;
+        position: relative;
+    }
+    .sidebar-item:hover { background: rgba(255,255,255,.09); opacity: 1; }
+    .sidebar-item.activo { background: #b8472d; color: #fff; opacity: 1; }
+    .sidebar-item .item-text {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        transition: opacity .15s;
+    }
+    .sidebar:not(.pinned) .sidebar-item .item-text { opacity: 0; pointer-events: none; }
+    .sidebar-item .item-icon { flex-shrink: 0; font-size: 1.1rem !important; }
+    .sidebar-item .item-icon-img { width: 1.1rem; height: 1.1rem; object-fit: contain; border-radius: 3px; }
+
+    /* Grupo colapsable */
+    .sidebar-group-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 14px;
+        cursor: pointer;
+        border-radius: 6px;
+        margin: 1px 6px;
+        color: var(--env-fore, rgba(255,255,255,.70));
+        opacity: .85;
+        font-size: .84rem;
+        transition: background .14s, color .14s, opacity .14s;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+    .sidebar-group-header:hover { background: rgba(255,255,255,.09); opacity: 1; }
+    .sidebar-group-header .item-text { flex:1; overflow:hidden; text-overflow:ellipsis; transition: opacity .15s; }
+    .sidebar:not(.pinned) .sidebar-group-header .item-text { opacity:0; pointer-events:none; }
+    .sidebar-group-children { padding-left: 8px; }
+
+    /* Tooltip en modo colapsado */
+    .sidebar-item-wrap { position: relative; }
+    .sidebar-item-wrap:hover .sidebar-tooltip {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateX(0);
+    }
+    .sidebar-tooltip {
+        position: absolute;
+        left: 64px;
+        top: 50%;
+        transform: translateY(-50%) translateX(-6px);
+        background: var(--env-back, #1a1714);
+        color: #fff;
+        font-size: .78rem;
+        padding: 4px 10px;
+        border-radius: 6px;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity .15s, transform .15s;
+        z-index: 9999;
+        border: 1px solid rgba(255,255,255,.12);
+        box-shadow: 0 4px 16px rgba(0,0,0,.4);
+    }
+
+    /* Pin button */
+    .pin-btn {
+        padding: 8px 12px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        border-top: 1px solid rgba(255,255,255,.08);
+        flex-shrink: 0;
+    }
+
+    /* Contenido principal desplazado */
+    :root { --sidebar-w: 280px; }
+    .main-content {
+        margin-left: 60px;
+        transition: margin-left .22s cubic-bezier(.4,0,.2,1);
+        height: 100%; /* relativo a #app (ver app.css), no a 100vh — necesario para que el
+                         zoom propio de la app (transform:scale en #app) escale todo junto */
+        display: flex;
+        flex-direction: column;
+        overflow: hidden; /* el scroll real ocurre dentro de .ws-tab-content, variable vía flexbox */
+    }
+    /* Solo el pin empuja el contenido; el hover es overlay (z-index mayor, no mueve el contenido) */
+    .main-content.expanded { margin-left: var(--sidebar-w, 280px); }
+    /* Modo circular / tiles: sidebar oculto → contenido a ancho completo */
+    .main-content.circular, .main-content.tiles { margin-left: 0 !important; }
+    /* Usuario zurdo: contenido desplazado desde la derecha */
+    .main-content.zurdo { margin-left: 0; margin-right: 60px; }
+    .main-content.zurdo.expanded { margin-right: var(--sidebar-w, 280px); margin-left: 0; }
+    .main-content.zurdo.circular, .main-content.zurdo.tiles { margin-right: 0 !important; }
+
+    /* Handle de redimensionado del sidebar */
+    .sidebar-resize-handle {
+        position: absolute;
+        top: 0; right: -4px; bottom: 0;
+        width: 9px;
+        cursor: col-resize;
+        z-index: 5000;
+        background: transparent;
+        transition: background .15s;
+        touch-action: none;
+    }
+    .sidebar-resize-handle:hover,
+    .sidebar-resize-handle.arrastrando { background: rgba(184,71,45,.5); }
+    .sidebar.zurdo .sidebar-resize-handle { right: auto; left: -4px; }
+
+    /* AppBar */
+    .app-bar {
+        position: sticky;
+        top: 0;
+        height: 92px; /* agrandada para que quepan los íconos de notificaciones (x3) */
+        flex-shrink: 0; /* nunca se comprime dentro del flex column de .main-content */
+        background: var(--env-back, #1a1714);
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+        z-index: 1100;
+        gap: 12px;
+    }
+
+    /* Grupo de notificaciones del AppBar (punto: íconos del SP + badge) — tamaño x3 */
+    .notif-icon-item {
+        position: relative;
+        width: 84px; height: 84px; border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        cursor: pointer; color: var(--env-fore, #fff);
+        transition: background .15s ease;
+    }
+    .notif-icon-item:hover { background: rgba(255,255,255,.08); }
+    .notif-badge {
+        position: absolute; top: 4px; right: 4px; min-width: 24px; height: 24px; padding: 0 6px;
+        border-radius: 13px; background: #e02424; color: #fff;
+        font-size: .95rem; font-weight: 700; line-height: 1;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 0 0 2px var(--env-back, #1a1714);
+        font-variant-numeric: tabular-nums;
+    }
+    .notif-panel {
+        /* top:100% (no un valor fijo en px) para que quede pegado justo al borde inferior
+           del ícono, sin ninguna franja intermedia — con una franja el mouse "sale" del
+           ícono al bajar hacia las filas y el mouseleave cierra el panel antes de poder
+           hacer clic (ocurría "a veces", según qué tan rápido bajaba el mouse). */
+        /* Ancho/avatar/tipografía vueltos a la mitad (el x2 anterior no era lo pedido —
+           era solo el ALTO de la lista, para que entren más filas visibles). El alto de
+           la lista sí queda más grande a propósito: antes se veían ~3 filas, ahora ~6-7. */
+        position: absolute; top: 100%; right: 0; width: 384px; max-width: 90vw;
+        border-radius: 10px; overflow: hidden; z-index: 1200; color: var(--env-fore, #fff);
+    }
+    .notif-panel-head {
+        padding: 10px 14px; display: flex; align-items: center; justify-content: space-between;
+        font-weight: 700; font-size: 0.8rem; border-bottom: 1px solid rgba(255,255,255,.12);
+    }
+    .notif-panel-list { max-height: 400px; overflow-y: auto; background: #fff; }
+    .notif-panel-item { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; background: #fff; transition: background .12s, color .12s; }
+    .notif-panel-item:last-child { border-bottom: none; }
+    /* Mismo color de foco que usan las filas de las grillas (FocoFondo/FocoTexto de
+       Configuración General), en vez de un hover genérico — variables inyectadas
+       desde el contenedor del grupo de íconos. */
+    .notif-panel-item:hover {
+        background: var(--notif-foco-back, #b8472d);
+        color: var(--notif-foco-fore, #ffffff);
+    }
+    .notif-panel-item:hover .notif-panel-item-titulo,
+    .notif-panel-item:hover .notif-panel-item-detalle,
+    .notif-panel-item:hover .notif-panel-item-usuario { color: var(--notif-foco-fore, #ffffff); }
+    .notif-panel-item-titulo { font-weight: 700; font-size: 0.78rem; color: #1d4ed8; }
+    .notif-panel-item-detalle { font-size: 0.74rem; color: #2563eb; opacity: .85; margin-top: 4px; }
+    .notif-panel-item-usuario { font-size: 0.68rem; color: #64748b; margin-top: 4px; font-weight: 600; }
+    .notif-panel-item-avatar {
+        width: 36px; height: 36px; border-radius: 50%; background: #e1dfdd; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center; overflow: hidden;
+    }
+    .notif-panel-item-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+    /* Toasts de notificación nueva, estilo Outlook de escritorio (Windows). */
+    .toast-outlook-host {
+        position: fixed; right: 16px; bottom: 44px; z-index: 9500;
+        display: flex; flex-direction: column-reverse; gap: 10px;
+        pointer-events: none;
+    }
+    .toast-outlook {
+        pointer-events: auto; width: 360px; max-width: 90vw;
+        background: #f3f2f1; border-radius: 8px; overflow: hidden;
+        box-shadow: 0 8px 24px rgba(0,0,0,.28), 0 0 0 1px rgba(0,0,0,.06);
+        animation: toast-outlook-in .25s ease-out;
+    }
+    @@keyframes toast-outlook-in {
+        from { opacity: 0; transform: translateY(12px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    .toast-outlook-head {
+        display: flex; align-items: center; gap: 8px; padding: 8px 6px 6px 12px;
+    }
+    .toast-outlook-appicon { width: 16px; height: 16px; object-fit: contain; border-radius: 3px; }
+    .toast-outlook-body {
+        display: flex; gap: 12px; padding: 4px 14px 12px; cursor: pointer;
+    }
+    .toast-outlook-avatar-col {
+        display: flex; flex-direction: column; align-items: center; gap: 3px; flex-shrink: 0; width: 72px;
+    }
+    .toast-outlook-avatar {
+        width: 56px; height: 56px; border-radius: 50%; background: #e1dfdd; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center; overflow: hidden;
+    }
+    .toast-outlook-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .toast-outlook-usuario {
+        font-size: .62rem; font-weight: 600; color: #605e5c; text-align: center;
+        width: 72px; line-height: 1.15; word-break: break-word;
+    }
+    .toast-outlook-titulo { font-size: .84rem; font-weight: 700; color: #201f1e; line-height: 1.3; }
+    .toast-outlook-msg { font-size: .78rem; color: #605e5c; margin-top: 2px; line-height: 1.35; }
+    .toast-outlook-actions {
+        display: flex; border-top: 1px solid rgba(0,0,0,.08);
+    }
+    .toast-outlook-actions .mud-icon-button { flex: 1; border-radius: 0; }
+    .toast-outlook-actions .mud-icon-button:not(:last-child) { border-right: 1px solid rgba(0,0,0,.08); }
+
+    /* Zoom control (estilo Chrome) */
+    .zoom-control {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 1px;
+        user-select: none;
+        border: 1px solid rgba(255,255,255,.15);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    .zoom-btn {
+        padding: 2px 8px;
+        font-size: .85rem;
+        color: var(--env-fore, #fff);
+        opacity: .7;
+        cursor: pointer;
+        transition: background .12s, opacity .12s;
+        line-height: 1.6;
+    }
+    .zoom-btn:hover { background: rgba(255,255,255,.12); opacity: 1; }
+    .zoom-pct {
+        padding: 2px 6px;
+        font-size: .73rem;
+        font-family: 'Spline Sans Mono', monospace;
+        color: var(--env-fore, #fff);
+        opacity: .8;
+        cursor: pointer;
+        border-left: 1px solid rgba(255,255,255,.1);
+        border-right: 1px solid rgba(255,255,255,.1);
+        min-width: 38px;
+        text-align: center;
+        line-height: 1.6;
+        transition: background .12s, opacity .12s;
+    }
+    .zoom-pct:hover { background: rgba(255,255,255,.1); opacity: 1; }
+
+    /* Pin button sin outline ni ripple */
+    .status-bar .mud-icon-button:focus,
+    .status-bar .mud-icon-button:focus-visible {
+        outline: none !important;
+        box-shadow: none !important;
+    }
+    .status-bar .mud-icon-button::after { display: none !important; }
+
+    /* Texto del valor seleccionado en el selector de roles */
+    .env-role-select .mud-input,
+    .env-role-select .mud-input-slot,
+    .env-role-select .mud-select-input,
+    .env-role-select input,
+    .env-role-select .mud-input-text,
+    .env-role-select .mud-input-root,
+    .env-role-select .mud-input-root-text {
+        color: var(--env-fore, #fff) !important;
+        background: var(--env-back, #1a1714) !important;
+        background-color: var(--env-back, #1a1714) !important;
+        font-size: .8rem !important;
+    }
+    .env-role-select .mud-select-icon,
+    .env-role-select .mud-icon-root {
+        color: var(--env-fore, #fff) !important;
+        opacity: .6;
+    }
+
+    /* Popover del selector de roles — colores del entorno */
+    .env-roles-popover .mud-list,
+    .env-roles-popover .mud-popover-paper {
+        background: var(--env-back, #1a1714) !important;
+        color: var(--env-fore, #fff) !important;
+    }
+    .env-roles-popover .mud-list-item-text,
+    .env-roles-popover .mud-list-item {
+        color: var(--env-fore, #fff) !important;
+    }
+    .env-roles-popover .mud-selected-item,
+    .env-roles-popover .mud-list-item.mud-selected {
+        background: rgba(255,255,255,.12) !important;
+        color: var(--env-fore, #fff) !important;
+    }
+    .env-roles-popover .mud-list-item:hover {
+        background: rgba(255,255,255,.09) !important;
+    }
+
+    /* Íconos de MudListItem dentro de menús contextuales del entorno */
+    .env-menu .mud-list-item-icon,
+    .env-menu .mud-icon-root,
+    .env-menu svg {
+        color: inherit !important;
+        fill: inherit !important;
+    }
+    .env-menu .mud-list-item:hover {
+        background: rgba(255,255,255,.09) !important;
+    }
+
+    /* Barra de estado inferior — ancho completo, fuera del área de tabs */
+    .status-bar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 40px;
+        background: var(--env-back, #1a1714);
+        border-top: 1px solid rgba(255,255,255,.15);
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+        gap: 12px;
+        z-index: 1150;
+        overflow: hidden;
+    }
+</style>
+
+@* ── Splash screen ── *@
+@if (!_menuCargado)
+{
+    <div class="splash-overlay">
+        @* Logo: preferir app, fallback empresa, fallback ícono *@
+        @if (_logoApp is not null)
+        {
+            <img src="data:image/png;base64,@_logoApp" class="splash-logo" />
+        }
+        else if (_logoEmpresa is not null)
+        {
+            <img src="data:image/png;base64,@_logoEmpresa" class="splash-logo" />
+        }
+        else
+        {
+            <div class="splash-icon-wrap">
+                <MudIcon Icon="@Icons.Material.Filled.GridView" Style="font-size:inherit;color:inherit;" />
+            </div>
+        }
+        @* Nombre de la aplicación (de config) con colores en dos partes *@
+        <div class="splash-appname">
+            @{ var parts = _nombreApp.Split(' ', 2); }
+            @if (parts.Length == 2)
+            {
+                <span style="color:rgba(255,255,255,.85);">@parts[0] </span><span style="color:var(--rust,#b8472d);">@parts[1]</span>
+            }
+            else
+            {
+                @_nombreApp
+            }
+        </div>
+        @* Nombre de la empresa debajo, pequeño y atenuado *@
+        @if (!string.IsNullOrWhiteSpace(_nombreEmpresa))
+        {
+            <div class="splash-appname" style="opacity:.45;font-size:.75rem;letter-spacing:.18em;margin-top:-16px;">@_nombreEmpresa.ToUpperInvariant()</div>
+        }
+        <div style="position:relative;width:150px;height:150px;display:flex;align-items:center;justify-content:center;" class="mt-2">
+            <svg viewBox="0 0 150 150" style="width:100%;height:100%;position:absolute;inset:0;">
+                @{ const int totalMarcas = 60; var encendidas = (int)Math.Round(totalMarcas * _cargaPct / 100.0); }
+                @for (var i = 0; i < totalMarcas; i++)
+                {
+                    var idx = i;
+                    var angulo = (idx / (double)totalMarcas) * 2 * Math.PI - Math.PI / 2;
+                    var x1 = 75 + 62 * Math.Cos(angulo); var y1 = 75 + 62 * Math.Sin(angulo);
+                    var x2 = 75 + 70 * Math.Cos(angulo); var y2 = 75 + 70 * Math.Sin(angulo);
+                    <line x1="@x1.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                          y1="@y1.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                          x2="@x2.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                          y2="@y2.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                          stroke="@(idx < encendidas ? "#39ff6a" : "rgba(255,255,255,.18)")"
+                          stroke-width="3" stroke-linecap="round" />
+                }
+            </svg>
+            <div style="position:relative;text-align:center;">
+                <div style="font-weight:800;font-size:1.6rem;color:#fff;font-family:var(--mono-font,monospace);">@_cargaPct%</div>
+            </div>
+        </div>
+        <div class="mono" style="color:#39ff6a;text-shadow:0 0 6px rgba(57,255,106,.55);font-size:.8rem;letter-spacing:.05em;margin-top:-8px;">@_cargaEtapa</div>
+    </div>
+}
+
+@* ── Persiana horizontal: al terminar de cargar el menú, en vez de que el splash
+     desaparezca de golpe, se cubre la pantalla con franjas horizontales apiladas que se
+     abren (encogen en ancho desde su propio centro) empezando por la franja central y en
+     cascada hacia arriba y hacia abajo, dejando ver el menú recién cargado detrás. ── *@
+@if (_revelandoPersiana)
+{
+    <div class="blind-overlay">
+        @{ double centro = (PersianaSlats - 1) / 2.0; }
+        @for (var i = 0; i < PersianaSlats; i++)
+        {
+            var delayMs = (int)(Math.Abs(i - centro) * 45);
+            <div class="blind-slat" style="animation-delay:@(delayMs)ms;"></div>
+        }
+    </div>
+}
+
+@* ── Overlay de transición corta (ej. giro del menú circular) — mismo estilo que el
+     splash posterior al login, pero sin logo: solo tapa mientras se abre una pestaña. ── *@
+@if (_mostrandoTransicion)
+{
+    <div class="splash-overlay">
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" Size="Size.Large" />
+        <div class="mono" style="color:#39ff6a;text-shadow:0 0 6px rgba(57,255,106,.55);font-size:.85rem;letter-spacing:.05em;">@_transicionMensaje</div>
+    </div>
+}
+
+<AuthorizeView>
+    <Authorized>
+    @if (_menuCargado)
+    {
+        <MudLayout style="@(_cambiandoRol ? "cursor:wait;pointer-events:none;" : "")">
+
+        @* ── Sidebar ── *@
+        <div id="sidebar-main" class="sidebar @(_pinned ? "pinned" : "") @(_estiloMenu != EstiloMenu.Lateral ? "oculto" : "") @(_esZurdo ? "zurdo" : "")"
+             @oncontextmenu="@(() => { })" @oncontextmenu:preventDefault="true">
+
+            @* Header: logo empresa + nombre empresa *@
+            <div class="sidebar-header">
+                @if (!string.IsNullOrEmpty(_logoEmpresa))
+                {
+                    <img src="data:image/png;base64,@_logoEmpresa"
+                         style="width:28px;height:28px;object-fit:contain;border-radius:4px;flex-shrink:0;background-color:#ffffff;padding:2px;cursor:zoom-in;"
+                         @ondblclick="@(() => AbrirZoomLogo(_logoEmpresa))" />
+                }
+                else
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.Business"
+                             Style="color:#b8472d;flex-shrink:0;font-size:4rem;" />
+                }
+                <span class="sidebar-logo-text">@(!string.IsNullOrEmpty(_nombreEmpresa) ? _nombreEmpresa : _nombreApp)</span>
+                <MudTooltip Text="@(_apiActiva ? "API activa" : "API no disponible")" Placement="Placement.Right">
+                    <span style="width:9px;height:9px;border-radius:50%;flex-shrink:0;
+                                 background:@(_apiActiva ? "#48bb78" : "#fc8181");
+                                 box-shadow:0 0 5px @(_apiActiva ? "#48bb78" : "#fc8181");
+                                 display:inline-block;margin-left:2px;" />
+                </MudTooltip>
+            </div>
+
+            @* Contenido scrollable *@
+            <div class="sidebar-scroll">
+
+                @* Favoritos — ocultos del sidebar, se gestionan desde el Workspace *@
+
+                @* Búsqueda — solo tiene sentido con el sidebar fijado (expandido) *@
+                @if (_pinned)
+                {
+                    <div style="padding:4px 10px 8px;">
+                        <MudTextField T="string" Value="_busquedaMenu" ValueChanged="@((string v) => _busquedaMenu = v)"
+                                      Placeholder="Buscar... (Ctrl+K)" Variant="Variant.Text" Margin="Margin.Dense"
+                                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                                      Immediate="true" Clearable="true" OnClearButtonClick="@(() => _busquedaMenu = "")"
+                                      UserAttributes="@(new Dictionary<string,object> { ["id"] = "sidebar-search-input" })"
+                                      Style="background:rgba(255,255,255,.06);border-radius:4px;color:var(--env-fore,#fff);" />
+                    </div>
+                }
+
+                @* Opciones dinámicas de la BD agrupadas por aplicación.
+                   Cada grupo lleva un encabezado con el nombre e ícono de la app. *@
+                @foreach (var grupo in _arbolMenuFiltrado.GroupBy(n => n.COD_APLICACION))
+                {
+                    var primerNodo = grupo.First();
+                    var codApp    = grupo.Key;
+                    var desApp    = (primerNodo.DES_APLICACION ?? codApp).ToUpperInvariant();
+                    var appColaps = string.IsNullOrWhiteSpace(_busquedaMenu) && _appsColapsadas.Contains(codApp);
+                    <div class="sidebar-section @(appColaps ? "colapsada" : "")"
+                         style="display:flex;align-items:center;gap:6px;"
+                         @onclick="@(() => ToggleApp(codApp))"
+                         @oncontextmenu="@(() => { })" @oncontextmenu:preventDefault="true">
+                        <MudIcon Icon="@IconoAplicacion(desApp)"
+                                 Style="font-size:.95rem;opacity:.75;flex-shrink:0;" />
+                        <span class="item-text" style="flex:1;">@desApp</span>
+                        <span class="item-text section-chevron">▼</span>
+                    </div>
+                    @if (!appColaps)
+                    {
+                        @foreach (var nodo in grupo)
+                        {
+                            <NodoMenuItem Nodo="nodo" Expandido="_pinned"
+                                          CarpetasExpandidas="@(string.IsNullOrWhiteSpace(_busquedaMenu) ? _carpetasExpandidas : _carpetasExpandidasFiltro)"
+                                          OnAbrirOpcion="AbrirTabOpcion"
+                                          OnMenuContextual="@(t => MostrarMenuOpcion(t.Item1, t.Item2))"
+                                          OnToggleCarpeta="ToggleCarpeta" />
+                        }
+                    }
+                }
+
+                @* Menú estático de desarrollo — solo si ya terminó de cargar el menú
+                   dinámico y resultó vacío (sin permisos reales), no durante la carga inicial *@
+                @if (_menuCargado && !_opciones.Any())
+                {
+                    @* SEGURIDAD *@
+                    <div class="@_classSeg" @onclick="ToggleSeccionSeg">
+                        <span>SEGURIDAD</span>
+                        <span class="section-chevron">▼</span>
+                    </div>
+                    @if (!_seccionesColapsadas.Contains("SEG"))
+                    {
+                        @SidebarGrupo("Usuarios",              Icons.Material.Filled.People,              "/seguridad/usuarios")
+                        @SidebarGrupo("Perfiles",              Icons.Material.Filled.Badge,               "/seguridad/perfiles")
+                        @SidebarGrupo("Roles",                 Icons.Material.Filled.AdminPanelSettings,  "/seguridad/roles")
+                        @SidebarGrupo("Aplicaciones",          Icons.Material.Filled.Apps,                "/seguridad/aplicaciones")
+                        @SidebarGrupo("Opciones Aplicaciones", Icons.Material.Filled.AccountTree,         "/seguridad/opciones-aplicaciones")
+                        @SidebarGrupo("Opciones Menú",         Icons.Material.Filled.Interests,           "/seguridad/opciones-menu")
+                        @SidebarGrupo("Complejidad contraseña",Icons.Material.Filled.Password,            "/seguridad/complejidad-password")
+                        @SidebarGrupo("Botones Estándar",      Icons.Material.Filled.SmartButton,         "/seguridad/botones-estandar")
+                        @SidebarGrupo("Asignación de Roles",   Icons.Material.Filled.GroupAdd,            "/seguridad/asignacion-roles")
+                    }
+
+                    @* ESTÁNDAR *@
+                    <div class="@_classEst" @onclick="ToggleSeccionEst">
+                        <span>ESTÁNDAR</span>
+                        <span class="section-chevron">▼</span>
+                    </div>
+                    @if (!_seccionesColapsadas.Contains("EST"))
+                    {
+                        @SidebarGrupo("Tipos de Estados", Icons.Material.Filled.Label,    "/estandar/tipos-estados")
+                        @SidebarGrupo("Estados Estándar", Icons.Material.Filled.Style,    "/estandar/estados-estandar")
+                        @SidebarGrupo("Tipos de Motivos", Icons.Material.Filled.Category, "/estandar/tipos-motivos")
+                    }
+
+                    @* SISTEMA *@
+                    <div class="@_classSis" @onclick="ToggleSeccionSis">
+                        <span>SISTEMA</span>
+                        <span class="section-chevron">▼</span>
+                    </div>
+                    @if (!_seccionesColapsadas.Contains("SIS"))
+                    {
+                        @SidebarGrupo("Visor de Logs",  Icons.Material.Filled.BugReport, "/developer/logviewer")
+                        @SidebarGrupo("Configuración",  Icons.Material.Filled.Settings,  "/seguridad/configuracion")
+                    }
+                }
+
+            </div>
+
+            <div id="sidebarResizeHandle" class="sidebar-resize-handle"></div>
+        </div>
+
+        @* ── Contenido principal ── *@
+        <div class="main-content @(_estiloMenu == EstiloMenu.Circular ? "circular" : _estiloMenu == EstiloMenu.Tiles ? "tiles" : _pinned ? "expanded" : "") @(_esZurdo ? "zurdo" : "")">
+
+            @* AppBar — derecha: logo aplicación; izquierda en modo circular/tiles: empresa *@
+            <div class="app-bar">
+                @if (_estiloMenu != EstiloMenu.Lateral)
+                {
+                    @if (!string.IsNullOrEmpty(_logoEmpresa))
+                    {
+                        <img src="data:image/png;base64,@_logoEmpresa"
+                             style="width:28px;height:28px;object-fit:contain;border-radius:4px;flex-shrink:0;background:#fff;padding:2px;cursor:zoom-in;"
+                             @ondblclick="@(() => AbrirZoomLogo(_logoEmpresa))" />
+                    }
+                    <span style="font-family:'Archivo',sans-serif;font-weight:800;letter-spacing:.08em;font-size:clamp(.6rem,1.8vw,1.1rem);color:var(--env-fore,#fff);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;">
+                        @(!string.IsNullOrEmpty(_nombreEmpresa) ? _nombreEmpresa : _nombreApp)
+                    </span>
+                }
+                <MudSpacer />
+
+                @* ── Notificaciones pendientes: un ícono por COD_TIPO_NOTIFICACION con badge de conteo ──
+                   Respeta la Configuración de Usuario "Notificaciones activas" (FLG_NOTIFICACION_ACTIVA). ── *@
+                @if (ConfigSvc.Current.NotificacionesActivas && _notifResumen.Count > 0)
+                {
+                    <div class="d-flex align-center gap-1"
+                         style="@($"--notif-foco-back:{ConfigSvc.Current.FocoFondo};--notif-foco-fore:{ConfigSvc.Current.FocoTexto};")">
+                        @foreach (var tipo in _notifResumen)
+                        {
+                            <div class="notif-icon-item" title="@tipo.DES_TIPO_NOTIFICACION"
+                                 @onclick="@(() => ToggleNotifPanel(tipo.COD_TIPO_NOTIFICACION))">
+                                @if (IconoBase64(tipo.IMG_ICONO) is { } src)
+                                {
+                                    <img src="@src" style="width:54px;height:54px;object-fit:contain;" alt="@tipo.DES_TIPO_NOTIFICACION" />
+                                }
+                                else
+                                {
+                                    <MudIcon Icon="@Icons.Material.Filled.Notifications" Style="font-size:54px;" />
+                                }
+                                <span class="notif-badge">@tipo.NUM_NOTIFICACIONES</span>
+
+                                @* El panel es hijo del ícono clickeado (no del grupo completo) para que
+                                   se posicione siempre debajo de ESE ícono, sin importar cuántos haya. *@
+                                @if (_notifTipoAbierto == tipo.COD_TIPO_NOTIFICACION)
+                                {
+                                    <MudPaper Elevation="6" Class="notif-panel" @onclick:stopPropagation="true"
+                                              Style="background:var(--env-back,#1a1714);border:1px solid rgba(255,255,255,.12);">
+                                        <div class="notif-panel-head">
+                                            <span>@tipo.DES_TIPO_NOTIFICACION</span>
+                                            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                                           Style="color:inherit;" OnClick="@(() => _notifTipoAbierto = null)" />
+                                        </div>
+                                        <div class="notif-panel-list">
+                                            @foreach (var n in _notifDetalle.Where(n => n.COD_TIPO_NOTIFICACION == tipo.COD_TIPO_NOTIFICACION))
+                                            {
+                                                @* PROC_NOTIFICACIONES_APROBACIONES_SHOWBYID trae la ficha completa
+                                                   (fecha, vencimiento, estado, cargo/área, historial) para CUALQUIER
+                                                   notificación, no solo las de aprobación — para un mensaje simple el
+                                                   historial trae una sola acción "LEIDO" en vez del flujo de firmas.
+                                                   Por eso todas abren el mismo diálogo rico, sin distinguir por FLG_APROBACION. *@
+                                                var fotoNotif = FotoSvc.ObtenerCacheada(n.COD_USUARIO_NOTIFICADOR);
+                                                <div class="notif-panel-item"
+                                                     style="cursor:pointer;display:flex;align-items:center;gap:8px;"
+                                                     @onclick="@(() => AbrirNotificacionAprobacion(n.NUM_NOTIFICACION))">
+                                                    <div class="notif-panel-item-avatar">
+                                                        @if (fotoNotif is not null)
+                                                        {
+                                                            <img src="@($"data:image/png;base64,{fotoNotif}")" alt="" />
+                                                        }
+                                                        else
+                                                        {
+                                                            <MudIcon Icon="@Icons.Material.Filled.Person" Style="font-size:1.1rem;opacity:.4;" />
+                                                        }
+                                                    </div>
+                                                    <div style="flex:1;min-width:0;">
+                                                        <div class="notif-panel-item-titulo">@n.DES_NOTIFICACION</div>
+                                                        <div class="notif-panel-item-detalle">@n.DES_INFORMACION</div>
+                                                        @if (!string.IsNullOrWhiteSpace(n.DES_USUARIO))
+                                                        {
+                                                            <div class="notif-panel-item-usuario">@n.DES_USUARIO</div>
+                                                        }
+                                                    </div>
+                                                    @if (n.DES_TIEMPO_RESTANTE is not null)
+                                                    {
+                                                        var colorTiempo = n.DES_TIEMPO_RESTANTE > 0 ? "#2e7d32" : n.DES_TIEMPO_RESTANTE == 0 ? "#1565c0" : "#c62828";
+                                                        <div style="@($"flex-shrink:0;display:flex;align-items:center;gap:3px;font-size:.7rem;font-weight:600;white-space:nowrap;color:{colorTiempo};")">
+                                                            <MudIcon Icon="@Icons.Material.Filled.Schedule" Size="Size.Small" Style="@($"font-size:.9rem;color:{colorTiempo};")" />
+                                                            @(n.DES_TIEMPO_RESTANTE >= 0
+                                                                ? $"{n.DES_TIEMPO_RESTANTE}d"
+                                                                : $"venció hace {Math.Abs(n.DES_TIEMPO_RESTANTE.Value)}d")
+                                                        </div>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                    </MudPaper>
+                                }
+                            </div>
+                        }
+                    </div>
+                    <div style="width:1px;height:24px;background:rgba(255,255,255,.14);flex-shrink:0;"></div>
+                    @if (_notifTipoAbierto is not null)
+                    {
+                        <div style="position:fixed;inset:0;z-index:1150;" @onclick="@(() => _notifTipoAbierto = null)"></div>
+                    }
+                }
+
+                @if (!string.IsNullOrEmpty(_logoApp))
+                {
+                    <img src="data:image/png;base64,@_logoApp"
+                         style="height:32px;object-fit:contain;border-radius:4px;flex-shrink:0;cursor:zoom-in;" alt="app"
+                         @ondblclick="@(() => AbrirZoomLogo(_logoApp))" />
+                }
+            </div>
+
+            @* Contenido — padding-bottom:40px reserva el espacio de la status-bar (position:fixed,
+               fuera de este flex column); flex:1 lo hace variable, sin cálculos de píxeles ni JS. *@
+            <div style="padding:24px 24px 40px;flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden;">
+                <WorkspaceTabHost>
+                    @Body
+                </WorkspaceTabHost>
+            </div>
+        </div>
+
+        @* ── Barra de estado inferior (ancho completo, fuera del área de tabs) ── *@
+        <div class="status-bar">
+
+            @* Sección izquierda: foto + nombre + texto de rol (abre menú usuario) *@
+            <div class="d-flex align-center gap-2" style="cursor:pointer;user-select:none;"
+                 @onclick="ToggleUserMenu">
+                @if (_fotoUsuario is not null)
+                {
+                    <MudAvatar Size="Size.Small" Style="flex-shrink:0;">
+                        <MudImage Src="@($"data:image/png;base64,{_fotoUsuario}")" />
+                    </MudAvatar>
+                }
+                else
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.AccountCircle"
+                             Style="color:var(--env-fore,#fff);opacity:.55;font-size:1.6rem;flex-shrink:0;" />
+                }
+                <div class="d-flex flex-column" style="line-height:1.15;overflow:hidden;min-width:0;">
+                    <span style="font-size:.78rem;color:var(--env-fore,#fff);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">@_codUsuario</span>
+                </div>
+                <MudIcon Icon="@(_userMenuOpen ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ExpandLess)"
+                         Style="color:var(--env-fore,#fff);opacity:.5;font-size:1rem;flex-shrink:0;" />
+            </div>
+
+            @* Reloj de cuenta regresiva hasta el bloqueo por inactividad — el texto lo escribe
+               directamente inactividad.js (sin round-trips a Blazor cada segundo). *@
+            <MudTooltip Text="Tiempo restante hasta el bloqueo automático por inactividad">
+                <div id="reloj-inactividad" class="d-flex align-center gap-1" style="display:none;">
+                    <MudIcon Icon="@Icons.Material.Filled.LockClock"
+                             Style="color:var(--env-fore,#fff);opacity:.5;font-size:1rem;flex-shrink:0;" />
+                    <span class="mono" style="font-size:.75rem;color:var(--env-fore,#fff);opacity:.6;min-width:38px;"></span>
+                </div>
+            </MudTooltip>
+
+            @* Reloj de cuenta regresiva del token de sesión (JWT) — mismo patrón que el de
+               inactividad: el texto lo escribe sesionToken.js directo, sin round-trip a Blazor
+               cada segundo. El deadline (epoch ms) se envía una sola vez desde OnAfterRenderAsync. *@
+            <MudTooltip Text="Tiempo restante de la sesión (token)">
+                <div id="reloj-token" class="d-flex align-center gap-1" style="display:none;">
+                    <MudIcon Icon="@Icons.Material.Filled.Timer"
+                             Style="color:var(--env-fore,#fff);opacity:.5;font-size:1rem;flex-shrink:0;" />
+                    <span class="mono" style="font-size:.75rem;color:var(--env-fore,#fff);opacity:.6;min-width:38px;"></span>
+                </div>
+            </MudTooltip>
+
+            @* Separador vertical *@
+            <div style="width:1px;height:24px;background:var(--env-fore,#fff);opacity:.25;flex-shrink:0;margin:0 4px;"></div>
+
+            @* Sección derecha del usuario: ícono de rol + selector + pin *@
+            <div class="d-flex align-center gap-1" style="flex-shrink:0;">
+                <MudIcon Icon="@Icons.Material.Filled.ManageAccounts"
+                         Style="color:var(--env-fore,#fff);opacity:.7;font-size:1.2rem;flex-shrink:0;" />
+                @if (MenuService.TieneVariosRoles)
+                {
+                    <MudSelect T="string" Value="@MenuService.RolActivo" ValueChanged="OnCambiarRol"
+                               Dense="true" Margin="Margin.Dense" Variant="Variant.Text"
+                               Style="max-width:200px;"
+                               Class="env-role-select"
+                               PopoverClass="env-roles-popover">
+                        @foreach (var rol in MenuService.Roles)
+                        {
+                            <MudSelectItem T="string" Value="@rol.COD_ROL_USUARIO">@(rol.DES_ROL_USUARIO ?? rol.COD_ROL_USUARIO)</MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+                <MudIconButton Icon="@(_pinned ? Icons.Material.Filled.PushPin : Icons.Material.Outlined.PushPin)"
+                               Style="@($"color:var(--env-fore,#fff);opacity:{(_pinned?"1":".45")};padding:4px;box-shadow:none !important;outline:none !important;")"
+                               Size="Size.Small"
+                               title="@(_pinned ? "Desfijar menú" : "Fijar menú")"
+                               OnClick="TogglePin" />
+            </div>
+
+            @* ── Zoom control (estilo Chrome) — pegado a la derecha ── *@
+            <div class="zoom-control">
+                <span class="zoom-btn" title="Reducir zoom" @onclick="ZoomOut">−</span>
+                <span class="zoom-pct" title="Restablecer zoom (100%)" @onclick="ZoomReset">@_zoomPct%</span>
+                <span class="zoom-btn" title="Aumentar zoom" @onclick="ZoomIn">+</span>
+            </div>
+        </div>
+
+        @* Menú contextual del usuario (abre hacia arriba desde el footer) *@
+        @if (_userMenuOpen)
+        {
+            <div style="position:fixed;inset:0;z-index:1249;" @onclick="@(() => _userMenuOpen = false)"></div>
+            <div style="position:fixed;left:16px;bottom:44px;z-index:1250;">
+                <MudPaper Elevation="6" Class="py-1" Style="min-width:220px;background:var(--menu-back, var(--ink));border:1px solid rgba(255,255,255,.12);">
+                    <MudListItem T="string" Style="color:var(--menu-fore, var(--paper));" OnClick="@(async () => { _userMenuOpen=false; await OpenCambiarPassword(); })">
+                        <div class="d-flex align-center gap-2" style="text-align:left;">
+                            <MudIcon Icon="@Icons.Material.Filled.Password" Size="Size.Small" Style="color:inherit;" />
+                            <span>Cambiar contraseña</span>
+                        </div>
+                    </MudListItem>
+                    <MudListItem T="string" Style="color:var(--menu-fore, var(--paper));" OnClick="@(async () => { _userMenuOpen=false; await BloquearPantalla(); })">
+                        <div class="d-flex align-center gap-2" style="text-align:left;">
+                            <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Style="color:inherit;" />
+                            <span>Bloquear pantalla</span>
+                        </div>
+                    </MudListItem>
+                    <MudDivider Style="border-color:rgba(255,255,255,.15);" />
+                    <MudListItem T="string" Style="color:var(--menu-fore, var(--paper));" OnClick="@(() => { _userMenuOpen=false; AbrirTabPorRuta("/configuracion-usuario"); })">
+                        <div class="d-flex align-center gap-2" style="text-align:left;">
+                            <MudIcon Icon="@Icons.Material.Filled.ManageAccounts" Size="Size.Small" Style="color:inherit;" />
+                            <span>Configuración de Usuarios</span>
+                        </div>
+                    </MudListItem>
+                    <MudDivider Style="border-color:rgba(255,255,255,.15);" />
+                    <MudListItem T="string" Style="color:var(--menu-fore, var(--paper));" OnClick="@(() => _estiloMenuSubmenuOpen = !_estiloMenuSubmenuOpen)">
+                        <div class="d-flex align-center gap-2" style="text-align:left;">
+                            <MudIcon Icon="@Icons.Material.Filled.Palette" Size="Size.Small" Style="color:inherit;" />
+                            <span>Estilo de menú</span>
+                            <MudSpacer />
+                            <MudIcon Icon="@(_estiloMenuSubmenuOpen ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small" Style="color:inherit;opacity:.6;" />
+                        </div>
+                    </MudListItem>
+                    @if (_estiloMenuSubmenuOpen)
+                    {
+                        <MudListItem T="string" Style="color:var(--menu-fore, var(--paper));padding-left:32px;" OnClick="@(() => CambiarEstiloMenu(EstiloMenu.Lateral))">
+                            <div class="d-flex align-center gap-2">
+                                @if (IconoBase64PorEstilo(EstiloMenu.Lateral) is { } imgLat)
+                                { <img src="@($"data:image/png;base64,{imgLat}")" style="width:20px;height:20px;object-fit:contain;" /> }
+                                else
+                                { <MudIcon Icon="@Icons.Material.Filled.List" Size="Size.Small" Style="color:inherit;" /> }
+                                <span>Menú lateral@(_estiloMenu == EstiloMenu.Lateral ? " ✓" : "")</span>
+                            </div>
+                        </MudListItem>
+                        <MudListItem T="string" Style="color:var(--menu-fore, var(--paper));padding-left:32px;" OnClick="@(() => CambiarEstiloMenu(EstiloMenu.Circular))">
+                            <div class="d-flex align-center gap-2">
+                                @if (IconoBase64PorEstilo(EstiloMenu.Circular) is { } imgCir)
+                                { <img src="@($"data:image/png;base64,{imgCir}")" style="width:20px;height:20px;object-fit:contain;" /> }
+                                else
+                                { <MudIcon Icon="@Icons.Material.Filled.DonutLarge" Size="Size.Small" Style="color:inherit;" /> }
+                                <span>Menú circular@(_estiloMenu == EstiloMenu.Circular ? " ✓" : "")</span>
+                            </div>
+                        </MudListItem>
+                        <MudListItem T="string" Style="color:var(--menu-fore, var(--paper));padding-left:32px;" OnClick="@(() => CambiarEstiloMenu(EstiloMenu.Tiles))">
+                            <div class="d-flex align-center gap-2">
+                                @if (IconoBase64PorEstilo(EstiloMenu.Tiles) is { } imgTil)
+                                { <img src="@($"data:image/png;base64,{imgTil}")" style="width:20px;height:20px;object-fit:contain;" /> }
+                                else
+                                { <MudIcon Icon="@Icons.Material.Filled.GridView" Size="Size.Small" Style="color:inherit;" /> }
+                                <span>Menú de tiles@(_estiloMenu == EstiloMenu.Tiles ? " ✓" : "")</span>
+                            </div>
+                        </MudListItem>
+                    }
+                    <MudDivider Style="border-color:rgba(255,255,255,.15);" />
+                    <MudListItem T="string" Style="color:var(--menu-fore, var(--paper));" OnClick="ToggleTablonPostIts">
+                        <div class="d-flex align-center gap-2" style="text-align:left;">
+                            <MudIcon Icon="@Icons.Material.Filled.PushPin" Size="Size.Small" Style="color:inherit;" />
+                            <span>Tablón de Post-its@(TablonPostItsAbierto ? " ✓" : "")</span>
+                        </div>
+                    </MudListItem>
+                    <MudDivider Style="border-color:rgba(255,255,255,.15);" />
+                    <MudListItem T="string" Style="color:var(--menu-fore, var(--paper));" OnClick="@(async () => { _userMenuOpen=false; await VerAtajosTeclado(); })">
+                        <div class="d-flex align-center gap-2" style="text-align:left;">
+                            <MudIcon Icon="@Icons.Material.Filled.Keyboard" Size="Size.Small" Style="color:inherit;" />
+                            <span>Atajos de teclado</span>
+                        </div>
+                    </MudListItem>
+                    <MudDivider Style="border-color:rgba(255,255,255,.15);" />
+                    <MudListItem T="string" Style="color:#ef4444;" OnClick="@(async () => { _userMenuOpen=false; await Logout(); })">
+                        <div class="d-flex align-center gap-2" style="text-align:left;">
+                            <MudIcon Icon="@Icons.Material.Filled.Logout" Size="Size.Small" Style="color:inherit;" />
+                            <span>Cerrar sesión</span>
+                        </div>
+                    </MudListItem>
+                </MudPaper>
+            </div>
+        }
+
+        <PantallaBloqueo @ref="_bloqueo" />
+
+        @* Overlay zoom logo (doble clic) *@
+        @if (_zoomLogoSrc is not null)
+        {
+            <div style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
+                        background:rgba(0,0,0,.72);backdrop-filter:blur(4px);"
+                 @onclick="CerrarZoomLogo">
+                <div style="width:min(50vw,50vh);height:min(50vw,50vh);
+                            background:#fff;border-radius:16px;padding:24px;
+                            box-shadow:0 8px 40px rgba(0,0,0,.6);
+                            display:flex;align-items:center;justify-content:center;"
+                     @onclick:stopPropagation="true">
+                    <img src="data:image/png;base64,@_zoomLogoSrc"
+                         style="max-width:100%;max-height:100%;object-fit:contain;" />
+                </div>
+                <span style="position:absolute;top:20px;right:28px;color:#fff;font-size:2rem;
+                             cursor:pointer;line-height:1;opacity:.8;"
+                      @onclick="CerrarZoomLogo">✕</span>
+            </div>
+        }
+
+        </MudLayout>
+    }
+    </Authorized>
+    <NotAuthorized>
+        @Body
+    </NotAuthorized>
+</AuthorizeView>
+
+@* Menú contextual favoritos *@
+@if (_ctxOpen && _ctxOpcion is not null)
+{
+    <div style="position:fixed;inset:0;z-index:9998;" @onclick="@(() => _ctxOpen = false)"></div>
+    <div style="@($"position:fixed;left:{_ctxX}px;top:{_ctxY}px;z-index:9999;")">
+        <MudPaper Elevation="4" Class="py-1" Style="min-width:200px;background:var(--env-back,#1a1714);border:1px solid rgba(255,255,255,.12);">
+            @if (_ctxEsFavorito)
+            {
+                <MudListItem T="string" Icon="@Icons.Material.Filled.StarBorder" IconColor="Color.Inherit"
+                             Style="color:var(--env-fore,#fff);" Class="px-3 ctx-fav-item"
+                             OnClick="QuitarFavorito">Quitar de favoritos</MudListItem>
+            }
+            else
+            {
+                <MudListItem T="string" Icon="@Icons.Material.Filled.Star" IconColor="Color.Inherit"
+                             Style="color:var(--env-fore,#fff);" Class="px-3 ctx-fav-item"
+                             OnClick="AgregarFavorito">Agregar a favoritos</MudListItem>
+            }
+        </MudPaper>
+    </div>
+}
+
+@* ── Toasts de notificaciones nuevas, estilo Outlook de escritorio (esquina inferior
+   derecha, apiladas) ── *@
+@if (_toasts.Count > 0)
+{
+    <div class="toast-outlook-host">
+        @foreach (var t in _toasts)
+        {
+            <div class="toast-outlook">
+                <div class="toast-outlook-head">
+                    @if (t.IMG_ICONO is { Length: > 0 })
+                    {
+                        <img src="@($"data:image/png;base64,{Convert.ToBase64String(t.IMG_ICONO)}")" class="toast-outlook-appicon" alt="" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Notifications" Style="font-size:1rem;opacity:.6;" />
+                    }
+                    <span style="flex:1;font-size:.74rem;font-weight:600;opacity:.7;">@(t.DES_TIPO_NOTIFICACION ?? "Notificación")</span>
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => CerrarToast(t))" />
+                </div>
+                <div class="toast-outlook-body" @onclick="@(() => VerToast(t))">
+                    <div class="toast-outlook-avatar-col">
+                        <div class="toast-outlook-avatar">
+                            @{
+                                var fotoToast = FotoSvc.ObtenerCacheada(t.COD_USUARIO_NOTIFICADOR);
+                            }
+                            @* Siempre la FOTO del usuario notificador (el ícono del tipo ya
+                               está en la cabecera del toast); mientras carga, silueta genérica. *@
+                            @if (fotoToast is not null)
+                            {
+                                <img src="@($"data:image/png;base64,{fotoToast}")" alt="" />
+                            }
+                            else
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Person" Style="font-size:1.8rem;opacity:.4;" />
+                            }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(t.DES_USUARIO))
+                        {
+                            <div class="toast-outlook-usuario">@t.DES_USUARIO</div>
+                        }
+                    </div>
+                    <div style="flex:1;min-width:0;">
+                        <div class="toast-outlook-titulo">@t.DES_NOTIFICACION</div>
+                        @if (!string.IsNullOrWhiteSpace(t.DES_INFORMACION))
+                        {
+                            <div class="toast-outlook-msg">@t.DES_INFORMACION</div>
+                        }
+                    </div>
+                </div>
+                <div class="toast-outlook-actions">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" OnClick="@(() => CerrarToast(t))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" OnClick="@(() => VerToast(t))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => CerrarToast(t))" />
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    // ── Estado del sidebar ──
+    private bool _pinned = false;   // fijado por el usuario (hover lo maneja CSS puro)
+
+    private readonly HashSet<string> _seccionesColapsadas = new();
+    private readonly HashSet<string> _appsColapsadas = new();
+
+    private void ToggleApp(string codApp)
+    {
+        if (!_appsColapsadas.Add(codApp)) _appsColapsadas.Remove(codApp);
+        StateHasChanged();
+    }
+
+    private void ToggleSeccion(string key)
+    {
+        if (!_seccionesColapsadas.Add(key)) _seccionesColapsadas.Remove(key);
+        StateHasChanged();
+    }
+
+    private void ToggleSeccionSeg() => ToggleSeccion("SEG");
+    private void ToggleSeccionEst() => ToggleSeccion("EST");
+    private void ToggleSeccionSis() => ToggleSeccion("SIS");
+    private void ToggleSeccionDev() => ToggleSeccion("DEV");
+
+    private string _classSeg => "sidebar-section" + (_seccionesColapsadas.Contains("SEG") ? " colapsada" : "");
+    private string _classEst => "sidebar-section" + (_seccionesColapsadas.Contains("EST") ? " colapsada" : "");
+    private string _classSis => "sidebar-section" + (_seccionesColapsadas.Contains("SIS") ? " colapsada" : "");
+    private string _classDev => "sidebar-section" + (_seccionesColapsadas.Contains("DEV") ? " colapsada" : "");
+
+    private async Task TogglePin()
+    {
+        _pinned = !_pinned;
+        await LocalStorage.SetItemAsync("sidebarPinned", _pinned);
+        // Al desfijar, limpiamos el inline style que pudo dejar el drag del handle
+        if (!_pinned)
+            try { await JS.InvokeVoidAsync("eval", "var s=document.getElementById('sidebar-main');if(s)s.style.width='';"); } catch { }
+        StateHasChanged();
+    }
+
+    // ── Zoom (estilo Chrome) ──────────────────────────────────────────────
+    private int _zoomPct = 100;
+    private static readonly int[] _zoomSteps = { 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200 };
+
+    private async Task ZoomIn()
+    {
+        var next = _zoomSteps.FirstOrDefault(z => z > _zoomPct, 200);
+        _zoomPct = next;
+        await JS.InvokeVoidAsync("appZoom.set", _zoomPct);
+        _ = GuardarZoomUsuarioAsync();
+    }
+
+    private async Task ZoomOut()
+    {
+        var prev = _zoomSteps.LastOrDefault(z => z < _zoomPct, 50);
+        _zoomPct = prev;
+        await JS.InvokeVoidAsync("appZoom.set", _zoomPct);
+        _ = GuardarZoomUsuarioAsync();
+    }
+
+    private async Task ZoomReset()
+    {
+        _zoomPct = 100;
+        await JS.InvokeVoidAsync("appZoom.set", _zoomPct);
+        _ = GuardarZoomUsuarioAsync();
+    }
+
+    // ── Helper: ícono representativo por nombre de aplicación ──
+    private static string IconoAplicacion(string desApp) => desApp switch
+    {
+        "SEGURIDAD" => Icons.Material.Filled.Shield,
+        "ESTANDAR"  => Icons.Material.Filled.Tune,
+        "COSTOS"    => Icons.Material.Filled.AttachMoney,
+        "ALMACEN"   => Icons.Material.Filled.Warehouse,
+        "COMPRAS"   => Icons.Material.Filled.ShoppingCart,
+        "VENTAS"    => Icons.Material.Filled.PointOfSale,
+        "LOGISTICA" => Icons.Material.Filled.LocalShipping,
+        "RRHH"      => Icons.Material.Filled.Groups,
+        "CONTAB"    => Icons.Material.Filled.AccountBalance,
+        _           => Icons.Material.Filled.Apps
+    };
+
+    // ── Helper: ítem individual del sidebar ──
+    private RenderFragment SidebarGrupo(string texto, string icono, string ruta) => __builder =>
+    {
+        __builder.OpenElement(0, "div");
+        __builder.AddAttribute(1, "class", "sidebar-item-wrap");
+        __builder.OpenElement(2, "div");
+        __builder.AddAttribute(3, "class", "sidebar-item");
+        __builder.AddAttribute(4, "onclick", EventCallback.Factory.Create(this, () => AbrirTabPorRuta(ruta)));
+        __builder.OpenComponent<MudIcon>(5);
+        __builder.AddAttribute(6, "Icon", icono);
+        __builder.AddAttribute(7, "Class", "item-icon");
+        __builder.CloseComponent();
+        __builder.OpenElement(8, "span");
+        __builder.AddAttribute(9, "class", "item-text");
+        __builder.AddContent(10, texto);
+        __builder.CloseElement();
+        __builder.CloseElement();
+        if (!_pinned)
+        {
+            __builder.OpenElement(11, "div");
+            __builder.AddAttribute(12, "class", "sidebar-tooltip");
+            __builder.AddAttribute(13, "style", "top:50%;transform:translateY(-50%);");
+            __builder.AddContent(14, texto);
+            __builder.CloseElement();
+        }
+        __builder.CloseElement();
+    };
+
+    // ── Resto del estado ──
+    private enum EstiloMenu { Lateral, Circular, Tiles }
+    private EstiloMenu _estiloMenu = EstiloMenu.Lateral;
+    private List<OpcionMenu> _opciones   = new();
+    private List<NodoMenu> _arbolMenu = new();
+    // True solo después de que MenuService.CargarAsync() termina — distingue
+    // "todavía cargando" (no mostrar nada) de "ya cargó y no hay opciones"
+    // (ahí sí mostrar el fallback estático, caso real de falta de permisos).
+    private bool _menuCargado;
+    private bool _revelandoPersiana;
+    private const int PersianaSlats = 16;
+
+    /// <summary>Deja la persiana montada el tiempo justo para que termine su animación
+    /// (ver .blind-slat en el CSS: 600ms + el mayor delay escalonado) y luego la desmonta.</summary>
+    private async Task OcultarPersianaAsync()
+    {
+        await Task.Delay(950);
+        _revelandoPersiana = false;
+        await InvokeAsync(StateHasChanged);
+    }
+    private int _cargaPct = 0;
+    private string _cargaEtapa = "Iniciando...";
+
+    private void Etapa(string texto, int pct)
+    {
+        _cargaEtapa = texto;
+        _cargaPct = pct;
+        StateHasChanged();
+    }
+    private static bool _startupLogoutDone = false;
+    private bool _apiActiva = true;
+    private System.Threading.Timer? _healthTimer;
+    private System.Threading.Timer? _notifTimer;
+    private List<NotificacionResumenTipo> _notifResumen = new();
+    private List<NotificacionFlujoItem> _notifDetalle = new();
+    private string? _notifTipoAbierto;
+    // Notificaciones ya vistas (para detectar cuáles son NUEVAS entre un refresco y el
+    // siguiente, y disparar el toast emergente solo para esas — nunca en la primera carga).
+    private readonly HashSet<int> _notifVistas = new();
+    private bool _notifPrimeraCarga = true;
+    private List<OpcionMenu> _favoritos  = new();
+    private string           _rol        = "";
+    private string           _codUsuario = "";
+    private string           _codPerfilUsuario = "";
+    private bool             _ctxOpen;
+    private bool             _userMenuOpen;
+    private bool             _estiloMenuSubmenuOpen;
+
+    private void ToggleUserMenu() { _userMenuOpen = !_userMenuOpen; StateHasChanged(); }
+
+    /// <summary>Refresca el layout (posición del sidebar, etc.) cuando otra pestaña
+    /// (p.ej. Configuración de Usuario) guarda cambios que aplican de inmediato.</summary>
+    private void OnConfigChanged()
+    {
+        // Si el usuario acaba de activar "Notificaciones activas" (Configuración de Usuario)
+        // y todavía no hay nada cargado, refresca de inmediato en vez de esperar el timer.
+        if (ConfigSvc.Current.NotificacionesActivas && _notifResumen.Count == 0)
+            _ = CargarNotificacionesAsync();
+        _ = ActualizarTecladoVirtualAsync();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private bool   _mostrandoTransicion;
+    private string _transicionMensaje = "Abriendo...";
+    private void OnTransicionMostrar(string mensaje)
+    {
+        _transicionMensaje = mensaje;
+        _mostrandoTransicion = true;
+        InvokeAsync(StateHasChanged);
+    }
+    private void OnTransicionOcultar()
+    {
+        _mostrandoTransicion = false;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        ConfigSvc.OnChange -= OnConfigChanged;
+        TransicionSvc.OnMostrar -= OnTransicionMostrar;
+        TransicionSvc.OnOcultar -= OnTransicionOcultar;
+        TabService.OnChange -= OnTabsCambiaron;
+        Cambios.Desuscribir("ENTORNO.DICCIONARIO_ETIQUETAS", RefrescarEtiquetasPorCambio);
+        Cambios.Desuscribir("SEGURIDAD.APLICACIONES_OPCIONES", RefrescarMenuPorCambio);
+        Cambios.Desuscribir("SEGURIDAD.APLICACIONES_OPCIONES_BOTONES", RefrescarMenuPorCambio);
+        MenuService.IconosActualizados -= OnIconosMenuActualizados;
+        _healthTimer?.Dispose();
+        _notifTimer?.Dispose();
+    }
+
+    // Experimento: los íconos del menú lateral llegan aparte (ver MenuService), sin bloquear
+    // el primer render del árbol (ya visible solo con texto) — al llegar, se reconstruye
+    // _arbolMenu igual que en los demás puntos que ya lo refrescan (cambio de rol, etc.).
+    private void OnIconosMenuActualizados()
+    {
+        _arbolMenu = MenuService.GetArbolMenu();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private Task RefrescarEtiquetasPorCambio() => EtiquetasSvc.CargarAsync(forzar: true);
+
+    private async Task RefrescarMenuPorCambio()
+    {
+        await MenuService.ForzarRecargaAsync();
+        _opciones = MenuService.GetOpciones();
+        _arbolMenu = MenuService.GetArbolMenu();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // Al cambiar de pestaña/pantalla activa, recalcular si el teclado virtual va habilitado.
+    private void OnTabsCambiaron() => _ = ActualizarTecladoVirtualAsync();
+
+    /// <summary>Notificaciones pendientes del usuario — resumen por tipo (íconos + badge del
+    /// AppBar) y detalle (lista al hacer clic en un ícono). Se refresca cada 2 minutos.</summary>
+    // Evita que el timer de 20s dispare otra ronda mientras la anterior sigue en vuelo
+    // (red lenta, muchos toasts a procesar) — sin esto, los sondeos se apilan.
+    private bool _cargandoNotificaciones;
+
+    private async Task CargarNotificacionesAsync()
+    {
+        // Sin sesión no se sondea: este layout también se renderiza en la pantalla de login,
+        // y el timer de 20s arranca en OnAfterRenderAsync(firstRender) sin comprobar si hay
+        // usuario autenticado. Sin esta guarda el endpoint se llamaba cada 20s sin token y
+        // devolvía 401 en bucle — de acá venía el ruido de "Requires an authenticated user"
+        // en consola, y además daba señales falsas de sesión perdida.
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (authState.User.Identity?.IsAuthenticated != true)
+        {
+            _notifResumen = new(); _notifDetalle = new();
+            return;
+        }
+
+        // Respeta la Configuración de Usuario "Notificaciones activas" — si el usuario las
+        // desactivó, ni siquiera se consulta el SP (ahorra la llamada cada 2 minutos).
+        if (!ConfigSvc.Current.NotificacionesActivas)
+        {
+            _notifResumen = new(); _notifDetalle = new();
+            return;
+        }
+        if (_cargandoNotificaciones) return;
+        _cargandoNotificaciones = true;
+        try
+        {
+            var r = await NotifSvc.GetPendientesAsync();
+            _notifResumen = r.Resumen;
+            _notifDetalle = r.Notificaciones;
+
+            // Precargar (una sola vez por usuario, cacheado en memoria) la foto de cada
+            // usuario notificador. La respuesta del polling ya NO trae la imagen; se pide
+            // aparte al endpoint dedicado y se reutiliza en toasts y lista.
+            _ = FotoSvc.PrecargarVariosAsync(_notifDetalle.Select(n => n.COD_USUARIO_NOTIFICADOR))
+                       .ContinueWith(async t =>
+                       {
+                           if (t.Result) await InvokeAsync(StateHasChanged);
+                       });
+
+            // Detectar notificaciones nuevas (no vistas en el refresco anterior) y avisar
+            // con un toast — igual que el aviso emergente de Outlook al llegar un correo.
+            var nuevas = _notifDetalle.Where(n => !_notifVistas.Contains(n.NUM_NOTIFICACION)).ToList();
+            foreach (var n in _notifDetalle) _notifVistas.Add(n.NUM_NOTIFICACION);
+
+            if (!_notifPrimeraCarga)
+                foreach (var n in nuevas)
+                    MostrarToastNotificacion(n);
+            _notifPrimeraCarga = false;
+        }
+        catch { }
+        finally { _cargandoNotificaciones = false; }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Tarjetas propias estilo "toast" de Outlook de escritorio (esquina inferior
+    /// derecha): ícono del tipo de notificación a modo de avatar, título/mensaje, y una
+    /// fila de botones (Descartar / Ver / Cerrar) — en vez del Snackbar genérico.</summary>
+    private readonly List<NotificacionFlujoItem> _toasts = new();
+    private const int MaxToastsVisibles = 3;
+
+    private void MostrarToastNotificacion(NotificacionFlujoItem n)
+    {
+        _toasts.Insert(0, n);
+        while (_toasts.Count > MaxToastsVisibles) _toasts.RemoveAt(_toasts.Count - 1);
+        StateHasChanged();
+        // Asegurar que la foto del notificador esté disponible para ESTE toast: si aún
+        // no está cacheada, se descarga y se re-renderiza el toast con la foto ya puesta.
+        _ = CargarFotoToastAsync(n);
+        _ = AutoCerrarToastAsync(n);
+    }
+
+    private async Task CargarFotoToastAsync(NotificacionFlujoItem n)
+    {
+        if (await FotoSvc.PrecargarAsync(n.COD_USUARIO_NOTIFICADOR))
+            await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task AutoCerrarToastAsync(NotificacionFlujoItem n)
+    {
+        await Task.Delay(8000);
+        await InvokeAsync(() => { CerrarToast(n); });
+    }
+
+    private void CerrarToast(NotificacionFlujoItem n)
+    {
+        _toasts.Remove(n);
+        StateHasChanged();
+    }
+
+    private void VerToast(NotificacionFlujoItem n)
+    {
+        CerrarToast(n);
+        _ = AbrirNotificacionAprobacion(n.NUM_NOTIFICACION);
+    }
+
+    private static string? IconoBase64(byte[]? bytes) =>
+        bytes is { Length: > 0 } ? $"data:image/png;base64,{Convert.ToBase64String(bytes)}" : null;
+
+    private void AbrirNotifPanel(string codTipo) => _notifTipoAbierto = codTipo;
+
+    private void ToggleNotifPanel(string codTipo) => _notifTipoAbierto = _notifTipoAbierto == codTipo ? null : codTipo;
+
+    /// <summary>
+    /// Carga los datos ANTES de abrir el diálogo (con el cursor "ocupado" mientras tanto) —
+    /// así el diálogo nace ya completo y solo se ve la animación de entrada de MudBlazor
+    /// ("crece" una sola vez), en vez de aparecer chico/vacío 3-4 segundos y recién
+    /// después completarse de golpe.
+    /// </summary>
+    private async Task AbrirNotificacionAprobacion(int numNotificacion)
+    {
+        _notifTipoAbierto = null;
+        try { await JS.InvokeVoidAsync("cursorBusy.show"); } catch { }
+        var data = await AprobSvc.GetByIdAsync(numNotificacion);
+        try { await JS.InvokeVoidAsync("cursorBusy.hide"); } catch { }
+
+        var parameters = new DialogParameters { ["Data"] = data };
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Entorno.NotificacionAprobacionDialog>(
+            "", parameters, new DialogOptions
+            {
+                // CloseButton=false: MudBlazor le agregaba su propia barra de título vacía
+                // (solo para el botón X) encima de nuestra cabecera propia, dejando un
+                // margen en blanco arriba. El cierre ahora vive en la cabecera del diálogo.
+                CloseButton = false, MaxWidth = MaxWidth.False, FullWidth = false,
+                Position = DialogPosition.Center, BackdropClick = false, CloseOnEscapeKey = false
+            });
+    }
+
+    /// <summary>
+    /// Atajos de teclado globales (ver wwwroot/js/shortcuts.js):
+    /// Ctrl+K busca en el menú, Ctrl+W cierra la pestaña activa, Esc cierra menús/paneles abiertos.
+    /// Ctrl+N / Ctrl+S / Delete / F2 se reenvían via ShortcutService a la página CRUD activa (si está suscrita).
+    /// </summary>
+    [JSInvokable]
+    public async Task OnAtajoTeclado(string atajo)
+    {
+        switch (atajo)
+        {
+            case "ctrl+k":
+                _pinned = true;
+                StateHasChanged();
+                await Task.Delay(30); // deja que el campo de búsqueda se renderice antes de enfocarlo
+                try { await JS.InvokeVoidAsync("shortcuts.focusSidebarSearch"); } catch { }
+                break;
+
+            case "ctrl+w":
+                var activa = TabService.GetActiveTabId(0);
+                if (activa is not null) TabService.Cerrar(activa);
+                break;
+
+            case "esc":
+                if (_userMenuOpen) { _userMenuOpen = false; StateHasChanged(); }
+                else if (_ctxOpen)  { _ctxOpen = false; StateHasChanged(); }
+                break;
+
+            case "ctrl+n":     ShortcutSvc.RaiseNuevo();     break;
+            case "ctrl+s":     ShortcutSvc.RaiseGuardar();   break;
+            case "delete":     ShortcutSvc.RaiseEliminar();  break;
+            case "f2":         ShortcutSvc.RaiseConsultar(); break;
+        }
+    }
+
+    /// <summary>
+    /// Cambia el rol activo: recarga botones/opciones para el nuevo rol, reconstruye
+    /// el menú lateral, y cierra todas las pestañas abiertas salvo el Workspace
+    /// (las pantallas abiertas con el rol anterior ya no son válidas).
+    /// </summary>
+    private bool _cambiandoRol = false;
+
+    private async Task OnCambiarRol(string codRolUsuario)
+    {
+        if (codRolUsuario == MenuService.RolActivo) return;
+
+        await ErrorLog.TraceAsync($"CAMBIO DE ROL - De: [{MenuService.RolActivo}] → A: [{codRolUsuario}]");
+        _cambiandoRol = true;
+        StateHasChanged();
+
+        await MenuService.CambiarRolAsync(codRolUsuario);
+        _opciones = MenuService.GetOpciones();
+        _arbolMenu = MenuService.GetArbolMenu();
+        await CargarEstadoCarpetasAsync();
+
+        var rolElegido = MenuService.Roles.FirstOrDefault(r => r.COD_ROL_USUARIO == codRolUsuario);
+        _rol = rolElegido?.DES_ROL_USUARIO ?? codRolUsuario;
+
+        TabService.CerrarTodasMenosFijas();
+
+        // Si estaba en modo circular/tiles, forzar cierre y reapertura para que cargue
+        // los ítems del nuevo rol (el tab fijo no se cierra con CerrarTodasMenosFijas)
+        if (_estiloMenu != EstiloMenu.Lateral)
+        {
+            var ruta = RutaDeEstilo(_estiloMenu)!;
+            var tabFijo = TabService.Tabs.FirstOrDefault(t => t.Ruta == ruta);
+            if (tabFijo is not null) { tabFijo.EsCerrable = true; TabService.Cerrar(tabFijo.Id); }
+            var info = WorkspaceRegistry.PorRuta(ruta)!;
+            TabService.Abrir(info.Titulo, info.Icono, info.ComponentType, info.Ruta, esCerrable: false);
+        }
+
+        _cambiandoRol = false;
+        await ErrorLog.TraceAsync($"CAMBIO DE ROL - Completado: [{codRolUsuario}] — {_rol} — {_opciones.Count} opciones cargadas");
+        StateHasChanged();
+    }
+    private OpcionMenu?      _ctxOpcion;
+    private bool             _ctxEsFavorito;
+    private double           _ctxX, _ctxY;
+    private string?          _fotoUsuario;
+    private string  _nombreApp     = "Cargando...";
+    private string? _logoApp;
+    private string  _nombreEmpresa = "";
+    private string? _logoEmpresa;
+    private string  _envBack = "#1a1714";
+    private string  _envFore = "#ffffff";
+    private string  _envFont = "Archivo";
+    private string? _zoomLogoSrc;
+
+    private void AbrirZoomLogo(string? src) { _zoomLogoSrc = src; }
+    private void CerrarZoomLogo()           { _zoomLogoSrc = null; }
+    private PantallaBloqueo? _bloqueo;
+    private bool             _bloqueoRestaurado;
+    private DotNetObjectReference<MainLayout>? _selfRef;
+
+    private MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#b8472d", Secondary = "#4a4a32",
+            Background = "#efe9df", Surface = "#ffffff",
+            AppbarBackground = "#16130f", DrawerBackground = "#f6f1e8"
+        },
+        Typography = new Typography { Default = new Default { FontFamily = new[] { "Archivo", "sans-serif" } } }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        ConfigSvc.OnChange += OnConfigChanged;
+        TransicionSvc.OnMostrar += OnTransicionMostrar;
+        TransicionSvc.OnOcultar += OnTransicionOcultar;
+        TabService.OnChange += OnTabsCambiaron;
+        MenuService.IconosActualizados += OnIconosMenuActualizados;
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        string Ts() => $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} (+{sw.ElapsedMilliseconds}ms)";
+
+        KONSolutions.Web.Services.JwtMessageHandler.SplashActivo = true;
+        try
+        {
+            await ErrorLog.TraceAsync($"INICIO CARGA MENU — {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
+
+            // Solo en la primera carga de la sesión de navegador: fuerza login
+            if (!_startupLogoutDone)
+            {
+                _startupLogoutDone = true;
+                await AuthService.LogoutAsync();
+            }
+
+            Etapa("Cargando configuración general...", 10);
+
+            // Restaurar pin y config en paralelo (ambas son locales/rápidas)
+            var pinTask = LocalStorage.GetItemAsync<bool>("sidebarPinned").AsTask();
+            var cfgTask = ConfigSvc.LoadAsync();
+            await Task.WhenAll(pinTask, cfgTask);
+            try { _pinned = pinTask.Result; } catch { }
+            await ConfigSvc.AplicarAsync();
+            await ErrorLog.TraceAsync($"CARGA DE MENU - ConfigSvc.LoadAsync + AplicarAsync", Ts());
+            Etapa("Verificando sesión...", 20);
+
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            if (authState.User.Identity?.IsAuthenticated != true) { _menuCargado = true; KONSolutions.Web.Services.JwtMessageHandler.SplashActivo = false; return; }
+            await ErrorLog.TraceAsync($"CARGA DE MENU - GetAuthenticationStateAsync", Ts());
+
+            var sesion = await AuthService.GetSesionAsync();
+            if (sesion is null) { _menuCargado = true; KONSolutions.Web.Services.JwtMessageHandler.SplashActivo = false; return; }
+            await ErrorLog.TraceAsync($"CARGA DE MENU - AuthService.GetSesionAsync", Ts());
+
+            _rol              = sesion.DES_ROL_USUARIO ?? sesion.COD_ROL_USUARIO ?? "";
+            _codUsuario       = sesion.COD_USUARIO ?? "";
+            _codPerfilUsuario = sesion.COD_PERFIL_USUARIO ?? "";
+
+            // Cargar logo/nombre ya disponibles para mostrarlos en el splash
+            try
+            {
+                var cfg = ConfigSvc.Current;
+                _nombreApp = string.IsNullOrWhiteSpace(cfg.NombreApp) ? "Cargando..." : cfg.NombreApp;
+                _logoApp   = cfg.LogoApp;
+            }
+            catch { }
+            StateHasChanged();
+
+            // Menú + Foto + ConfiguracionGeneral + ConfiguracionUsuario — se lanzan todas en
+            // paralelo (misma performance que antes), pero se van "esperando" en orden para
+            // poder mostrar la etapa correspondiente en el splash mientras se resuelven.
+            var tMenu           = MenuService.CargarAsync();
+            var tFoto           = CargarFotoUsuario();
+            var tCfgGeneral     = CargarConfiguracionGeneralAsync();
+            var tCfgUsuario     = CargarConfiguracionUsuarioAsync();
+            var tEtiquetas      = EtiquetasSvc.CargarAsync();
+
+            Etapa("Cargando configuración general...", 35);
+            await tCfgGeneral;
+            Etapa("Cargando configuración de usuario...", 50);
+            await tCfgUsuario;
+
+            // tCfgGeneral y tCfgUsuario corren en PARALELO (arrancan antes de este punto);
+            // aunque se esperen en este orden, el orden real en que cada una escribe
+            // ConfigSvc.Current.FilasPorPaginaUnica depende de la latencia de red de cada
+            // una, no del orden de estos "await" — sin esto, la Configuración General podía
+            // terminar de escribir DESPUÉS que la de Usuario y pisar su preferencia. Se
+            // reafirma acá, ya con ambas resueltas, para que la del usuario gane siempre.
+            if (_miConfigUsuario?.NUM_ROWS_PAGE is > 0)
+            {
+                ConfigSvc.Current.FilasPorPaginaUnica = _miConfigUsuario.NUM_ROWS_PAGE.Value;
+                ConfigSvc.Current.FilasPorPaginaPadre = _miConfigUsuario.NUM_ROWS_PAGE.Value;
+                ConfigSvc.Current.FilasPorPaginaHijo  = _miConfigUsuario.NUM_ROWS_PAGE.Value;
+            }
+
+            Etapa("Cargando menú...", 65);
+            await tMenu;
+            await tFoto;
+            await ErrorLog.TraceAsync($"CARGA DE MENU - MenuService.CargarAsync + CargarFotoUsuario (paralelo)", Ts());
+
+            _opciones    = MenuService.GetOpciones();
+            _arbolMenu   = MenuService.GetArbolMenu();
+
+            Etapa("Cargando Diccionario de Etiquetas...", 75);
+            await tEtiquetas;
+            await ErrorLog.TraceAsync($"CARGA DE MENU - EtiquetasSvc.CargarAsync", Ts());
+
+            Etapa("Cargando accesos y favoritos...", 85);
+            // Estado carpetas + favoritos dependen del menú ya cargado
+            await Task.WhenAll(
+                CargarEstadoCarpetasAsync(),
+                CargarFavoritos()
+            );
+            await ErrorLog.TraceAsync($"CARGA DE MENU - CargarEstadoCarpetasAsync + CargarFavoritos (paralelo)", Ts());
+
+            Etapa("Listo", 100);
+            _menuCargado = true;
+            KONSolutions.Web.Services.JwtMessageHandler.SplashActivo = false;
+            _revelandoPersiana = true;
+            StateHasChanged();
+            _ = OcultarPersianaAsync();
+
+            // Límites se cargan en segundo plano sin bloquear la UI
+            _ = SafeRun(() => Limites.CargarAsync());
+
+            TabService.AbrirWorkspace("Workspace", Icons.Material.Filled.Dashboard,
+                typeof(KONSolutions.Web.Pages.Workspace), "/");
+
+            // Si el usuario tiene guardado un estilo de menú distinto al lateral (por
+            // defecto), abre también su tab fijo — antes que Workspace, como los demás.
+            if (_estiloMenu != EstiloMenu.Lateral)
+            {
+                var rutaEstiloGuardado = RutaDeEstilo(_estiloMenu);
+                if (rutaEstiloGuardado is not null)
+                {
+                    var infoEstilo = WorkspaceRegistry.PorRuta(rutaEstiloGuardado)!;
+                    TabService.Abrir(infoEstilo.Titulo, infoEstilo.Icono, infoEstilo.ComponentType, infoEstilo.Ruta,
+                        esCerrable: false, alInicio: true);
+                }
+            }
+
+            // Config: inactividad y refresco automático
+            try
+            {
+                var cfg = ConfigSvc.Current;
+                if (cfg.RefrescoAutomatico && cfg.ControlCambiosActivo)
+                    Cambios.Iniciar(cfg.RefrescoIntervaloSegs);
+
+                // El Diccionario de Etiquetas se cargó una sola vez arriba (tEtiquetas) — se
+                // vuelve a cargar solo cuando ENTORNO.DICCIONARIO_ETIQUETAS cambia (editado por
+                // este usuario u otro, incluso en otra pestaña), sin esperar a un nuevo login.
+                Cambios.Suscribir("ENTORNO.DICCIONARIO_ETIQUETAS", RefrescarEtiquetasPorCambio);
+
+                // Menú de Opciones — se recarga solo (saltando la caché de 60 min) cuando
+                // un admin agrega/modifica/reordena opciones o botones desde el Treeview,
+                // sin esperar a que la caché venza ni a un nuevo login.
+                Cambios.Suscribir("SEGURIDAD.APLICACIONES_OPCIONES", RefrescarMenuPorCambio);
+                Cambios.Suscribir("SEGURIDAD.APLICACIONES_OPCIONES_BOTONES", RefrescarMenuPorCambio);
+                // NUM_MINUTOS_LOCKOUT_SCREEN de Configuración de Usuario prevalece sobre la Configuración General
+                var minutosBloqueo = cfg.BloqueoMinutosUsuario ?? cfg.BloqueoMinutos;
+                if (cfg.BloqueoActivo && minutosBloqueo > 0)
+                {
+                    _selfRef = DotNetObjectReference.Create(this);
+                    try { await JS.InvokeVoidAsync("inactividad.iniciar", _selfRef, minutosBloqueo); } catch { }
+                }
+
+                var expiraToken = await ((JwtAuthStateProvider)AuthStateProvider).GetExpiracionTokenAsync();
+                if (expiraToken is not null)
+                {
+                    try { await JS.InvokeVoidAsync("sesionToken.iniciar", expiraToken.Value.ToUnixTimeMilliseconds()); } catch { }
+                }
+            }
+            catch { }
+
+            await ErrorLog.TraceAsync($"FIN CARGA MENU — {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} — Total: {sw.ElapsedMilliseconds}ms");
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.TraceAsync($"FIN CARGA MENU (con error) — {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} — Total: {sw.ElapsedMilliseconds}ms", ex.Message);
+            _rol = ""; _opciones = new(); _menuCargado = true;
+            KONSolutions.Web.Services.JwtMessageHandler.SplashActivo = false;
+        }
+    }
+
+    private static async Task SafeRun(Func<Task> fn) { try { await fn(); } catch { } }
+
+    // Evita que el timer de 2 min dispare otra ronda mientras la anterior sigue en vuelo.
+    private bool _verificandoApi;
+
+    private async Task VerificarApi()
+    {
+        if (_verificandoApi) return;
+        _verificandoApi = true;
+        try
+        {
+            var resp = await Http.GetAsync("health");
+            _apiActiva = resp.IsSuccessStatusCode;
+        }
+        catch { _apiActiva = false; }
+        finally { _verificandoApi = false; }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await VerificarApi();
+            _healthTimer = new System.Threading.Timer(
+                async _ => await VerificarApi(),
+                null,
+                TimeSpan.FromMinutes(2),
+                TimeSpan.FromMinutes(2));
+
+            await CargarNotificacionesAsync();
+            // 20s (antes 2 min): con el polling más corto, las notificaciones nuevas
+            // se detectan casi al instante y disparan el toast estilo Outlook.
+            _notifTimer = new System.Threading.Timer(
+                async _ => await CargarNotificacionesAsync(),
+                null,
+                TimeSpan.FromSeconds(20),
+                TimeSpan.FromSeconds(20));
+        }
+        if (firstRender && !_bloqueoRestaurado)
+        {
+            _bloqueoRestaurado = true;
+            try
+            {
+                var bloqueada = await LocalStorage.GetItemAsync<bool>("sesionBloqueada");
+                if (bloqueada)
+                {
+                    await LocalStorage.RemoveItemAsync("sesionBloqueada");
+                    await AuthService.LogoutAsync();
+                    Navigation.NavigateTo("/login", forceLoad: true);
+                }
+            }
+            catch { }
+
+            try { await JS.InvokeVoidAsync("eval", _jsResizeSidebar); } catch { }
+            try
+            {
+                _selfRef ??= DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("shortcuts.iniciar", _selfRef);
+            }
+            catch { }
+            try { await JS.InvokeVoidAsync("gridResize.init"); } catch { }
+            try { await JS.InvokeVoidAsync("virtualKeyboard.init"); } catch { }
+            await ActualizarTecladoVirtualAsync();
+        }
+    }
+
+    /// <summary>
+    /// Habilita el teclado virtual solo si los 3 flags están en true:
+    /// Configuración General AND Opción (pantalla activa) AND Configuración de Usuario.
+    /// </summary>
+    private async Task ActualizarTecladoVirtualAsync()
+    {
+        var general = ConfigSvc.Current.TecladoVirtual;
+        var usuario = ConfigSvc.Current.TecladoVirtualUsuario;
+
+        // Flag de la opción/pantalla activa (por sus parámetros CodAplicacion/CodOpcionAplicacion).
+        bool opcion = false;
+        string? ca = null, co = null;
+        bool? opcionFlag = null;
+        var activaId = TabService.GetActiveTabId(0);
+        var tab = TabService.Tabs.FirstOrDefault(t => t.Id == activaId);
+        if (tab is not null
+            && tab.Parametros.TryGetValue("CodAplicacion", out var caObj)
+            && tab.Parametros.TryGetValue("CodOpcionAplicacion", out var coObj))
+        {
+            ca = caObj?.ToString(); co = coObj?.ToString();
+            opcionFlag = MenuService.TecladoVirtualOpcion(ca, co);
+            opcion = opcionFlag == true;
+        }
+
+        var habilitado = general && usuario && opcion;
+
+        // LOG TEMPORAL de diagnóstico del teclado virtual (quitar cuando funcione).
+        Console.WriteLine($"[TECLADO-VIRTUAL] general={general} usuario={usuario} " +
+            $"opcion={opcion} (flagOpcionBD={(opcionFlag.HasValue ? opcionFlag.ToString() : "null")}) " +
+            $"tab='{tab?.Titulo}' CodApp='{ca}' CodOpc='{co}' => HABILITADO={habilitado}");
+
+        try { await JS.InvokeVoidAsync("virtualKeyboard.setHabilitado", habilitado); } catch { }
+    }
+
+    private const string _jsResizeSidebar = @"(function() {
+        var handle  = document.getElementById('sidebarResizeHandle');
+        var sidebar = document.getElementById('sidebar-main');
+        if (!handle || !sidebar) return;
+        // Solo actualiza la variable CSS --sidebar-w; NUNCA pone inline style.width
+        // (el inline style sobreescribe las clases CSS y el sidebar no se contrae).
+        function guardarAncho(w) {
+            document.documentElement.style.setProperty('--sidebar-w', w);
+            try { localStorage.setItem('sidebarWidth', w); } catch(e) {}
+        }
+        try {
+            var saved = localStorage.getItem('sidebarWidth');
+            if (saved) document.documentElement.style.setProperty('--sidebar-w', saved);
+        } catch(e) {}
+        // Pointer Events + setPointerCapture en vez de mousedown/mousemove/mouseup en
+        // document: una vez capturado el puntero, TODOS los eventos posteriores (incluso
+        // si el mouse pasa sobre otro elemento con mayor z-index/stacking, como items del
+        // menú o el propio contenido) siguen llegando al handle — elimina de raíz cualquier
+        // problema de otro elemento 'robándose' el arrastre a mitad de camino.
+        var dragging = false, startX = 0, startW = 0;
+        handle.style.touchAction = 'none';
+        handle.addEventListener('pointerdown', function(e) {
+            dragging = true;
+            startX = e.clientX;
+            startW = sidebar.offsetWidth;
+            handle.classList.add('arrastrando');
+            sidebar.style.transition = 'none';
+            document.body.style.userSelect = 'none';
+            try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+            e.preventDefault();
+        });
+        handle.addEventListener('pointermove', function(e) {
+            if (!dragging) return;
+            // e.clientX es posición real de pantalla; startW es pre-escala (offsetWidth).
+            // Con el zoom propio de la app (transform:scale en #app, ver appZoom.js) activo,
+            // el mismo desplazamiento real de mouse representa MÁS píxeles pre-escala cuanto
+            // menor sea el zoom (y viceversa) — sin esto, arrastrar no responde bien salvo
+            // exactamente al 100%. Mismo patrón que usa gridResize en index.html.
+            var scale = (window.appZoom && window.appZoom.currentScale) || 1;
+            var delta = (e.clientX - startX) / scale;
+            var w = Math.min(Math.max(startW + delta, 180), 560) + 'px';
+            // Durante el arrastre sí ponemos inline style para suavidad visual
+            sidebar.style.width = w;
+            document.documentElement.style.setProperty('--sidebar-w', w);
+        });
+        function finalizarArrastre(e) {
+            if (!dragging) return;
+            dragging = false;
+            handle.classList.remove('arrastrando');
+            sidebar.style.transition = '';
+            document.body.style.userSelect = '';
+            var w = sidebar.offsetWidth + 'px';
+            // Limpiamos el inline style y dejamos que la clase CSS controle el ancho
+            sidebar.style.width = '';
+            guardarAncho(w);
+            if (e && e.pointerId !== undefined) {
+                try { handle.releasePointerCapture(e.pointerId); } catch (err) {}
+            }
+        }
+        handle.addEventListener('pointerup', finalizarArrastre);
+        handle.addEventListener('pointercancel', finalizarArrastre);
+        // Salvaguarda: si el pointerup no llega a dispararse (ej. el foco saltó a otra
+        // pestaña al abrir una nueva), esto evita que 'dragging' quede pegado en true con
+        // user-select bloqueado indefinidamente.
+        window.addEventListener('blur', function () { finalizarArrastre(); });
+
+        // ── Ajuste automático del nombre en el header del sidebar ──
+        // En vez de calcularlo con CSS calc()/clamp() (frágil: no reacciona igual en todos
+        // los navegadores y se puede pasar de rosca truncando con '...'), medimos el ancho
+        // real disponible en JS y vamos bajando el tamaño de letra de a 1px hasta que el
+        // texto entre completo — así nunca queda cortado, sea cual sea el ancho del sidebar.
+        var textoNombre = document.querySelector('.sidebar-logo-text');
+        function ajustarFontNombre() {
+            if (!textoNombre || !textoNombre.offsetParent) return; // oculto (sidebar sin pin)
+            var maxPx = 22, minPx = 10;
+            textoNombre.style.fontSize = maxPx + 'px';
+            var intentos = maxPx - minPx;
+            while (textoNombre.scrollWidth > textoNombre.clientWidth && intentos-- > 0) {
+                maxPx -= 1;
+                textoNombre.style.fontSize = maxPx + 'px';
+            }
+        }
+        if (textoNombre) {
+            var ro = new ResizeObserver(function () { ajustarFontNombre(); });
+            ro.observe(sidebar);
+            ro.observe(textoNombre);
+            // Reintento corto tras el primer render (fuentes web / logo cargando pueden
+            // cambiar el layout un instante después de este script).
+            setTimeout(ajustarFontNombre, 50);
+            setTimeout(ajustarFontNombre, 300);
+        }
+    })();";
+
+    [JSInvokable]
+    public async Task OnInactividad()
+    {
+        if (_bloqueo is not null && !_bloqueo.Bloqueada)
+            await _bloqueo.Bloquear();
+    }
+
+    private async Task BloquearPantalla()
+    {
+        if (_bloqueo is not null && !_bloqueo.Bloqueada)
+            await _bloqueo.Bloquear();
+    }
+
+    /// <summary>
+    /// La ruta de una opción es directamente su DES_FORMULARIO (ya viene como ruta
+    /// completa desde el SP, ej. "/seguridad/usuarios") — no requiere conversión.
+    /// </summary>
+    private string RutaDeOpcion(OpcionMenu op) => op.DES_FORMULARIO ?? "";
+
+    private void AbrirTabPorRuta(string ruta)
+    {
+        var info = WorkspaceRegistry.PorRuta(ruta);
+        if (info is null)
+        {
+            // ruta siempre viene con dato aquí (botones estáticos del sidebar) →
+            // si no resuelve a ninguna pantalla, es un error de configuración, no "vacío".
+            TabService.Abrir(ruta, Icons.Material.Filled.ErrorOutline,
+                typeof(KONSolutions.Web.Pages.Shared.PaginaError), $"/error-pantalla{ruta}",
+                new Dictionary<string, object> { ["Titulo"] = ruta, ["Ruta"] = ruta });
+            return;
+        }
+        TabService.Abrir(info.Titulo, info.Icono, info.ComponentType, info.Ruta);
+    }
+
+    private async Task AbrirTabOpcion(OpcionMenu op)
+    {
+        if (op.FLG_EXIGE_PASSWORD == true)
+        {
+            var ok = await KONSolutions.Web.Services.AccesoOpcionHelper.ConfirmarAccesoAsync(DialogService, AuthService, ConfigSvc);
+            if (!ok) return;
+        }
+
+        await ErrorLog.TraceAsync($"MENU LATERAL - AbrirOpcion: [{op.COD_APLICACION}] {op.DES_OPCION_APLICACION} → {op.DES_FORMULARIO}");
+        var ruta = RutaDeOpcion(op);
+        var info = WorkspaceRegistry.PorRuta(ruta);
+        if (info is not null)
+        {
+            // Se pasan los códigos de aplicación/opción para que la pantalla pueda
+            // resolver sus propios botones de acción dinámicos vía AccionesBotones.
+            var parametros = new Dictionary<string, object>
+            {
+                ["CodAplicacion"] = op.COD_APLICACION,
+                ["CodOpcionAplicacion"] = op.COD_OPCION_APLICACION
+            };
+            TabService.Abrir(info.Titulo, info.Icono, info.ComponentType, info.Ruta, parametros,
+                iconoImagenBase64: op.IMG_ICONO_OPCION);
+        }
+        else
+        {
+            // Sin pantalla registrada para esa ruta. Antes se consultaba una metadata de
+            // pantallas dinámicas que nunca se terminó de implementar; al retirarla, una
+            // opción sin pantalla cae directamente en "en construcción", que es lo que
+            // realmente está pasando.
+            AbrirEnConstruccion(op);
+        }
+    }
+
+    /// <summary>
+    /// DES_FORMULARIO vacío → "Página en construcción" (opción sin pantalla asignada aún).
+    /// DES_FORMULARIO con dato pero que no resuelve a ninguna pantalla registrada ni a
+    /// metadata dinámica → "Página de error" (configuración inválida).
+    /// </summary>
+    private void AbrirEnConstruccion(OpcionMenu op)
+    {
+        var titulo = op.DES_OPCION_APLICACION ?? op.COD_OPCION_APLICACION ?? "";
+        var ruta = RutaDeOpcion(op);
+        if (string.IsNullOrWhiteSpace(ruta))
+        {
+            TabService.Abrir(titulo, Icons.Material.Filled.Construction,
+                typeof(KONSolutions.Web.Pages.Shared.PaginaEnConstruccion),
+                $"/en-construccion/{op.COD_APLICACION}/{op.COD_OPCION_APLICACION}",
+                new Dictionary<string, object>
+                {
+                    ["Titulo"] = titulo,
+                    ["CodAplicacion"] = op.COD_APLICACION ?? "",
+                    ["CodOpcionAplicacion"] = op.COD_OPCION_APLICACION ?? ""
+                });
+        }
+        else
+        {
+            TabService.Abrir(titulo, Icons.Material.Filled.ErrorOutline,
+                typeof(KONSolutions.Web.Pages.Shared.PaginaError),
+                $"/error-pantalla/{op.COD_APLICACION}/{op.COD_OPCION_APLICACION}",
+                new Dictionary<string, object>
+                {
+                    ["Titulo"] = titulo,
+                    ["Ruta"] = ruta,
+                    ["CodAplicacion"] = op.COD_APLICACION ?? "",
+                    ["CodOpcionAplicacion"] = op.COD_OPCION_APLICACION ?? ""
+                });
+        }
+    }
+
+    // ── Estilo de menú (pestaña fija: circular o tiles) ──
+    private const string RutaMenuCircular = "/menu-circular";
+    private const string RutaMenuTiles    = "/menu-tiles";
+
+    private static string? RutaDeEstilo(EstiloMenu estilo) => estilo switch
+    {
+        EstiloMenu.Circular => RutaMenuCircular,
+        EstiloMenu.Tiles    => RutaMenuTiles,
+        _ => null
+    };
+
+    private const string RutaPostIts = "/entorno/postits";
+    private bool TablonPostItsAbierto => TabService.Tabs.Any(t => t.Ruta == RutaPostIts);
+
+    private void ToggleTablonPostIts()
+    {
+        _userMenuOpen = false;
+        var existente = TabService.Tabs.FirstOrDefault(t => t.Ruta == RutaPostIts);
+        if (existente is not null)
+            TabService.Cerrar(existente.Id);
+        else
+            TabService.Abrir("Post-its", Icons.Material.Filled.PushPin,
+                typeof(KONSolutions.Web.Pages.Entorno.PostItsBoard), RutaPostIts);
+    }
+
+    private void CambiarEstiloMenu(EstiloMenu nuevo)
+    {
+        _userMenuOpen = false;
+        if (_estiloMenu == nuevo) return;
+        _ = GuardarEstiloMenuUsuarioAsync(nuevo);
+
+        // Cerrar el tab fijo del estilo anterior (si tenía uno)
+        var rutaAnterior = RutaDeEstilo(_estiloMenu);
+        if (rutaAnterior is not null)
+        {
+            var tabAnterior = TabService.Tabs.FirstOrDefault(t => t.Ruta == rutaAnterior);
+            if (tabAnterior is not null) { tabAnterior.EsCerrable = true; TabService.Cerrar(tabAnterior.Id); }
+        }
+
+        _estiloMenu = nuevo;
+
+        // Abrir el tab fijo del nuevo estilo (si aplica)
+        var rutaNueva = RutaDeEstilo(_estiloMenu);
+        if (rutaNueva is not null)
+        {
+            var info = WorkspaceRegistry.PorRuta(rutaNueva)!;
+            TabService.Abrir(info.Titulo, info.Icono, info.ComponentType, info.Ruta, esCerrable: false, alInicio: true);
+        }
+    }
+
+    // ── Menú circular del sidebar ──
+    private List<WorkspaceMenuCircular.GrupoVm> _gruposCircularSidebar =>
+        _arbolMenu
+            .GroupBy(n => n.COD_APLICACION)
+            .Select((g, gi) => new WorkspaceMenuCircular.GrupoVm
+            {
+                CodApp    = g.Key,
+                NombreApp = g.First().DES_APLICACION ?? g.Key,
+                BackColor = "",
+                ForeColor = "",
+                Tiles     = Aplanar(g.ToList())
+                    .Where(n => !string.IsNullOrWhiteSpace(n.DES_FORMULARIO))
+                    .Select((n, ti) => new WorkspaceMenuCircular.TileVm
+                    {
+                        CodApp      = n.COD_APLICACION,
+                        CodOpcion   = n.COD_OPCION_APLICACION,
+                        Nombre      = n.DES_OPCION_APLICACION ?? n.COD_OPCION_APLICACION,
+                        Ruta        = n.DES_FORMULARIO,
+                        BackColor   = "",
+                        ForeColor   = "",
+                        Orden       = ti
+                    }).ToList()
+            })
+            .Where(g => g.Tiles.Count > 0)
+            .ToList();
+
+    private static List<NodoMenu> Aplanar(List<NodoMenu> nodos)
+    {
+        var result = new List<NodoMenu>();
+        foreach (var n in nodos)
+        {
+            if (!n.EsCarpeta && !n.EsSeparador && !n.EsSubModulo)
+                result.Add(n);
+            if (n.Hijos.Count > 0)
+                result.AddRange(Aplanar(n.Hijos));
+        }
+        return result;
+    }
+
+    private async Task AbrirDesdeCircularSidebar(WorkspaceMenuCircular.TileVm t)
+    {
+        await ErrorLog.TraceAsync($"MENU CIRCULAR - SeleccionarTile: [{t.CodApp}] {t.Nombre} → {t.Ruta}");
+        var op = new OpcionMenu
+        {
+            COD_APLICACION        = t.CodApp,
+            COD_OPCION_APLICACION = t.CodOpcion,
+            DES_OPCION_APLICACION = t.Nombre,
+            DES_FORMULARIO        = t.Ruta,
+            FLG_ACCESO_PERMITIDO  = true
+        };
+        await AbrirTabOpcion(op);
+    }
+
+    private async Task Logout()
+    {
+        await MenuService.LimpiarCacheAsync();
+        await AuthService.LogoutAsync();
+        Navigation.NavigateTo("/login", forceLoad: true);
+    }
+
+    private async Task<string> GetCodUsuarioActualAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_codUsuario)) return _codUsuario;
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        return state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+    }
+
+    private async Task VerAtajosTeclado()
+    {
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.AtajosTecladoDialog>("Atajos de teclado",
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true });
+    }
+
+    private async Task OpenCambiarPassword()
+    {
+        try
+        {
+            var codUsuario = await GetCodUsuarioActualAsync();
+            if (string.IsNullOrWhiteSpace(codUsuario)) { Snackbar.Add("No se pudo obtener la sesión del usuario.", Severity.Warning); return; }
+            string? codComplejidad = null;
+            var codPerfil = _codPerfilUsuario;
+            if (string.IsNullOrWhiteSpace(codPerfil))
+            {
+                var u = await UsuarioSvc.GetByIdAsync(codUsuario);
+                codPerfil = u?.COD_PERFIL_USUARIO ?? "";
+            }
+            if (!string.IsNullOrWhiteSpace(codPerfil))
+            {
+                var perfil = await PerfilSvc.GetByIdAsync(codPerfil);
+                codComplejidad = perfil?.COD_PASSWORD_COMPLEJIDAD;
+            }
+            await DialogService.ShowAsync<CambiarPasswordDialog>("Cambiar contraseña",
+                new DialogParameters { ["CodUsuario"] = codUsuario, ["CodComplejidad"] = codComplejidad },
+                new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        }
+        catch (Exception ex) { Snackbar.Add($"Error al abrir cambio de contraseña: {ex.Message}", Severity.Error); }
+    }
+
+    private KONSolutions.Shared.Models.Estandar.ConfiguracionUsuario? _miConfigUsuario;
+    private List<KONSolutions.Shared.Models.Estandar.TipoMenuOpciones> _tiposMenu = new();
+    private bool _esZurdo => ConfigSvc.Current.EsZurdo;
+
+    private async Task CargarConfiguracionUsuarioAsync()
+    {
+        try
+        {
+            var tCfg   = CfgUsuarioSvc.GetMiConfiguracionAsync();
+            var tTipos = TiposMenuSvc.GetAllAsync();
+            await Task.WhenAll(tCfg, tTipos);
+            _miConfigUsuario = tCfg.Result;
+            _tiposMenu       = tTipos.Result;
+
+            await ConfigSvc.AplicarUsuarioAsync(_miConfigUsuario);
+            if (ConfigSvc.Current.ZoomWebUsuario is > 0)
+                _zoomPct = ConfigSvc.Current.ZoomWebUsuario!.Value;
+
+            // Aplica el estilo de menú (lateral/circular/tiles) guardado por el usuario
+            var estiloGuardado = EstiloDesdeCod(_miConfigUsuario?.COD_TIPO_MENU_OPCIONES);
+            if (estiloGuardado is not null)
+                _estiloMenu = estiloGuardado.Value;
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { }
+    }
+
+    /// <summary>Persiste el zoom actual como preferencia del usuario, sin tocar sus otros campos.</summary>
+    private async Task GuardarZoomUsuarioAsync()
+    {
+        try
+        {
+            var cfg = _miConfigUsuario ?? new KONSolutions.Shared.Models.Estandar.ConfiguracionUsuario { COD_USUARIO = _codUsuario };
+            cfg.TAS_ZOOM_WEB = _zoomPct;
+            _miConfigUsuario = cfg;
+            await CfgUsuarioSvc.SaveAsync(cfg);
+        }
+        catch { }
+    }
+
+    /// <summary>Persiste el estilo de menú elegido como preferencia del usuario, para que se
+    /// vuelva a aplicar automáticamente la próxima vez que inicie sesión.</summary>
+    private async Task GuardarEstiloMenuUsuarioAsync(EstiloMenu estilo)
+    {
+        try
+        {
+            var tipo = TipoMenuPorEstilo(estilo);
+            if (tipo is null) return; // sin catálogo configurado para este estilo, no hay nada que guardar
+            var cfg = _miConfigUsuario ?? new KONSolutions.Shared.Models.Estandar.ConfiguracionUsuario { COD_USUARIO = _codUsuario };
+            cfg.COD_TIPO_MENU_OPCIONES = tipo.COD_TIPO_MENU_OPCIONES;
+            _miConfigUsuario = cfg;
+            await CfgUsuarioSvc.SaveAsync(cfg);
+        }
+        catch { }
+    }
+
+    /// <summary>Deduce el EstiloMenu (Lateral/Circular/Tiles) a partir de la descripción del
+    /// tipo de menú en el catálogo ESTANDAR.TIPOS_MENU_OPCIONES, por palabra clave.</summary>
+    private static EstiloMenu? EstiloDesdeDescripcion(string? des)
+    {
+        var n = (des ?? "").ToUpperInvariant();
+        if (n.Contains("CIRCULAR")) return EstiloMenu.Circular;
+        if (n.Contains("TILE"))     return EstiloMenu.Tiles;
+        if (n.Contains("LATERAL"))  return EstiloMenu.Lateral;
+        return null;
+    }
+
+    private EstiloMenu? EstiloDesdeCod(string? cod)
+    {
+        if (string.IsNullOrWhiteSpace(cod)) return null;
+        var t = _tiposMenu.FirstOrDefault(x => x.COD_TIPO_MENU_OPCIONES == cod);
+        return EstiloDesdeDescripcion(t?.DES_TIPO_MENU_OPCIONES);
+    }
+
+    private KONSolutions.Shared.Models.Estandar.TipoMenuOpciones? TipoMenuPorEstilo(EstiloMenu e)
+        => _tiposMenu.FirstOrDefault(t => EstiloDesdeDescripcion(t.DES_TIPO_MENU_OPCIONES) == e);
+
+    /// <summary>Ícono base64 del catálogo para este estilo de menú, si existe (para mostrarlo
+    /// en el selector de estilo del menú de usuario, en vez del ícono fijo de Material).</summary>
+    private string? IconoBase64PorEstilo(EstiloMenu e)
+    {
+        var t = TipoMenuPorEstilo(e);
+        return t?.IMG_ICONO is { Length: > 0 } bytes ? Convert.ToBase64String(bytes) : null;
+    }
+
+    private async Task CargarConfiguracionGeneralAsync()
+    {
+        try
+        {
+            var cfg = await CfgGeneralSvc.GetCurrentAsync();
+            if (cfg is null) return;
+            if (!string.IsNullOrWhiteSpace(cfg.DES_NOMBRE_EMPRESA))
+                _nombreEmpresa = cfg.DES_NOMBRE_EMPRESA;
+            if (!string.IsNullOrWhiteSpace(cfg.DES_NOMBRE_APLICACION))
+            {
+                _nombreApp = cfg.DES_NOMBRE_APLICACION;
+            }
+            if (cfg.IMG_LOGO_EMPRESA is { Length: > 0 })
+                _logoEmpresa = Convert.ToBase64String(cfg.IMG_LOGO_EMPRESA);
+            if (cfg.IMG_LOGO_APLICACION is { Length: > 0 })
+            {
+                _logoApp = Convert.ToBase64String(cfg.IMG_LOGO_APLICACION);
+                try { await JS.InvokeVoidAsync("cursorBusy.setIcono", _logoApp); } catch { }
+            }
+
+            // Aplica TODA la Configuración General (colores de grilla, foco, fuentes, etc.)
+            // al AppConfig y la persiste — antes esto solo pasaba si el usuario entraba
+            // manualmente a la pantalla "Configuración General" y grababa; con localStorage
+            // recién limpiado (o un navegador/equipo nuevo) la app arrancaba con los
+            // valores por defecto hasta esa visita manual. Ahora se aplica ya al arrancar.
+            ConfigService.MapearDesdeConfiguracionGeneral(cfg, ConfigSvc.Current);
+            await ConfigSvc.SaveAsync(ConfigSvc.Current);
+
+            // Actualizar el splash con los datos reales de la BD mientras sigue cargando
+            await InvokeAsync(StateHasChanged);
+
+            // Aplicar colores de la BD al MudTheme para que afecten a todos los
+            // componentes MudBlazor (botones, selects, chips, etc.)
+            var primary      = string.IsNullOrWhiteSpace(cfg.DES_COLOR_PRIMARY)             ? "#b8472d"  : cfg.DES_COLOR_PRIMARY.Trim();
+            var secondary    = string.IsNullOrWhiteSpace(cfg.DES_COLOR_SECONDARY)           ? "#4a4a32"  : cfg.DES_COLOR_SECONDARY.Trim();
+            var backColor    = string.IsNullOrWhiteSpace(cfg.DES_BACKCOLOR)                 ? "#efe9df"  : cfg.DES_BACKCOLOR.Trim();
+            var font         = string.IsNullOrWhiteSpace(cfg.DES_TYPOGRAPHY_CONTROLS_FONT)  ? "Archivo"  : cfg.DES_TYPOGRAPHY_CONTROLS_FONT.Trim();
+            _envBack = string.IsNullOrWhiteSpace(cfg.DES_BACKCOLOR_ENVIRONMENT)      ? "#1a1714" : cfg.DES_BACKCOLOR_ENVIRONMENT.Trim();
+            _envFore = string.IsNullOrWhiteSpace(cfg.DES_FORECOLOR_ENVIRONMENT)      ? "#ffffff" : cfg.DES_FORECOLOR_ENVIRONMENT.Trim();
+            _envFont = string.IsNullOrWhiteSpace(cfg.DES_TYPOGRAPHY_ENVIRONMENT_FONT)? font      : cfg.DES_TYPOGRAPHY_ENVIRONMENT_FONT.Trim();
+            var envBack = _envBack;
+            var envFore = _envFore;
+            var envFont = _envFont;
+            // Sincronizar --paper con el color de fondo real de la BD
+            // para que los labels outlined siempre tapen el borde con el color correcto
+            try { await JS.InvokeVoidAsync("eval", $"document.documentElement.style.setProperty('--paper','{backColor}')"); } catch { }
+
+            _theme = new MudTheme
+            {
+                PaletteLight = new PaletteLight
+                {
+                    Primary           = primary,
+                    Secondary         = secondary,
+                    Background        = backColor,
+                    Surface           = "#ffffff",
+                    AppbarBackground  = envBack,
+                    AppbarText        = envFore,
+                    DrawerBackground  = envBack,
+                    DrawerText        = envFore,
+                    DrawerIcon        = envFore,
+                },
+                Typography = new Typography
+                {
+                    Default = new Default { FontFamily = new[] { font,    "sans-serif" } },
+                    H6      = new H6      { FontFamily = new[] { envFont, "sans-serif" } },
+                    Body1   = new Body1   { FontFamily = new[] { font,    "sans-serif" } },
+                    Body2   = new Body2   { FontFamily = new[] { font,    "sans-serif" } },
+                }
+            };
+            if (!string.IsNullOrWhiteSpace(cfg.DES_CULTURE))
+            {
+                try
+                {
+                    var stored = await LocalStorage.GetItemAsStringAsync("app-culture");
+                    if (stored != cfg.DES_CULTURE)
+                    {
+                        // Guardar y recargar para que Program.cs aplique el culture antes del primer render
+                        await LocalStorage.SetItemAsStringAsync("app-culture", cfg.DES_CULTURE);
+                        await JS.InvokeVoidAsync("location.reload");
+                        return;
+                    }
+                    // Ya está aplicado desde Program.cs; refuerzo en memoria por si acaso,
+                    // fijando también CurrentCulture del hilo actual (no solo el default
+                    // para hilos nuevos), igual que en Program.cs.
+                    KONSolutions.Web.Services.CultureHelper.Aplicar(cfg.DES_CULTURE);
+                }
+                catch { }
+            }
+        }
+        catch { }
+    }
+
+    private async Task CargarFotoUsuario()
+    {
+        try
+        {
+            var codUsuario = await GetCodUsuarioActualAsync();
+            if (string.IsNullOrWhiteSpace(codUsuario)) return;
+            var usuario = await UsuarioSvc.GetByIdAsync(codUsuario);
+            if (usuario?.IMG_FOTO is { Length: > 0 })
+                _fotoUsuario = Convert.ToBase64String(usuario.IMG_FOTO);
+        }
+        catch (Exception ex)
+        {
+            // Antes: catch vacío — la excepción desaparecía sin dejar rastro
+            // ni siquiera en el log de errores. Mismo tratamiento que los
+            // errores de SQL: se registra en errors_*.log vía ErrorLogService.
+            await ErrorLog.LogAsync(ex, "MainLayout", nameof(CargarFotoUsuario));
+        }
+    }
+
+    private async Task CargarFavoritos()
+    {
+        if (string.IsNullOrWhiteSpace(_codUsuario)) { _favoritos = new(); return; }
+        try
+        {
+            var apps = _opciones.Select(o => o.COD_APLICACION).Distinct().ToList();
+            // Todas las apps en paralelo en lugar de secuencial (N+1 → 1 ronda)
+            var tareas = apps.Select(app => FavoritoService.GetAsync(_codUsuario, app.ToString())).ToList();
+            var resultados = await Task.WhenAll(tareas);
+            var favs = new List<OpcionMenu>();
+            foreach (var lista in resultados)
+            {
+                foreach (var f in lista)
+                {
+                    var op = _opciones.FirstOrDefault(o =>
+                        o.COD_APLICACION.ToString() == f.COD_APLICACION &&
+                        o.COD_OPCION_APLICACION.ToString() == f.COD_OPCION_APLICACION);
+                    if (op is not null) favs.Add(op);
+                }
+            }
+            _favoritos = favs
+                .DistinctBy(o => o.COD_OPCION_APLICACION)
+                .ToList();
+
+            // Deja el set de favoritos disponible para las pantallas de menú (circular/tiles)
+            // que se abren automáticamente al login — así no vuelven a pedirlos por su cuenta.
+            FavoritosCache.Establecer(_favoritos.Select(o => (o.COD_APLICACION.ToString(), o.COD_OPCION_APLICACION.ToString())));
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, "MainLayout", nameof(CargarFavoritos));
+        }
+    }
+
+    private bool EsFavorito(OpcionMenu op) =>
+        _favoritos.Any(f => f.COD_APLICACION == op.COD_APLICACION && f.COD_OPCION_APLICACION == op.COD_OPCION_APLICACION);
+
+    private void MostrarMenuOpcion(MouseEventArgs e, OpcionMenu op)
+    {
+        Console.WriteLine($"[TRACE] {DateTime.Now:HH:mm:ss.fff} — MostrarMenuOpcion: {op.DES_OPCION_APLICACION} (antes _ctxOpen={_ctxOpen})");
+        _ctxOpcion = op; _ctxEsFavorito = EsFavorito(op);
+        (_ctxX, _ctxY) = CoordenadasMenuContextual(e);
+        _ctxOpen = true;
+    }
+
+    /// <summary>
+    /// Este menú contextual usa position:fixed dentro de #app, que tiene transform:scale()
+    /// aplicado por el zoom propio de la app. Un ancestro con transform se vuelve el
+    /// "containing block" de sus descendientes fixed (spec CSS), así que las coordenadas
+    /// de e.ClientX/Y (reales del viewport) hay que dividirlas entre el factor de zoom
+    /// para que el div quede alineado bajo el cursor en cualquier nivel de zoom.
+    /// </summary>
+    private (double x, double y) CoordenadasMenuContextual(MouseEventArgs e)
+    {
+        var scale = _zoomPct / 100.0;
+        return scale > 0 ? (e.ClientX / scale, e.ClientY / scale) : (e.ClientX, e.ClientY);
+    }
+
+    // ── Árbol jerárquico del menú (MDL/CRP/BTN/SPR) ──
+    // Cache en memoria del estado expandido para reaccionar sin esperar la
+    // llamada async de MenuEstadoService en cada render; se sincroniza al togglear.
+    private readonly HashSet<string> _carpetasExpandidas = new();
+
+    // ── Búsqueda del menú lateral ──
+    private string _busquedaMenu = "";
+
+    /// <summary>Poda el árbol dejando solo ramas donde el nodo o algún descendiente coincide con la búsqueda.</summary>
+    private List<NodoMenu> _arbolMenuFiltrado
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_busquedaMenu)) return _arbolMenu;
+            return FiltrarNodos(_arbolMenu, _busquedaMenu);
+        }
+    }
+
+    private static List<NodoMenu> FiltrarNodos(List<NodoMenu> nodos, string busqueda)
+    {
+        var resultado = new List<NodoMenu>();
+        foreach (var n in nodos)
+        {
+            var hijosFiltrados = FiltrarNodos(n.Hijos, busqueda);
+            var coincide = (n.DES_OPCION_APLICACION ?? "").Contains(busqueda, StringComparison.OrdinalIgnoreCase);
+            if (coincide || hijosFiltrados.Count > 0)
+            {
+                resultado.Add(new NodoMenu
+                {
+                    COD_OPCION_APLICACION      = n.COD_OPCION_APLICACION,
+                    COD_APLICACION             = n.COD_APLICACION,
+                    DES_APLICACION             = n.DES_APLICACION,
+                    DES_OPCION_APLICACION      = n.DES_OPCION_APLICACION,
+                    DES_FORMULARIO             = n.DES_FORMULARIO,
+                    COD_TIPO_OPCION_APLICACION = n.COD_TIPO_OPCION_APLICACION,
+                    DES_BACKCOLOR_APLICACION   = n.DES_BACKCOLOR_APLICACION,
+                    DES_FORECOLOR_APLICACION   = n.DES_FORECOLOR_APLICACION,
+                    IMG_ICONO_APLICACION       = n.IMG_ICONO_APLICACION,
+                    DES_BACKCOLOR_OPCION       = n.DES_BACKCOLOR_OPCION,
+                    DES_FORECOLOR_OPCION       = n.DES_FORECOLOR_OPCION,
+                    IMG_ICONO_OPCION           = n.IMG_ICONO_OPCION,
+                    Hijos                      = coincide ? n.Hijos : hijosFiltrados
+                });
+            }
+        }
+        return resultado;
+    }
+
+    /// <summary>Todas las carpetas del árbol filtrado, para que se muestren expandidas mientras se busca.</summary>
+    private HashSet<string> _carpetasExpandidasFiltro
+    {
+        get
+        {
+            var set = new HashSet<string>();
+            void Visitar(IEnumerable<NodoMenu> nodos)
+            {
+                foreach (var n in nodos)
+                {
+                    if (n.EsCarpeta) set.Add(n.COD_OPCION_APLICACION);
+                    Visitar(n.Hijos);
+                }
+            }
+            Visitar(_arbolMenuFiltrado);
+            return set;
+        }
+    }
+
+    // RenderNodo se reemplazó por un componente recursivo separado (NodoMenuItem.razor),
+    // ya que mezclar HTML directo dentro de un RenderFragment construido a mano en C#
+    // no es sintaxis Razor válida en archivos .razor.
+
+    private async Task CargarEstadoCarpetasAsync()
+    {
+        try
+        {
+            // Recorre el árbol completo y consulta el estado persistido de cada carpeta.
+            async Task Visitar(IEnumerable<NodoMenu> nodos)
+            {
+                foreach (var n in nodos)
+                {
+                    if (n.EsCarpeta && await MenuEstado.EstaExpandidaAsync(n.COD_OPCION_APLICACION))
+                        _carpetasExpandidas.Add(n.COD_OPCION_APLICACION);
+                    await Visitar(n.Hijos);
+                }
+            }
+            await Visitar(_arbolMenu);
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, "MainLayout", nameof(CargarEstadoCarpetasAsync));
+        }
+    }
+
+    private async Task ToggleCarpeta(string codOpcionAplicacion)
+    {
+        var expandida = !_carpetasExpandidas.Remove(codOpcionAplicacion);
+        if (expandida) _carpetasExpandidas.Add(codOpcionAplicacion);
+        Console.WriteLine($"[TRACE] {DateTime.Now:HH:mm:ss.fff} — MENU LATERAL - ToggleCarpeta: {codOpcionAplicacion} → {(expandida ? "EXPANDIDA" : "COLAPSADA")}");
+        await MenuEstado.ToggleAsync(codOpcionAplicacion);
+        StateHasChanged();
+    }
+
+    private void MostrarMenuFavorito(MouseEventArgs e, OpcionMenu op)
+    {
+        _ctxOpcion = op; _ctxEsFavorito = true;
+        (_ctxX, _ctxY) = CoordenadasMenuContextual(e);
+        _ctxOpen = true;
+    }
+
+    private async Task AgregarFavorito()
+    {
+        _ctxOpen = false;
+        if (_ctxOpcion is null || string.IsNullOrWhiteSpace(_codUsuario)) return;
+        await ErrorLog.TraceAsync($"FAVORITOS - Agregar: [{_ctxOpcion.COD_APLICACION}] {_ctxOpcion.DES_OPCION_APLICACION} (usuario={_codUsuario})");
+        var ok = await FavoritoService.AgregarAsync(_codUsuario,
+            _ctxOpcion.COD_APLICACION.ToString(), _ctxOpcion.COD_OPCION_APLICACION.ToString());
+        if (ok)
+        {
+            // Ya sabemos exactamente qué opción se agregó — actualizar en memoria evita
+            // recargar TODAS las apps del menú (antes: N llamadas HTTP en paralelo, una por
+            // cada aplicación, solo para reflejar el cambio de una fila).
+            if (!_favoritos.Any(o => o.COD_OPCION_APLICACION == _ctxOpcion.COD_OPCION_APLICACION))
+                _favoritos.Add(_ctxOpcion);
+            FavoritosCache.Establecer(_favoritos.Select(o => (o.COD_APLICACION.ToString(), o.COD_OPCION_APLICACION.ToString())));
+            Snackbar.Add("Agregado a favoritos.", Severity.Success);
+        }
+        else Snackbar.Add("No se pudo agregar a favoritos.", Severity.Error);
+    }
+
+    private async Task QuitarFavorito()
+    {
+        _ctxOpen = false;
+        if (_ctxOpcion is null || string.IsNullOrWhiteSpace(_codUsuario)) return;
+        await ErrorLog.TraceAsync($"FAVORITOS - Quitar: [{_ctxOpcion.COD_APLICACION}] {_ctxOpcion.DES_OPCION_APLICACION} (usuario={_codUsuario})");
+        var ok = await FavoritoService.QuitarAsync(_codUsuario,
+            _ctxOpcion.COD_APLICACION.ToString(), _ctxOpcion.COD_OPCION_APLICACION.ToString());
+        if (ok)
+        {
+            _favoritos.RemoveAll(o => o.COD_OPCION_APLICACION == _ctxOpcion.COD_OPCION_APLICACION);
+            FavoritosCache.Establecer(_favoritos.Select(o => (o.COD_APLICACION.ToString(), o.COD_OPCION_APLICACION.ToString())));
+            Snackbar.Add("Quitado de favoritos.", Severity.Success);
+        }
+        else Snackbar.Add("No se pudo quitar de favoritos.", Severity.Error);
+    }
+}

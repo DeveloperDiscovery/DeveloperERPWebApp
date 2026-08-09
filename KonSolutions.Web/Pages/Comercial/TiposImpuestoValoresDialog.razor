@@ -1,0 +1,113 @@
+@using TiposImpuestoValoresModel = KONSolutions.Shared.Models.Comercial.TiposImpuestoValores
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@(Item?.FEC_INICIO?.ToString("dd/MM/yyyy"))" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <MudDatePicker @bind-Date="_fecInicio" Label="Vigente desde" Editable="true"
+                           Disabled="@(Modo != CrudModo.Create || _readonly)" Class="mb-3" />
+            <MudDatePicker @bind-Date="_fecFinal" Label="Vigente hasta" Editable="true"
+                           Disabled="_readonly" Class="mb-3" />
+            <MudNumericField @bind-Value="_model.TAS_IMPUESTO" Label="Tasa de impuesto (%)" Min="0" Max="100"
+                              Format="N3" Variant="Variant.Outlined" Disabled="_readonly" Class="mb-3"
+                              Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+            <MudNumericField @bind-Value="_model.VAL_IMPUESTO" Label="Valor fijo de impuesto" Min="0"
+                              Format="N2" Variant="Variant.Outlined" Disabled="_readonly" Class="mb-3"
+                              Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposImpuestoValoresModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public string? CodTipoImpuestoFijo { get; set; }
+
+    private TiposImpuestoValoresModel _model = new();
+    private DateTime? _fecInicio;
+    private DateTime? _fecFinal;
+    private bool _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        // Mapeo inicial desde el Item que pasó la grilla — se usa como fallback mientras
+        // se resuelve el viaje a SHOWBYID (en OnInitializedAsync) o si ese viaje falla; una
+        // vez que responde, MapearDesdeModelo() pisa estos valores con los frescos de la BD.
+        if (Item is not null)
+        {
+            MapearDesdeModelo(Item);
+        }
+        else if (!string.IsNullOrEmpty(CodTipoImpuestoFijo))
+        {
+            _model.COD_TIPO_IMPUESTO = CodTipoImpuestoFijo;
+        }
+        _fecInicio = _model.FEC_INICIO;
+        _fecFinal  = _model.FEC_FINAL;
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de SHOWBYID) hacia _model.</summary>
+    private void MapearDesdeModelo(TiposImpuestoValoresModel m)
+    {
+        _model.COD_TIPO_IMPUESTO = m.COD_TIPO_IMPUESTO;
+        _model.FEC_INICIO = m.FEC_INICIO;
+        _model.FEC_FINAL = m.FEC_FINAL;
+        _model.TAS_IMPUESTO = m.TAS_IMPUESTO;
+        _model.VAL_IMPUESTO = m.VAL_IMPUESTO;
+        _fecInicio = _model.FEC_INICIO;
+        _fecFinal  = _model.FEC_FINAL;
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear), para no mostrar datos desactualizados de la
+    /// grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposImpuestoValoresModel>($"{ApiRoutes.Comercial.TiposImpuestoValores}/{Uri.EscapeDataString(_model.COD_TIPO_IMPUESTO)}/{Uri.EscapeDataString(_model.FEC_INICIO?.ToString("yyyy-MM-dd") ?? string.Empty)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Modo != CrudModo.Create && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _model.FEC_INICIO = _fecInicio;
+        _model.FEC_FINAL  = _fecFinal;
+        _saving = true;
+        var ruta = ApiRoutes.Comercial.TiposImpuestoValores;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_TIPO_IMPUESTO)}/{_model.FEC_INICIO:yyyy-MM-dd}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposImpuestoValoresDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var resp = await Http.GuardarAsync(ruta, _model, Modo == CrudModo.Create);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add("Guardado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposImpuestoValoresDialog), nameof(Submit));
+    }
+}

@@ -1,0 +1,213 @@
+@using SubProcesosModel = KONSolutions.Shared.Models.Produccion.SubProcesos
+@using ProduccionRoute = KONSolutions.Web.Services.ApiRoutes.Produccion
+@using IngenieriaRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_SUB_PROCESO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            <MudTextField T="string" Label="Proceso" Value="@DescripcionProceso"
+                          ValueChanged="@((string _) => { })" Variant="Variant.Outlined" Disabled="true" Class="mb-3" ReadOnly="true" />
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="4">
+                    <CampoTexto Tabla="PRODUCCION.SUB_PROCESOS" Columna="COD_SUB_PROCESO"
+                                @bind-Value="_model.COD_SUB_PROCESO"
+                                Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <CampoTexto Tabla="PRODUCCION.SUB_PROCESOS" Columna="DES_SUB_PROCESO"
+                                @bind-Value="_model.DES_SUB_PROCESO"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="PRODUCCION.SUB_PROCESOS" Columna="DES_ALIAS"
+                                @bind-Value="_model.DES_ALIAS"
+                                Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="PRODUCCION.SUB_PROCESOS" Columna="DES_LINEA_PRODUCCION"
+                                @bind-Value="_model.DES_LINEA_PRODUCCION"
+                                Disabled="_readonly" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="4">
+                    <CampoTexto Tabla="PRODUCCION.SUB_PROCESOS" Columna="DES_NOMBRE_ORDEN_PRODUCCION"
+                                @bind-Value="_model.DES_NOMBRE_ORDEN_PRODUCCION"
+                                Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <CampoTexto Tabla="PRODUCCION.SUB_PROCESOS" Columna="DES_NOMBRE_ORDEN_PRODUCCION_ITEM"
+                                @bind-Value="_model.DES_NOMBRE_ORDEN_PRODUCCION_ITEM"
+                                Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <CampoTexto Tabla="PRODUCCION.SUB_PROCESOS" Columna="DES_NOMBRE_ORDEN_PRODUCCION_UNIDAD"
+                                @bind-Value="_model.DES_NOMBRE_ORDEN_PRODUCCION_UNIDAD"
+                                Disabled="_readonly" />
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="4">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposMerma"
+                               TextFunc="@(c => $"{c.Id} - {c.Texto}")" ValueFunc="@(c => c.Id)"
+                               @bind-Value="_model.COD_TIPO_MERMA"
+                               Label="Tipo de Merma" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField T="int?" @bind-Value="_model.VAL_ULTIMO_CORRELATIVO" Label="Último Correlativo"
+                                      Variant="Variant.Outlined" Disabled="true" Class="mb-3"
+                                      Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudNumericField T="int?" @bind-Value="_model.VAL_ULTIMO_CORRELATIVO_CONTENEDOR" Label="Último Correlativo Contenedor"
+                                      Variant="Variant.Outlined" Disabled="true" Class="mb-3"
+                                      Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </MudItem>
+            </MudGrid>
+
+            <div class="d-flex flex-wrap" style="gap:8px 24px;margin-bottom:12px;">
+                @{ var switches = new (string Icon, string Label, Func<bool?> Get, Action<bool?> Set)[]
+                   {
+                       (Icons.Material.Filled.PrecisionManufacturing, "Orden de Fabricación", () => _model.FLG_ORDEN_FABRICACION, v => _model.FLG_ORDEN_FABRICACION = v),
+                       (Icons.Material.Filled.Inventory,               "Embalaje Final",       () => _model.FLG_EMBALAJE_FINAL,    v => _model.FLG_EMBALAJE_FINAL = v),
+                       (Icons.Material.Filled.VerifiedUser,            "Control de Calidad",   () => _model.FLG_CONTROL_CALIDAD,   v => _model.FLG_CONTROL_CALIDAD = v),
+                   };
+                }
+                @foreach (var s in switches)
+                {
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@s.Icon" Size="Size.Small" Style="opacity:.6;" />
+                        <MudText Typo="Typo.body2">@s.Label</MudText>
+                        <MudSwitch T="bool?" Value="@s.Get()" ValueChanged="@s.Set" Color="Color.Primary" Disabled="_readonly" />
+                    </div>
+                }
+            </div>
+
+            <EstadoCombo DesTabla="PRODUCCION.SUB_PROCESOS"
+                         @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                         Disabled="_readonly" Class="mb-3" />
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public SubProcesosModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private SubProcesosModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _tiposMerma = new();
+
+    private string DescripcionProceso => string.IsNullOrWhiteSpace(_model.DES_PROCESO)
+        ? _model.COD_PROCESO
+        : $"{_model.COD_PROCESO} - {_model.DES_PROCESO}";
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de SHOWBYID) hacia _model.</summary>
+    private void MapearDesdeModelo(SubProcesosModel m)
+    {
+        _model.COD_PROCESO = m.COD_PROCESO;
+        _model.DES_PROCESO = m.DES_PROCESO;
+        _model.COD_SUB_PROCESO = m.COD_SUB_PROCESO;
+        _model.DES_SUB_PROCESO = m.DES_SUB_PROCESO;
+        _model.DES_ALIAS = m.DES_ALIAS;
+        _model.FLG_ORDEN_FABRICACION = m.FLG_ORDEN_FABRICACION;
+        _model.DES_NOMBRE_ORDEN_PRODUCCION = m.DES_NOMBRE_ORDEN_PRODUCCION;
+        _model.DES_NOMBRE_ORDEN_PRODUCCION_ITEM = m.DES_NOMBRE_ORDEN_PRODUCCION_ITEM;
+        _model.DES_NOMBRE_ORDEN_PRODUCCION_UNIDAD = m.DES_NOMBRE_ORDEN_PRODUCCION_UNIDAD;
+        _model.DES_EQUIPO_PRODUCCION_PRINCIPAL = m.DES_EQUIPO_PRODUCCION_PRINCIPAL;
+        _model.DES_LINEA_PRODUCCION = m.DES_LINEA_PRODUCCION;
+        _model.FLG_EMBALAJE_FINAL = m.FLG_EMBALAJE_FINAL;
+        _model.FLG_CONTROL_CALIDAD = m.FLG_CONTROL_CALIDAD;
+        _model.COD_TIPO_MERMA = m.COD_TIPO_MERMA;
+        _model.VAL_ULTIMO_CORRELATIVO = m.VAL_ULTIMO_CORRELATIVO;
+        _model.VAL_ULTIMO_CORRELATIVO_CONTENEDOR = m.VAL_ULTIMO_CORRELATIVO_CONTENEDOR;
+        _model.IMG_ICONO = m.IMG_ICONO;
+        _model.COD_TIPO_ESTADO = m.COD_TIPO_ESTADO;
+        _model.COD_ESTADO = m.COD_ESTADO;
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID (clave compuesta) — se usa al abrir el
+    /// diálogo (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<SubProcesosModel>(
+            $"{ProduccionRoute.SubProcesos}/{Uri.EscapeDataString(_model.COD_PROCESO)}/{Uri.EscapeDataString(_model.COD_SUB_PROCESO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>(IngenieriaRoute.TiposMermaCombobox);
+            _tiposMerma = r?.Data ?? new();
+        }
+        catch { _tiposMerma = new(); }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ProduccionRoute.SubProcesos;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync(
+                $"{ruta}/{Uri.EscapeDataString(_model.COD_PROCESO)}/{Uri.EscapeDataString(_model.COD_SUB_PROCESO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(SubProcesosDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var dto = new { _model.COD_PROCESO, _model.COD_SUB_PROCESO, _model.DES_SUB_PROCESO, _model.DES_ALIAS,
+                        _model.FLG_ORDEN_FABRICACION, _model.DES_NOMBRE_ORDEN_PRODUCCION,
+                        _model.DES_NOMBRE_ORDEN_PRODUCCION_ITEM, _model.DES_NOMBRE_ORDEN_PRODUCCION_UNIDAD,
+                        _model.DES_EQUIPO_PRODUCCION_PRINCIPAL, _model.DES_LINEA_PRODUCCION,
+                        _model.FLG_EMBALAJE_FINAL, _model.FLG_CONTROL_CALIDAD,
+                        _model.COD_TIPO_MERMA, _model.VAL_ULTIMO_CORRELATIVO, _model.VAL_ULTIMO_CORRELATIVO_CONTENEDOR,
+                        _model.IMG_ICONO, _model.COD_TIPO_ESTADO, _model.COD_ESTADO };
+        var resp = await Http.GuardarAsync(ruta, dto, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(SubProcesosDialog), nameof(Submit));
+    }
+}

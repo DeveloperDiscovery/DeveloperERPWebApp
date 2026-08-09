@@ -1,0 +1,227 @@
+@page "/entorno/tipos-notificaciones"
+@attribute [Authorize]
+@using KONSolutions.Shared.Models.Entorno
+@inject CatalogoService<TipoNotificacion, TipoNotificacionDto> Service
+@inject IDialogService DialogService
+@inject AccessLogService AccessLog
+@inject ISnackbar Snackbar
+@inject ControlCambiosClientService Cambios
+@inject LimitesService Limites
+@inject ShortcutService ShortcutSvc
+@inject ConfigService ConfigSvc
+@implements IDisposable
+
+<PageTitle>Tipos de Notificación · KONSolutions ERP</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Tipos de Notificación" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema ENTORNO · @_items.Count registros</MudText>
+    </div>
+    <BarraBusqueda @bind-Value="_searchTerm" OnSearch="HandleSearch" Placeholder="Buscar tipo de notificación..." DebounceInterval="450" MaxWidth="719px" Class="grid-header-search" />
+    <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="@(_filtros.Any(f => f.Value is not null))" />
+    <div class="grid-header-divider"></div>
+    <div class="d-flex gap-2">
+        <GridRefreshButton OnRefresh="Load" />
+        <GridPrintButton Titulo="Tipos de Notificación" Headers="@_printHeaders" Rows="@PrintRows()" />
+        <AccionesBotones CodAplicacion="@CodAplicacion"
+                         CodOpcionAplicacion="@CodOpcionAplicacion"
+                         Zona="@AccionesBotones.ZonaBotones.Header"
+                         OnAccion="OnAccionHeader" />
+    </div>
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="tipos-notificacion" style="position:relative;">
+    <MudDataGrid T="TipoNotificacion" Items="_visibles" Dense="true" Hover="true" Striped="true"
+                 Height="100%" FixedHeader="true" RowsPerPage="@ConfigSvc.Current.FilasPorPaginaUnica">
+        <Columns>
+            <TemplateColumn Title="Icono" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <GridImage Image="context.Item.IMG_ICONO" />
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Código" Width="@Limites.ColWidth("ENTORNO.TIPOS_NOTIFICACION","COD_TIPO_NOTIFICACION",60,150)" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_TIPO_NOTIFICACION" Activo="@(_ordenColumna == 0)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(0))" />
+                        <FiltroExcelColumna T="TipoNotificacion" ItemsBase="@BaseSinEstaColumna(0)"
+                                            ValorDe="@(x => x.COD_TIPO_NOTIFICACION ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(0)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(0, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.COD_TIPO_NOTIFICACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Descripción" Width="@Limites.ColWidth("ENTORNO.TIPOS_NOTIFICACION","DES_TIPO_NOTIFICACION",120,350)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="DES_TIPO_NOTIFICACION" Activo="@(_ordenColumna == 1)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(1))" />
+                        <FiltroExcelColumna T="TipoNotificacion" ItemsBase="@BaseSinEstaColumna(1)"
+                                            ValorDe="@(x => x.DES_TIPO_NOTIFICACION ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(1)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(1, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_NOTIFICACION</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Tipo de estado" Width="@Limites.ColWidth("ENTORNO.TIPOS_NOTIFICACION","COD_TIPO_ESTADO",120,220)">
+                <HeaderTemplate>
+                    <div class="d-flex align-center gap-1">
+                        <EncabezadoOrdenable Campo="COD_TIPO_ESTADO" Activo="@(_ordenColumna == 2)" Ascendente="_ordenAscendente" OnClick="@(() => ToggleOrden(2))" />
+                        <FiltroExcelColumna T="TipoNotificacion" ItemsBase="@BaseSinEstaColumna(2)"
+                                            ValorDe="@(x => x.DES_TIPO_ESTADO ?? "")"
+                                            ValoresActivos="_filtros.GetValueOrDefault(2)"
+                                            ValoresActivosChanged="@(v => AplicarFiltro(2, v))" />
+                    </div>
+                </HeaderTemplate>
+                <CellTemplate>@context.Item.DES_TIPO_ESTADO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Dispara" Sortable="false" CellStyle="text-align:center;" HeaderStyle="text-align:center;">
+                <CellTemplate>
+                    <div class="d-flex align-center justify-center gap-2">
+                        <MudTooltip Text="Aprobación">
+                            <MudIcon Icon="@Icons.Material.Filled.HowToReg" Color="@(context.Item.FLG_APROBACION == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_APROBACION == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                        <MudTooltip Text="Calendario">
+                            <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" Color="@(context.Item.FLG_CALENDARIO == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_CALENDARIO == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                        <MudTooltip Text="Mensaje">
+                            <MudIcon Icon="@Icons.Material.Filled.Message" Color="@(context.Item.FLG_MENSAJE == true ? Color.Success : Color.Error)"
+                                     Style="@(context.Item.FLG_MENSAJE == true ? "" : "opacity:.2;")" Size="Size.Small" />
+                        </MudTooltip>
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="Acciones" Sortable="false">
+                <CellTemplate>
+                    @{ var item = context.Item; }
+                    <AccionesBotones CodAplicacion="@CodAplicacion"
+                                     CodOpcionAplicacion="@CodOpcionAplicacion"
+                                     Zona="@AccionesBotones.ZonaBotones.Grilla"
+                                     OnAccion="@(b => OnAccionGrilla(item, b))" />
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent><MudText Class="pa-6 mono" Style="opacity:.5;">Sin tipos de notificación.</MudText></NoRecordsContent>
+        <PagerContent><MudDataGridPager T="TipoNotificacion" /></PagerContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public string CodAplicacion { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private List<TipoNotificacion> _items = new();
+    private string _searchTerm = string.Empty;
+    private readonly Dictionary<int, HashSet<string>?> _filtros = new();
+    private int? _ordenColumna;
+    private bool _ordenAscendente = true;
+    private void ToggleOrden(int columna)
+    {
+        if (_ordenColumna == columna) _ordenAscendente = !_ordenAscendente;
+        else { _ordenColumna = columna; _ordenAscendente = true; }
+        StateHasChanged();
+    }
+    private List<TipoNotificacion> Ordenar(List<TipoNotificacion> items) => _ordenColumna switch
+    {
+        0 => _ordenAscendente ? items.OrderBy(x => x.COD_TIPO_NOTIFICACION).ToList() : items.OrderByDescending(x => x.COD_TIPO_NOTIFICACION).ToList(),
+        1 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_NOTIFICACION).ToList() : items.OrderByDescending(x => x.DES_TIPO_NOTIFICACION).ToList(),
+        2 => _ordenAscendente ? items.OrderBy(x => x.DES_TIPO_ESTADO).ToList() : items.OrderByDescending(x => x.DES_TIPO_ESTADO).ToList(),
+        _ => items
+    };
+
+    private List<TipoNotificacion> _visibles => Ordenar(AplicarTodos(_items, -1));
+    private List<TipoNotificacion> BaseSinEstaColumna(int col) => AplicarTodos(_items, col);
+
+    private List<TipoNotificacion> AplicarTodos(List<TipoNotificacion> origen, int excluir)
+    {
+        IEnumerable<TipoNotificacion> q = origen;
+        foreach (var (col, vals) in _filtros)
+        {
+            if (col == excluir || vals is null) continue;
+            q = col switch
+            {
+                0 => q.Where(x => vals.Contains(x.COD_TIPO_NOTIFICACION ?? "")),
+                1 => q.Where(x => vals.Contains(x.DES_TIPO_NOTIFICACION ?? "")),
+                2 => q.Where(x => vals.Contains(x.DES_TIPO_ESTADO ?? "")),
+                _ => q
+            };
+        }
+        return q.ToList();
+    }
+
+    private void AplicarFiltro(int col, HashSet<string>? vals) { _filtros[col] = vals; StateHasChanged(); }
+    private void LimpiarFiltros() { foreach (var k in _filtros.Keys.ToList()) _filtros[k] = null; StateHasChanged(); }
+
+    private readonly List<string> _printHeaders = new() { "Código", "Descripción", "Tipo de estado" };
+    private List<List<string>> PrintRows() => _items.Select(b => new List<string>
+    {
+        b.COD_TIPO_NOTIFICACION ?? "", b.DES_TIPO_NOTIFICACION ?? "", b.DES_TIPO_ESTADO ?? ""
+    }).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("ENTORNO", "TiposNotificacion");
+        await Load();
+        Cambios.Suscribir("ENTORNO.TIPOS_NOTIFICACION", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested += OnAtajoNuevo;
+    }
+
+    private async void OnAtajoNuevo() => await InvokeAsync(() => Open(null));
+
+    private async Task Load() => _items = await Service.GetAllAsync();
+
+    private async Task HandleSearch()
+    {
+        _items = string.IsNullOrWhiteSpace(_searchTerm)
+            ? await Service.GetAllAsync()
+            : await Service.SearchAsync(_searchTerm);
+    }
+
+    private Task OnAccionHeader(BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_POST == true) return Open(null);
+        return Task.CompletedTask;
+    }
+
+    private Task OnAccionGrilla(TipoNotificacion item, BotonTreeviewItem b)
+    {
+        if (b.FLG_ACCION_GET    == true) return Ver(item);
+        if (b.FLG_ACCION_PUT    == true) return Open(item);
+        if (b.FLG_ACCION_DELETE == true) return Delete(item);
+        return Task.CompletedTask;
+    }
+
+    private async Task Ver(TipoNotificacion item)    => await AbrirDialog(item, CrudModo.Read);
+    private async Task Open(TipoNotificacion? b)     => await AbrirDialog(b, b is null ? CrudModo.Create : CrudModo.Update);
+    private async Task Delete(TipoNotificacion b)    => await AbrirDialog(b, CrudModo.Delete);
+
+    private async Task AbrirDialog(TipoNotificacion? b, CrudModo modo)
+    {
+        var titulo = modo switch
+        {
+            CrudModo.Create => "Nuevo tipo de notificación",
+            CrudModo.Read   => $"Ver · {b?.COD_TIPO_NOTIFICACION}",
+            CrudModo.Update => $"Editar · {b?.COD_TIPO_NOTIFICACION}",
+            CrudModo.Delete => $"Eliminar · {b?.COD_TIPO_NOTIFICACION}",
+            _ => "Tipo de notificación"
+        };
+        var parameters = new DialogParameters { ["Item"] = b, ["Modo"] = modo };
+        var dlg = await DialogService.ShowAsync<TipoNotificacionDialog>(titulo, parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await Load();
+    }
+
+    private async Task RefrescarPorCambio() => await InvokeAsync(async () => { await Load(); StateHasChanged(); });
+
+    public void Dispose()
+    {
+        Cambios.Desuscribir("ENTORNO.TIPOS_NOTIFICACION", RefrescarPorCambio);
+        ShortcutSvc.NuevoRequested -= OnAtajoNuevo;
+    }
+}

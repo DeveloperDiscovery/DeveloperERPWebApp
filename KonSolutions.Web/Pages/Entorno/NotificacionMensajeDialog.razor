@@ -1,0 +1,92 @@
+@* Visor genérico para notificaciones que NO son de aprobación (mensajes, vencimientos,
+   asignaciones, etc.) — mismo lenguaje visual que NotificacionAprobacionDialog (cabecera,
+   chips de fecha/estado, tarjeta de información con foto del notificador), pero sin las
+   secciones que solo aplican al flujo de aprobación (documentos/historial/botonera). *@
+<style>
+    .notif-msj-dlg .mud-dialog-content { padding: 0 !important; }
+    .chip-meta {
+        display: inline-flex; align-items: center; gap: 3px;
+        font-size: .62rem; font-weight: 700; color: var(--ink-dim, #6b6358);
+        background: rgba(0,0,0,.04); border-radius: 4px; padding: 1px 6px;
+        white-space: nowrap;
+    }
+    .chip-meta b { color: inherit; font-weight: 700; opacity: .75; }
+</style>
+
+<MudDialog Class="notif-msj-dlg" Style="max-width:96vw;">
+    <DialogContent>
+        <div style="width:520px;max-width:96vw;box-sizing:border-box;padding:10px 24px 24px 24px;">
+            <div style="display:flex;align-items:center;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--line,#d9d2c5);margin-bottom:12px;">
+                <div style="width:41px;height:41px;border-radius:7px;background:var(--rust,#b8472d);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    @if (Item?.IMG_ICONO is { Length: > 0 })
+                    {
+                        <img src="@Base64Img(Item.IMG_ICONO)" style="width:18px;height:18px;object-fit:contain;" alt="" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Notifications" Style="color:#fff;font-size:18px;" />
+                    }
+                </div>
+                <div style="flex:1;min-width:0;">
+                    <div class="mono" style="font-size:.68rem;opacity:.55;">Notificación · #@Item?.NUM_NOTIFICACION</div>
+                    <div style="font-weight:800;font-size:.92rem;line-height:1.25;">@Item?.DES_NOTIFICACION</div>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                               OnClick="@(() => MudDialog.Cancel())" />
+            </div>
+
+            <div class="d-flex gap-2" style="flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line,#d9d2c5);margin-bottom:10px;">
+                @if (!string.IsNullOrWhiteSpace(Item?.DES_TIPO_NOTIFICACION))
+                {
+                    <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Label">@Item.DES_TIPO_NOTIFICACION</MudChip>
+                }
+                @if (Item?.DES_TIEMPO_RESTANTE is not null)
+                {
+                    <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.HourglassBottom">@Item.DES_TIEMPO_RESTANTE días restantes</MudChip>
+                }
+            </div>
+
+            <div style="display:flex;gap:12px;border:1px solid var(--line,#d9d2c5);border-radius:8px;padding:12px;">
+                <div style="flex:1;font-size:.82rem;line-height:1.5;">
+                    <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;opacity:.5;font-weight:700;margin-bottom:4px;">Información</div>
+                    <div style="white-space:pre-line;">@Item?.DES_INFORMACION</div>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(Item?.DES_USUARIO))
+                {
+                    <div style="width:115px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;">
+                        @if (!string.IsNullOrEmpty(FotoNotificador))
+                        {
+                            <img src="@($"data:image/png;base64,{FotoNotificador}")" style="width:62px;height:62px;border-radius:50%;object-fit:cover;border:1px solid var(--line,#d9d2c5);" alt="" />
+                        }
+                        else
+                        {
+                            <MudAvatar Size="Size.Medium" Color="Color.Default">@Iniciales(Item.DES_USUARIO)</MudAvatar>
+                        }
+                        <div style="font-size:.7rem;font-weight:700;line-height:1.2;">@Item.DES_USUARIO</div>
+                    </div>
+                }
+            </div>
+
+            <div style="padding-top:16px;display:flex;justify-content:flex-end;">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(() => MudDialog.Close())">Cerrar</MudButton>
+            </div>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public KONSolutions.Shared.Models.Entorno.NotificacionFlujoItem? Item { get; set; }
+    [Parameter] public string? FotoNotificador { get; set; }
+
+    private static string Base64Img(byte[]? bytes) =>
+        bytes is { Length: > 0 } ? $"data:image/png;base64,{Convert.ToBase64String(bytes)}" : "";
+
+    private static string Iniciales(string? nombre)
+    {
+        if (string.IsNullOrWhiteSpace(nombre)) return "?";
+        var partes = nombre.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return partes.Length >= 2 ? $"{partes[0][0]}{partes[1][0]}".ToUpperInvariant()
+                                   : partes[0][0].ToString().ToUpperInvariant();
+    }
+}

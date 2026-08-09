@@ -1,0 +1,100 @@
+@using CondicionesPagoModel = KONSolutions.Shared.Models.Comercial.CondicionesPago
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_CONDICION_PAGO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            @if (!_esNuevo)
+            {
+                <CampoTexto Tabla="COMERCIAL.CONDICIONES_PAGO" Columna="COD_CONDICION_PAGO"
+                            @bind-Value="_codigoStr" Disabled="true" />
+            }
+            <CampoTexto Tabla="COMERCIAL.CONDICIONES_PAGO" Columna="DES_CONDICION_PAGO"
+                        @bind-Value="_model.DES_CONDICION_PAGO"
+                        Disabled="_readonly" Obligatorio="true" />
+            <MudNumericField @bind-Value="_model.CAN_DIAS" Label="Días" Min="0"
+                              Variant="Variant.Outlined" Disabled="_readonly" Class="mb-3"
+                              Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.CreditCard" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_CREDITO" Color="Color.Primary" Label="Crédito" Disabled="_readonly" /></div>
+            <div class="d-flex align-center gap-2 mb-3"><MudIcon Icon="@Icons.Material.Filled.CalendarMonth" Color="Color.Primary" Size="Size.Medium" />
+                <MudSwitch @bind-Value="_model.FLG_DIAS_CALENDARIO" Color="Color.Secondary" Label="Días calendario" Disabled="_readonly" /></div>
+            <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)" Label="Ícono" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public CondicionesPagoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private CondicionesPagoModel _model = new();
+    private string? _codigoStr;
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        // Mapeo inicial desde el Item que pasó la grilla — se usa como fallback mientras
+        // se resuelve el viaje a SHOWBYID (en OnInitializedAsync) o si ese viaje falla; una
+        // vez que responde, MapearDesdeModelo() pisa estos valores con los frescos de la BD.
+        if (Item is not null) MapearDesdeModelo(Item);
+        _codigoStr = _model.COD_CONDICION_PAGO?.ToString();
+    }
+
+    /// <summary>Copia los campos editables del modelo (Item de la grilla, o la respuesta
+    /// fresca de SHOWBYID) hacia _model.</summary>
+    private void MapearDesdeModelo(CondicionesPagoModel m)
+    {
+        _model.COD_CONDICION_PAGO = m.COD_CONDICION_PAGO;
+        _model.DES_CONDICION_PAGO = m.DES_CONDICION_PAGO;
+        _model.FLG_CREDITO = m.FLG_CREDITO;
+        _model.CAN_DIAS = m.CAN_DIAS;
+        _model.FLG_DIAS_CALENDARIO = m.FLG_DIAS_CALENDARIO;
+        _model.IMG_ICONO = m.IMG_ICONO;
+        _codigoStr = _model.COD_CONDICION_PAGO?.ToString();
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear), para no mostrar datos desactualizados de la
+    /// grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<CondicionesPagoModel>($"{ApiRoutes.Comercial.CondicionesPago}/{_model.COD_CONDICION_PAGO}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Comercial.CondicionesPago;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{_model.COD_CONDICION_PAGO}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(CondicionesPagoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // El SP hace upsert: POST tanto para crear como para editar (COD identity).
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(CondicionesPagoDialog), nameof(Submit));
+    }
+}

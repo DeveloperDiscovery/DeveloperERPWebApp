@@ -1,0 +1,17 @@
+@* Botón reutilizable para limpiar filtros de columna.
+   Uso: <GridClearFiltersButton OnClear="LimpiarFiltros" HasFilters="_filtros.Any(f => f.Value is not null)" />
+   Color.Default de MudBlazor queda casi invisible sobre el tema oscuro de la app —
+   se fuerza un color propio (igual que Refrescar/Imprimir) para que siempre se vea,
+   sin perder el aviso en Warning cuando hay filtros activos. *@
+<MudTooltip Text="Limpiar filtros">
+    <MudIconButton Icon="@Icons.Material.Filled.FilterAltOff"
+                   Class="grid-header-btn"
+                   Color="@(HasFilters ? Color.Warning : Color.Default)"
+                   Style="@(HasFilters ? "" : "color:var(--boton-backcolor,var(--ink));")"
+                   OnClick="OnClear" />
+</MudTooltip>
+
+@code {
+    [Parameter] public EventCallback OnClear  { get; set; }
+    [Parameter] public bool          HasFilters { get; set; }
+}

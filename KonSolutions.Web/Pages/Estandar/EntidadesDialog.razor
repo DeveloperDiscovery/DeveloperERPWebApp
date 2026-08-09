@@ -1,0 +1,976 @@
+@using KONSolutions.Shared.Models.Estandar
+@using ConfiguracionGeneralModel = KONSolutions.Shared.Models.Estandar.ConfiguracionGeneral
+@using KONSolutions.Web.Pages.Comercial
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+@inject ConfiguracionGeneralService CfgSvc
+
+<MudDialog Style="width:min(1328px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_NOMBRE_COMPLETO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-0 pt-3" @bind-ActivePanelIndex="_tabActiva">
+            <MudTabPanel Text="Información Básica">
+            <div style="display:flex;gap:16px;align-items:flex-start;width:100%;">
+            <div style="flex:1 1 auto;min-width:0;">
+            <MudGrid Spacing="2">
+                <MudItem xs="12" md="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposPersona"
+                               TextFunc="@(t => t.Texto)" ValueFunc="@(t => t.Id)"
+                               Value="@(_model.COD_TIPO_PERSONA?.ToString())"
+                               ValueChanged="@(v => { _model.COD_TIPO_PERSONA = int.TryParse(v, out var n) ? n : null; ActualizarNombreCompleto(); LimpiarPrefijoSiNoAplica(); LimpiarDependenciaSiNoAplica(); })"
+                               Label="Tipo de Persona" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    @* Solo aplica a Persona Jurídica (2) — deshabilitado en Natural (1). *@
+                    <CampoTexto Tabla="ESTANDAR.ENTIDADES" Columna="NUM_DUNS"
+                                @bind-Value="_model.NUM_DUNS"
+                                Obligatorio="false" Disabled="@(_readonly || _model.COD_TIPO_PERSONA != 2)" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposDoc"
+                               TextFunc="@(td => td.Texto)" ValueFunc="@(td => td.Id)"
+                               Value="@(_model.COD_TIPO_DOCUMENTO_IDENTIDAD?.ToString())"
+                               ValueChanged="@(v => _model.COD_TIPO_DOCUMENTO_IDENTIDAD = int.TryParse(v, out var n) ? n : null)"
+                               Label="Tipo doc. identidad" Obligatorio="true" Disabled="_readonly" Class="mt-1 mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="8">
+                    <CampoTexto Tabla="ESTANDAR.ENTIDADES" Columna="NUM_DOCUMENTO_IDENTIDAD"
+                                @bind-Value="_model.NUM_DOCUMENTO_IDENTIDAD"
+                                Obligatorio="true" Disabled="_readonly" Class="mt-1 mb-3" />
+                </MudItem>
+                @* Solo aplican a Persona Natural (COD_TIPO_PERSONA = 1) — deshabilitados en Jurídica. *@
+                <MudItem xs="6" md="3">
+                    <CampoTexto Tabla="ESTANDAR.ENTIDADES" Columna="DES_PATERNO"
+                                Value="@_model.DES_PATERNO"
+                                ValueChanged="@(v => { _model.DES_PATERNO = v ?? ""; ActualizarNombreCompleto(); })"
+                                Disabled="@(_readonly || _model.COD_TIPO_PERSONA == 2)" />
+                </MudItem>
+                <MudItem xs="6" md="3">
+                    <CampoTexto Tabla="ESTANDAR.ENTIDADES" Columna="DES_MATERNO"
+                                Value="@_model.DES_MATERNO"
+                                ValueChanged="@(v => { _model.DES_MATERNO = v ?? ""; ActualizarNombreCompleto(); })"
+                                Disabled="@(_readonly || _model.COD_TIPO_PERSONA == 2)" />
+                </MudItem>
+                <MudItem xs="6" md="3">
+                    <CampoTexto Tabla="ESTANDAR.ENTIDADES" Columna="DES_NOMBRE"
+                                Value="@_model.DES_NOMBRE"
+                                ValueChanged="@(v => { _model.DES_NOMBRE = v ?? ""; ActualizarNombreCompleto(); })"
+                                Disabled="@(_readonly || _model.COD_TIPO_PERSONA == 2)" />
+                </MudItem>
+                <MudItem xs="6" md="3">
+                    <CampoTexto Tabla="ESTANDAR.ENTIDADES" Columna="DES_NOMBRE2"
+                                Value="@_model.DES_NOMBRE2"
+                                ValueChanged="@(v => { _model.DES_NOMBRE2 = v ?? ""; ActualizarNombreCompleto(); })"
+                                Disabled="@(_readonly || _model.COD_TIPO_PERSONA == 2)" />
+                </MudItem>
+                @* Persona Natural (1): calculado y deshabilitado. Persona Jurídica (2): editable y obligatorio. *@
+                <MudItem xs="12" md="6">
+                    <CampoTexto Tabla="ESTANDAR.ENTIDADES" Columna="DES_NOMBRE_COMPLETO"
+                                @bind-Value="_model.DES_NOMBRE_COMPLETO"
+                                Disabled="@(_readonly || _model.COD_TIPO_PERSONA == 1)" Obligatorio="true" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    @* Habilitado para los dos tipos de persona. Antes se bloqueaba en Jurídica (2),
+                       que es justamente donde el nombre comercial más se usa: no había forma de
+                       cargarlo desde la pantalla. A diferencia del prefijo y de la dependencia,
+                       este campo no se limpia al cambiar de tipo — aplica a los dos. *@
+                    <CampoTexto Tabla="ESTANDAR.ENTIDADES" Columna="DES_COMERCIAL"
+                                @bind-Value="_model.DES_COMERCIAL"
+                                Disabled="@_readonly" />
+                </MudItem>
+                @* Solo aplica a Persona Jurídica (2) — deshabilitado y limpiado en Natural (1),
+                   ver LimpiarPrefijoSiNoAplica. *@
+                <MudItem xs="12" md="6">
+                    <CampoTexto Tabla="ESTANDAR.ENTIDADES" Columna="DES_PREFIJO_USUARIO_COMERCIAL"
+                                Label="Prefijo usuario comercial"
+                                @bind-Value="_model.DES_PREFIJO_USUARIO_COMERCIAL"
+                                Disabled="@(_readonly || _model.COD_TIPO_PERSONA != 2)" />
+                </MudItem>
+                @* Solo aplica a Persona Natural (1) — deshabilitado y limpiado en Jurídica (2),
+                   ver LimpiarDependenciaSiNoAplica. Lista precargada desde
+                   PROC_ESTANDAR_ENTIDADES_PARADEPENDER (ya viene filtrada a Persona Jurídica
+                   por el propio SP, con nombre y prefijo, sin la ambigüedad de columnas que
+                   tiene SHOWALL/SHOWBYID — ver Domain/Models/Estandar/Entidades.cs del lado API). *@
+                <MudItem xs="12" md="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_entidadesParaDepender"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               Value="@(_model.COD_ENTIDAD_DEPENDENCIA?.ToString())"
+                               ValueChanged="@(v => _model.COD_ENTIDAD_DEPENDENCIA = decimal.TryParse(v, out var n) ? n : null)"
+                               Label="Entidad dependencia"
+                               Disabled="@(_readonly || _model.COD_TIPO_PERSONA != 1)" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <div class="d-flex align-center gap-1 mt-2"><MudIcon Icon="@Icons.Material.Filled.Home" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool?" Value="_model.FLG_DOMICILIADO" ValueChanged="@(v => OnDomiciliadoChanged(v))"
+                                   Label="Domiciliado" Disabled="_readonly" Color="Color.Primary" /></div>
+                </MudItem>
+                <MudItem xs="12" md="8">
+                    @* Si es Domiciliado, País se precarga desde Configuración General, pero queda editable.
+                       ItemSelected actualiza DES_PAIS (no solo COD_PAIS): TextoInicial está atado a
+                       DES_PAIS, y si no se refresca, el combo remoto revierte el texto mostrado al
+                       valor viejo apenas se re-renderiza tras elegir un país nuevo. *@
+                    <AriaCombo TItem="ComboboxItem" Items="Enumerable.Empty<ComboboxItem>()"
+                               TextFunc="@(x => $"{x.Id} – {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               Value="@_model.COD_PAIS" ValueChanged="@(v => _model.COD_PAIS = v ?? "")"
+                               ItemSelected="@(item => _model.DES_PAIS = item?.Texto ?? "")"
+                               SearchFunc="BuscarPaisAsync" MinCharacters="2"
+                               TextoInicial="@(_model.DES_PAIS)"
+                               Label="País" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <AriaCombo TItem="ComboboxItem" Items="Enumerable.Empty<ComboboxItem>()"
+                               TextFunc="@(x => $"{x.Id} – {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               Value="@_model.COD_USUARIO_RELACIONADO" ValueChanged="@(v => _model.COD_USUARIO_RELACIONADO = v ?? "")"
+                               SearchFunc="BuscarUsuarioEntidadAsync" MinCharacters="2"
+                               TextoInicial="@(_model.COD_USUARIO_RELACIONADO)"
+                               Label="Usuario relacionado" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <EstadoCombo DesTabla="ESTANDAR.ENTIDADES"
+                                 @bind-Value="_model.COD_ESTADO"
+                                 CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                                 Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+            </MudGrid>
+            </div>
+            <div style="flex-shrink:0;padding-left:8px;border-left:1px solid rgba(0,0,0,.1);width:290px;">
+                <ImagePicker Label="Logo" Image="_model.IMG_LOGO"
+                             ImageChanged="@(v => _model.IMG_LOGO = v)"
+                             ReadOnly="_readonly" />
+
+                @* Tipos de Entidad: check = INSERT inmediato en ENTIDADES_TIPOS_ENTIDADES,
+                   uncheck = DELETE inmediato — no espera al Guardar del formulario principal. *@
+                <MudText Typo="Typo.caption" Class="mono mt-3 mb-1"
+                          Style="opacity:.6;font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">Tipos de Entidad:</MudText>
+                @if (_esNuevo)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Style="font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">Guarda la entidad primero para asignar tipos.</MudAlert>
+                }
+                else
+                {
+                    <div style="border:1px solid var(--line);border-radius:4px;padding:6px 8px;max-height:225px;overflow-y:auto;">
+                        @foreach (var t in _tiposEntidadTodos)
+                        {
+                            <div class="d-flex align-center">
+                                <MudSwitch T="bool"
+                                           Value="@(BloquearTipoEntidad ? t.Id == CodTipoEntidadFijo : _tiposEntidadAsignados.Contains(t.Id))"
+                                           ValueChanged="@(v => ToggleTipoEntidad(t.Id, v))"
+                                           Disabled="@(_readonly || _tipoEntidadGuardando == t.Id || BloquearTipoEntidad)"
+                                           Dense="true" Color="Color.Primary" />
+                                <MudText Typo="Typo.body2" Style="font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">@t.Texto</MudText>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Documentos de Identidad">
+            <div style="min-height:40vh;">
+            @if (_esNuevo)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Style="font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">Guarda la entidad primero para asignar sus Documentos de Identidad.</MudAlert>
+            }
+            else
+            {
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <MudText Typo="Typo.caption" Class="mono" Style="opacity:.6;font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">@_documentos.Count documento(s)</MudText>
+                    @if (!_readonly)
+                    {
+                        <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Filled" Size="Size.Small"
+                                   Style="@EstiloBotonConfirmar" OnClick="AgregarDocumento">Agregar documento</MudButton>
+                    }
+                </div>
+                @* Tabla HTML simple (sin el wrapper "overflow-x:auto" de MudSimpleTable) —
+                   ese wrapper recorta también el overflow vertical (regla CSS: un eje
+                   overflow:auto fuerza el otro a auto), lo que ocultaba el desplegable
+                   de AriaCombo (position:absolute) apenas se abría dentro de una fila. *@
+                <table class="tabla-simple-editable" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th style="width:280px;">Tipo de documento</th>
+                            <th>Número de documento</th>
+                            <th style="width:190px;">Fecha de caducidad</th>
+                            <th style="width:130px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _documentos)
+                        {
+                            <tr>
+                                <td>
+                                    <AriaCombo TItem="ComboboxItem" Items="_tiposDoc"
+                                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                                               Value="@(row.CodTipo?.ToString())"
+                                               ValueChanged="@(v => row.CodTipo = int.TryParse(v, out var n) ? n : null)"
+                                               Disabled="@(!row.EsNueva || _readonly)" Class="mb-0" Style="margin-top:0;" />
+                                </td>
+                                <td>
+                                    <div class="grilla-campo-texto">
+                                        <CampoTexto Tabla="ESTANDAR.ENTIDADES_DOCUMENTOS_IDENTIDAD" Columna="NUM_DOCUMENTO_IDENTIDAD"
+                                                    @bind-Value="row.NumDocumento" Disabled="_readonly" MostrarLabel="false"
+                                                    Margin="Margin.None" Class="mb-0" />
+                                    </div>
+                                </td>
+                                <td>
+                                    <MudDatePicker @bind-Date="row.FecCaducidad" Variant="Variant.Outlined" Disabled="_readonly"
+                                                   Margin="Margin.None" Class="mb-0" />
+                                </td>
+                                <td>
+                                    @if (!_readonly)
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success"
+                                                       Disabled="@(row.Guardando || row.CodTipo is null || string.IsNullOrWhiteSpace(row.NumDocumento))"
+                                                       OnClick="@(() => GuardarDocumentoAsync(row))" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                       Disabled="row.Guardando" OnClick="@(() => EliminarDocumentoAsync(row))" />
+                                    }
+                                    @if (!row.EsNueva)
+                                    {
+                                        <PanelAuditoria CodUsuarioRegistro="@row.CodUsuarioRegistro"
+                                                        CodEstacionRegistro="@row.CodEstacionRegistro"
+                                                        FecRegistro="@row.FecRegistro"
+                                                        CodUsuarioActualizacion="@row.CodUsuarioActualizacion"
+                                                        CodEstacionActualizacion="@row.CodEstacionActualizacion"
+                                                        FecActualizacion="@row.FecActualizacion" />
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Medios de Contacto">
+            <div style="min-height:40vh;">
+            @if (_esNuevo)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Style="font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">Guarda la entidad primero para asignar sus Medios de Contacto.</MudAlert>
+            }
+            else
+            {
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <MudText Typo="Typo.caption" Class="mono" Style="opacity:.6;font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">@_mediosContacto.Count medio(s) de contacto</MudText>
+                    @if (!_readonly)
+                    {
+                        <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Filled" Size="Size.Small"
+                                   Style="@EstiloBotonConfirmar" OnClick="AgregarMedioContacto">Agregar medio de contacto</MudButton>
+                    }
+                </div>
+                <table class="tabla-simple-editable" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th style="width:240px;">Tipo de medio de contacto</th>
+                            <th>Dato (correo, teléfono, url, usuario...)</th>
+                            <th style="width:180px;">Tipo de uso</th>
+                            <th style="width:130px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _mediosContacto)
+                        {
+                            <tr>
+                                <td>
+                                    @* Ya no es clave (la clave es NUM_SECUENCIA), así que se puede editar
+                                       aunque la fila no sea nueva — permite varias filas del mismo tipo. *@
+                                    <AriaCombo TItem="ComboboxItem" Items="_tiposMedioContacto"
+                                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                                               Value="@(row.CodTipo?.ToString())"
+                                               ValueChanged="@(v => row.CodTipo = int.TryParse(v, out var n) ? n : null)"
+                                               Disabled="_readonly" Class="mb-0" Style="margin-top:0;" />
+                                </td>
+                                <td>
+                                    <div class="grilla-campo-texto">
+                                        <CampoTexto Tabla="COMERCIAL.ENTIDADES_TIPOS_MEDIO_CONTACTO" Columna="DAT_TIPO_MEDIO_CONTACTO"
+                                                    @bind-Value="row.Dato" Disabled="_readonly" MostrarLabel="false"
+                                                    Margin="Margin.None" Class="mb-0" />
+                                    </div>
+                                </td>
+                                <td>
+                                    <AriaCombo TItem="ComboboxItem" Items="_tiposUso"
+                                               TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                                               Value="@(row.CodTipoUso)"
+                                               ValueChanged="@(v => row.CodTipoUso = v)"
+                                               Disabled="_readonly" Class="mb-0" Style="margin-top:0;" />
+                                </td>
+                                <td>
+                                    @if (!_readonly)
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success"
+                                                       Disabled="@(row.Guardando || row.CodTipo is null || string.IsNullOrWhiteSpace(row.Dato))"
+                                                       OnClick="@(() => GuardarMedioContactoAsync(row))" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                       Disabled="row.Guardando" OnClick="@(() => EliminarMedioContactoAsync(row))" />
+                                    }
+                                    @if (!row.EsNueva)
+                                    {
+                                        <PanelAuditoria CodUsuarioRegistro="@row.CodUsuarioRegistro"
+                                                        CodEstacionRegistro="@row.CodEstacionRegistro"
+                                                        FecRegistro="@row.FecRegistro"
+                                                        CodUsuarioActualizacion="@row.CodUsuarioActualizacion"
+                                                        CodEstacionActualizacion="@row.CodEstacionActualizacion"
+                                                        FecActualizacion="@row.FecActualizacion" />
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            </div>
+            </MudTabPanel>
+
+            @* Direcciones tiene demasiados campos (17, incluyendo el mapa de ubicación)
+               para editarse en una fila de grilla como Documentos/Medios de Contacto —
+               acá cada fila abre EntidadesDireccionesDialog (diálogo CRUD completo,
+               mismo patrón que el resto de la app) en vez de edición in-place. *@
+            <MudTabPanel Text="Direcciones">
+            <div style="min-height:40vh;">
+            @if (_esNuevo)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Style="font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">Guarda la entidad primero para asignar sus Direcciones.</MudAlert>
+            }
+            else
+            {
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <MudText Typo="Typo.caption" Class="mono" Style="opacity:.6;font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">@_direcciones.Count dirección(es)</MudText>
+                    @if (!_readonly)
+                    {
+                        <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Filled" Size="Size.Small"
+                                   Style="@EstiloBotonConfirmar" OnClick="AgregarDireccion">Agregar dirección</MudButton>
+                    }
+                </div>
+                <table class="tabla-simple-editable" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th style="width:170px;">Tipo</th>
+                            <th>Dirección</th>
+                            <th style="width:170px;">Ubigeo</th>
+                            <th style="width:130px;">Coordenadas</th>
+                            <th style="width:130px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in _direcciones)
+                        {
+                            <tr>
+                                <td>@d.DES_TIPO_DIRECCION</td>
+                                <td>@d.DES_DIRECCION</td>
+                                <td>@d.DES_UBIGEO</td>
+                                <td>
+                                    @if (d.VAL_LATITUD is not null && d.VAL_LONGITUD is not null)
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.LocationOn" Color="Color.Success" Size="Size.Small" Title="Tiene coordenadas guardadas" />
+                                    }
+                                </td>
+                                <td>
+                                    @if (!_readonly)
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => EditarDireccion(d))" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => EliminarDireccionAsync(d))" />
+                                    }
+                                    <PanelAuditoria CodUsuarioRegistro="@d.COD_USUARIO_REGISTRO"
+                                                    CodEstacionRegistro="@d.COD_ESTACION_REGISTRO"
+                                                    FecRegistro="@d.FEC_REGISTRO"
+                                                    CodUsuarioActualizacion="@d.COD_USUARIO_ACTUALIZACION"
+                                                    CodEstacionActualizacion="@d.COD_ESTACION_ACTUALIZACION"
+                                                    FecActualizacion="@d.FEC_ACTUALIZACION" />
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            </div>
+            </MudTabPanel>
+
+            @* Solo aplica al Catálogo de Clientes (COD_TIPO_ENTIDAD = 'CLI', ver
+               CodTipoEntidadFijo/BloquearTipoEntidad) — no tiene sentido en la grilla
+               genérica de Entidades ni para otros tipos (Proveedores, Personal, etc.). *@
+            @if (BloquearTipoEntidad && CodTipoEntidadFijo == "CLI")
+            {
+                <MudTabPanel Text="Asesores Comerciales">
+                <div style="min-height:40vh;">
+                @if (_esNuevo)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Style="font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">Guarda el cliente primero para asignar sus Asesores Comerciales.</MudAlert>
+                }
+                else
+                {
+                    <div class="d-flex align-center justify-space-between mb-2">
+                        <MudText Typo="Typo.caption" Class="mono" Style="opacity:.6;font-family:var(--control-font, inherit);font-size:var(--control-size, 14px);">@_asesoresComerciales.Count asesor(es) asignado(s)</MudText>
+                        @if (!_readonly)
+                        {
+                            <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Filled" Size="Size.Small"
+                                       Style="@EstiloBotonConfirmar" OnClick="AgregarAsesorComercial">Agregar asesor comercial</MudButton>
+                        }
+                    </div>
+                    <table class="tabla-simple-editable" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th>Asesor comercial</th>
+                                <th style="width:130px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var a in _asesoresComerciales)
+                            {
+                                <tr>
+                                    <td>@(a.DES_NOMBRE_COMPLETO ?? a.COD_ENTIDAD_ASESOR_COMERCIAL?.ToString())</td>
+                                    <td>
+                                        @if (!_readonly)
+                                        {
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => EliminarAsesorComercialAsync(a))" />
+                                        }
+                                        <PanelAuditoria CodUsuarioRegistro="@a.COD_USUARIO_REGISTRO"
+                                                        CodEstacionRegistro="@a.COD_ESTACION_REGISTRO"
+                                                        FecRegistro="@a.FEC_REGISTRO" />
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+                </div>
+                </MudTabPanel>
+            }
+            </MudTabs>
+
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Entidad? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    // Reutilización de este diálogo con un Tipo de Entidad fijo (ej. "CLI" = Clientes) —
+    // ver Entidades.razor y DES_PARAMETRO en SEGURIDAD.APLICACIONES_OPCIONES. Cuando
+    // BloquearTipoEntidad es true, el panel "Tipos de Entidad" queda con ese tipo marcado
+    // y TODO el panel deshabilitado (no se puede desmarcar ni marcar otro).
+    [Parameter] public string? CodTipoEntidadFijo { get; set; }
+    [Parameter] public bool BloquearTipoEntidad { get; set; }
+    // Solo para resolver el combo de Asesores Comerciales (tab condicional, ver arriba) —
+    // identifica la opción de menú actual para encontrar su Área enlazada
+    // (ESTANDAR.APLICACIONES_OPCIONES_AREAS) y así los cargos/entidades asignados a ella.
+    [Parameter] public string? CodAplicacion { get; set; }
+    [Parameter] public string? CodOpcionAplicacion { get; set; }
+
+    // FLG_DOMICILIADO por defecto true en Crear — MapearDesdeModelo reemplaza el objeto
+    // completo en Editar/Ver, así que este default no pisa el valor real guardado.
+    private Entidad _model = new() { FLG_DOMICILIADO = true };
+    private bool _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _tiposDoc = new();
+    private bool _esNuevo;
+    private int _tabActiva;
+
+    // Mismo estándar que CrudDialogActions.razor: el botón de acción usa el color
+    // configurado en ESTANDAR.CONFIGURACION_GENERAL (--boton-backcolor/--boton-forecolor).
+    private const string EstiloBotonConfirmar =
+        "font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));";
+
+    // ── Documentos de Identidad (pestaña, grilla editable in-place) ──
+    private class DocumentoIdentidadRow
+    {
+        public int? CodTipo { get; set; }
+        public string NumDocumento { get; set; } = "";
+        public DateTime? FecCaducidad { get; set; }
+        public bool EsNueva { get; set; }
+        public bool Guardando { get; set; }
+        public string? CodUsuarioRegistro { get; set; }
+        public string? CodEstacionRegistro { get; set; }
+        public DateTime? FecRegistro { get; set; }
+        public string? CodUsuarioActualizacion { get; set; }
+        public string? CodEstacionActualizacion { get; set; }
+        public DateTime? FecActualizacion { get; set; }
+    }
+    private List<DocumentoIdentidadRow> _documentos = new();
+
+    private async Task CargarDocumentosAsync()
+    {
+        if (_model.COD_ENTIDAD is null) return;
+        var lista = await Http.SafeGetAsync<List<KONSolutions.Shared.Models.Estandar.EntidadesDocumentosIdentidad>>(
+            $"{ApiRoutes.Estandar.EntidadesDocumentosIdentidad}?codEntidad={_model.COD_ENTIDAD}") ?? new();
+        _documentos = lista.Select(m => new DocumentoIdentidadRow
+        {
+            CodTipo = m.COD_TIPO_DOCUMENTO_IDENTIDAD,
+            NumDocumento = m.NUM_DOCUMENTO_IDENTIDAD,
+            FecCaducidad = m.FEC_CADUCIDAD,
+            EsNueva = false,
+            CodUsuarioRegistro = m.COD_USUARIO_REGISTRO,
+            CodEstacionRegistro = m.COD_ESTACION_REGISTRO,
+            FecRegistro = m.FEC_REGISTRO,
+            CodUsuarioActualizacion = m.COD_USUARIO_ACTUALIZACION,
+            CodEstacionActualizacion = m.COD_ESTACION_ACTUALIZACION,
+            FecActualizacion = m.FEC_ACTUALIZACION
+        }).ToList();
+    }
+
+    private void AgregarDocumento() => _documentos.Add(new DocumentoIdentidadRow { EsNueva = true });
+
+    private async Task GuardarDocumentoAsync(DocumentoIdentidadRow row)
+    {
+        row.Guardando = true;
+        try
+        {
+            var dto = new
+            {
+                COD_ENTIDAD = _model.COD_ENTIDAD,
+                COD_TIPO_DOCUMENTO_IDENTIDAD = row.CodTipo,
+                NUM_DOCUMENTO_IDENTIDAD = row.NumDocumento,
+                FEC_CADUCIDAD = row.FecCaducidad
+            };
+            // PROC_ESTANDAR_ENTIDADES_DOCUMENTOS_IDENTIDAD_INSERT es upsert — siempre POST.
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Estandar.EntidadesDocumentosIdentidad, dto);
+            if (resp.IsSuccessStatusCode) { row.EsNueva = false; Snackbar.Add("Guardado.", Severity.Success); }
+            else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EntidadesDialog), nameof(GuardarDocumentoAsync));
+        }
+        finally { row.Guardando = false; }
+    }
+
+    private async Task EliminarDocumentoAsync(DocumentoIdentidadRow row)
+    {
+        if (row.EsNueva) { _documentos.Remove(row); return; }
+        row.Guardando = true;
+        try
+        {
+            var resp = await Http.DeleteAsync($"{ApiRoutes.Estandar.EntidadesDocumentosIdentidad}/{_model.COD_ENTIDAD}/{row.CodTipo}");
+            if (resp.IsSuccessStatusCode) { _documentos.Remove(row); Snackbar.Add("Eliminado.", Severity.Success); }
+            else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EntidadesDialog), nameof(EliminarDocumentoAsync), "No se pudo eliminar el registro");
+        }
+        finally { row.Guardando = false; }
+    }
+
+    // ── Medios de Contacto (pestaña, grilla editable in-place) ──
+    // Clave: COD_ENTIDAD + NUM_SECUENCIA (auto-generado por el SP INSERT al crear,
+    // ver PROC_COMERCIAL_ENTIDADES_TIPOS_MEDIO_CONTACTO_INSERT) — permite varias filas
+    // del mismo tipo de medio de contacto para una misma entidad.
+    private class MedioContactoRow
+    {
+        public short? NumSecuencia { get; set; }
+        public int? CodTipo { get; set; }
+        public string Dato { get; set; } = "";
+        public string? CodTipoUso { get; set; }
+        public bool EsNueva { get; set; }
+        public bool Guardando { get; set; }
+        public string? CodUsuarioRegistro { get; set; }
+        public string? CodEstacionRegistro { get; set; }
+        public DateTime? FecRegistro { get; set; }
+        public string? CodUsuarioActualizacion { get; set; }
+        public string? CodEstacionActualizacion { get; set; }
+        public DateTime? FecActualizacion { get; set; }
+    }
+    private List<MedioContactoRow> _mediosContacto = new();
+    private List<ComboboxItem> _tiposMedioContacto = new();
+    private List<ComboboxItem> _tiposUso = new();
+
+    private async Task CargarMediosContactoAsync()
+    {
+        if (_model.COD_ENTIDAD is null) return;
+        var lista = await Http.SafeGetAsync<List<KONSolutions.Shared.Models.Comercial.EntidadesTiposMedioContacto>>(
+            $"{ApiRoutes.Comercial.EntidadesTiposMedioContacto}?codEntidad={_model.COD_ENTIDAD}") ?? new();
+        _mediosContacto = lista.Select(m => new MedioContactoRow
+        {
+            NumSecuencia = m.NUM_SECUENCIA,
+            CodTipo = m.COD_TIPO_MEDIO_CONTACTO,
+            Dato = m.DAT_TIPO_MEDIO_CONTACTO,
+            CodTipoUso = m.COD_TIPO_USO,
+            EsNueva = false,
+            CodUsuarioRegistro = m.COD_USUARIO_REGISTRO,
+            CodEstacionRegistro = m.COD_ESTACION_REGISTRO,
+            FecRegistro = m.FEC_REGISTRO,
+            CodUsuarioActualizacion = m.COD_USUARIO_ACTUALIZACION,
+            CodEstacionActualizacion = m.COD_ESTACION_ACTUALIZACION,
+            FecActualizacion = m.FEC_ACTUALIZACION
+        }).ToList();
+    }
+
+    private void AgregarMedioContacto() => _mediosContacto.Add(new MedioContactoRow { EsNueva = true });
+
+    private async Task GuardarMedioContactoAsync(MedioContactoRow row)
+    {
+        row.Guardando = true;
+        try
+        {
+            var dto = new
+            {
+                COD_ENTIDAD = _model.COD_ENTIDAD,
+                NUM_SECUENCIA = row.NumSecuencia ?? 0,
+                COD_TIPO_MEDIO_CONTACTO = row.CodTipo,
+                DAT_TIPO_MEDIO_CONTACTO = row.Dato,
+                COD_TIPO_USO = row.CodTipoUso
+            };
+            // PROC_COMERCIAL_ENTIDADES_TIPOS_MEDIO_CONTACTO_INSERT es upsert — siempre POST.
+            // NUM_SECUENCIA se recalcula en el servidor al crear (0/null), así que tras un
+            // alta se recarga la grilla completa para obtener el correlativo asignado.
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Comercial.EntidadesTiposMedioContacto, dto);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Guardado.", Severity.Success);
+                if (row.EsNueva) await CargarMediosContactoAsync(); else row.EsNueva = false;
+            }
+            else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EntidadesDialog), nameof(GuardarMedioContactoAsync));
+        }
+        finally { row.Guardando = false; }
+    }
+
+    private async Task EliminarMedioContactoAsync(MedioContactoRow row)
+    {
+        if (row.EsNueva) { _mediosContacto.Remove(row); return; }
+        row.Guardando = true;
+        try
+        {
+            var resp = await Http.DeleteAsync($"{ApiRoutes.Comercial.EntidadesTiposMedioContacto}/{_model.COD_ENTIDAD}/{row.NumSecuencia}");
+            if (resp.IsSuccessStatusCode) { _mediosContacto.Remove(row); Snackbar.Add("Eliminado.", Severity.Success); }
+            else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EntidadesDialog), nameof(EliminarMedioContactoAsync), "No se pudo eliminar el registro");
+        }
+        finally { row.Guardando = false; }
+    }
+
+    // ── Direcciones (pestaña, lista + diálogo CRUD completo — ver comentario en el markup) ──
+    private List<KONSolutions.Shared.Models.Comercial.EntidadesDirecciones> _direcciones = new();
+
+    private async Task CargarDireccionesAsync()
+    {
+        if (_model.COD_ENTIDAD is null) return;
+        _direcciones = await Http.SafeGetAsync<List<KONSolutions.Shared.Models.Comercial.EntidadesDirecciones>>(
+            $"{ApiRoutes.Comercial.EntidadesDirecciones}?codEntidad={_model.COD_ENTIDAD}") ?? new();
+    }
+
+    private async Task AgregarDireccion()
+    {
+        var parametros = new DialogParameters { ["Modo"] = CrudModo.Create, ["CodEntidad"] = _model.COD_ENTIDAD };
+        var dlg = await DialogService.ShowAsync<EntidadesDireccionesDialog>("Nueva dirección", parametros,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await CargarDireccionesAsync();
+    }
+
+    private async Task EditarDireccion(KONSolutions.Shared.Models.Comercial.EntidadesDirecciones d)
+    {
+        var parametros = new DialogParameters { ["Modo"] = CrudModo.Update, ["Item"] = d, ["CodEntidad"] = _model.COD_ENTIDAD };
+        var dlg = await DialogService.ShowAsync<EntidadesDireccionesDialog>($"Editar · {d.DES_DIRECCION}", parametros,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await CargarDireccionesAsync();
+    }
+
+    private async Task EliminarDireccionAsync(KONSolutions.Shared.Models.Comercial.EntidadesDirecciones d)
+    {
+        var parametros = new DialogParameters { ["Modo"] = CrudModo.Delete, ["Item"] = d, ["CodEntidad"] = _model.COD_ENTIDAD };
+        var dlg = await DialogService.ShowAsync<EntidadesDireccionesDialog>($"Eliminar · {d.DES_DIRECCION}", parametros,
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await CargarDireccionesAsync();
+    }
+
+    private ConfiguracionGeneralModel? _cfg;
+
+    private List<ComboboxItem> _tiposEntidadTodos = new();
+    private HashSet<string> _tiposEntidadAsignados = new();
+    private string? _tipoEntidadGuardando;
+
+    // ── Asesores Comerciales (tab condicional, solo Catálogo de Clientes) ──
+    private List<KONSolutions.Shared.Models.Comercial.EntidadesAsesoresComerciales> _asesoresComerciales = new();
+
+    private async Task CargarAsesoresComercialesAsync()
+    {
+        if (_model.COD_ENTIDAD is null) return;
+        _asesoresComerciales = await Http.SafeGetAsync<List<KONSolutions.Shared.Models.Comercial.EntidadesAsesoresComerciales>>(
+            $"{ApiRoutes.Comercial.EntidadesAsesoresComerciales}/{_model.COD_ENTIDAD}") ?? new();
+    }
+
+    private async Task AgregarAsesorComercial()
+    {
+        var yaAsignados = _asesoresComerciales
+            .Where(a => a.COD_ENTIDAD_ASESOR_COMERCIAL is not null)
+            .Select(a => a.COD_ENTIDAD_ASESOR_COMERCIAL!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .ToList();
+        var parametros = new DialogParameters
+        {
+            ["CodEntidadCliente"] = _model.COD_ENTIDAD!.Value,
+            ["YaAsignados"] = yaAsignados
+        };
+        var dlg = await DialogService.ShowAsync<KONSolutions.Web.Pages.Comercial.EntidadesAsesoresComercialesDialog>("Nuevo asesor comercial", parametros,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false });
+        if ((await dlg.Result) is { Canceled: false }) await CargarAsesoresComercialesAsync();
+    }
+
+    private async Task EliminarAsesorComercialAsync(KONSolutions.Shared.Models.Comercial.EntidadesAsesoresComerciales a)
+    {
+        var confirmar = await DialogService.ShowMessageBox("Confirmar", $"¿Eliminar al asesor comercial \"{a.DES_NOMBRE_COMPLETO}\"?", yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirmar != true) return;
+        var resp = await Http.DeleteAsync($"{ApiRoutes.Comercial.EntidadesAsesoresComerciales}/{a.COD_ENTIDAD_CLIENTE}/{a.COD_ENTIDAD_ASESOR_COMERCIAL}");
+        if (resp.IsSuccessStatusCode) await CargarAsesoresComercialesAsync();
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EntidadesDialog), nameof(EliminarAsesorComercialAsync));
+    }
+
+    private class EntidadTipoEntidadShowselectRow
+    {
+        public bool FLG_SELECT { get; set; }
+        public decimal? COD_ENTIDAD { get; set; }
+        public string COD_TIPO_ENTIDAD { get; set; } = "";
+        public string DES_TIPO_ENTIDAD { get; set; } = "";
+    }
+
+    /// <summary>PROC_ESTANDAR_ENTIDADES_TIPOS_ENTIDADES_SHOWWSELECT trae en un solo llamado
+    /// TODOS los tipos de entidad con FLG_SELECT indicando si ya están asignados a esta
+    /// entidad — se ordenan asignados primero.</summary>
+    private async Task CargarTiposEntidadAsync()
+    {
+        if (_model.COD_ENTIDAD is null) return;
+        var filas = await Http.SafeGetAsync<List<EntidadTipoEntidadShowselectRow>>(
+            $"{ApiRoutes.Estandar.EntidadesTiposEntidadesShowselect}/{_model.COD_ENTIDAD}") ?? new();
+        _tiposEntidadTodos = filas
+            .OrderByDescending(f => f.FLG_SELECT)
+            .ThenBy(f => f.DES_TIPO_ENTIDAD)
+            .Select(f => new ComboboxItem { Id = f.COD_TIPO_ENTIDAD, Texto = f.DES_TIPO_ENTIDAD })
+            .ToList();
+        _tiposEntidadAsignados = filas.Where(f => f.FLG_SELECT).Select(f => f.COD_TIPO_ENTIDAD).ToHashSet();
+    }
+
+    private async Task ToggleTipoEntidad(string codTipoEntidad, bool marcado)
+    {
+        if (_model.COD_ENTIDAD is null) return;
+        _tipoEntidadGuardando = codTipoEntidad;
+        try
+        {
+            if (marcado)
+            {
+                var dto = new { COD_ENTIDAD = _model.COD_ENTIDAD, COD_TIPO_ENTIDAD = codTipoEntidad };
+                var resp = await Http.PostAsJsonAsync(ApiRoutes.Estandar.EntidadesTiposEntidades, dto);
+                if (resp.IsSuccessStatusCode) _tiposEntidadAsignados.Add(codTipoEntidad);
+                else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EntidadesDialog), nameof(ToggleTipoEntidad));
+            }
+            else
+            {
+                var resp = await Http.DeleteAsync($"{ApiRoutes.Estandar.EntidadesTiposEntidades}/{_model.COD_ENTIDAD}/{Uri.EscapeDataString(codTipoEntidad)}");
+                if (resp.IsSuccessStatusCode) _tiposEntidadAsignados.Remove(codTipoEntidad);
+                else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EntidadesDialog), nameof(ToggleTipoEntidad));
+            }
+        }
+        finally { _tipoEntidadGuardando = null; }
+    }
+
+    /// <summary>Al marcar/desmarcar Domiciliado, hereda (o limpia) el País desde
+    /// Configuración General — pedido explícito: "País se hereda de la Configuración
+    /// General si es Domiciliado".</summary>
+    private void OnDomiciliadoChanged(bool? v)
+    {
+        _model.FLG_DOMICILIADO = v;
+        if (v == true)
+        {
+            _model.COD_PAIS = _cfg?.COD_PAIS ?? "";
+            _model.DES_PAIS = _cfg?.DES_PAIS ?? "";
+        }
+    }
+
+    // COD_TIPO_PERSONA: valor fijo de 2 opciones (tinyint), no viene de una tabla catálogo.
+    private readonly List<ComboboxItem> _tiposPersona = new()
+    {
+        new() { Id = "1", Texto = "Persona Natural" },
+        new() { Id = "2", Texto = "Persona Jurídica" },
+    };
+
+    /// <summary>Solo aplica para Persona Natural: DES_NOMBRE_COMPLETO se calcula y queda
+    /// deshabilitado. Para Persona Jurídica el usuario lo escribe directamente.</summary>
+    private void ActualizarNombreCompleto()
+    {
+        if (_model.COD_TIPO_PERSONA == 1)
+            _model.DES_NOMBRE_COMPLETO = $"{_model.DES_PATERNO} {_model.DES_MATERNO} {_model.DES_NOMBRE} {_model.DES_NOMBRE2}".Trim();
+    }
+
+    /// <summary>DES_PREFIJO_USUARIO_COMERCIAL solo aplica a Persona Jurídica: al cambiar a
+    /// Natural se limpia para no dejar un valor guardado que ya no corresponde mostrar.</summary>
+    private void LimpiarPrefijoSiNoAplica()
+    {
+        if (_model.COD_TIPO_PERSONA != 2)
+            _model.DES_PREFIJO_USUARIO_COMERCIAL = null;
+    }
+
+    /// <summary>COD_ENTIDAD_DEPENDENCIA solo aplica a Persona Natural: al cambiar a
+    /// Jurídica se limpia para no dejar un valor guardado que ya no corresponde mostrar.</summary>
+    private void LimpiarDependenciaSiNoAplica()
+    {
+        if (_model.COD_TIPO_PERSONA != 1)
+            _model.COD_ENTIDAD_DEPENDENCIA = null;
+    }
+
+    private List<ComboboxItem> _entidadesParaDepender = new();
+
+    /// <summary>Carga PROC_ESTANDAR_ENTIDADES_PARADEPENDER (ya filtrado a Persona Jurídica
+    /// por el propio SP) y descarta la propia entidad — no puede depender de sí misma.</summary>
+    private async Task CargarEntidadesParaDependerAsync()
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(
+                ApiRoutes.Estandar.EntidadesParaDepender);
+            _entidadesParaDepender = (r?.Data ?? new())
+                .Where(x => x.Id != _model.COD_ENTIDAD?.ToString())
+                .ToList();
+        }
+        catch { _entidadesParaDepender = new(); }
+    }
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(Entidad m)
+    {
+        _model = new Entidad
+        {
+            COD_ENTIDAD                  = m.COD_ENTIDAD,
+            COD_TIPO_PERSONA             = m.COD_TIPO_PERSONA,
+            DES_PATERNO                  = m.DES_PATERNO,
+            DES_MATERNO                  = m.DES_MATERNO,
+            DES_NOMBRE                   = m.DES_NOMBRE,
+            DES_NOMBRE2                  = m.DES_NOMBRE2,
+            DES_NOMBRE_COMPLETO          = m.DES_NOMBRE_COMPLETO,
+            DES_COMERCIAL                = m.DES_COMERCIAL,
+            DES_PREFIJO_USUARIO_COMERCIAL = m.DES_PREFIJO_USUARIO_COMERCIAL,
+            COD_ENTIDAD_DEPENDENCIA      = m.COD_ENTIDAD_DEPENDENCIA,
+            COD_TIPO_DOCUMENTO_IDENTIDAD = m.COD_TIPO_DOCUMENTO_IDENTIDAD,
+            NUM_DOCUMENTO_IDENTIDAD      = m.NUM_DOCUMENTO_IDENTIDAD,
+            FLG_DOMICILIADO              = m.FLG_DOMICILIADO,
+            COD_PAIS                     = m.COD_PAIS,
+            DES_PAIS                     = m.DES_PAIS,
+            NUM_DUNS                     = m.NUM_DUNS,
+            COD_USUARIO_RELACIONADO      = m.COD_USUARIO_RELACIONADO,
+            IMG_LOGO                     = m.IMG_LOGO,
+            COD_TIPO_ESTADO              = m.COD_TIPO_ESTADO,
+            COD_ESTADO                   = m.COD_ESTADO,
+        };
+    }
+
+    /// <summary>Trae la Entidad fresca desde SHOWBYID — evita mostrar datos desactualizados
+    /// de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<Entidad>($"{ApiRoutes.Estandar.Entidades}/{Uri.EscapeDataString(_model.COD_ENTIDAD?.ToString() ?? "")}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        var tTiposDoc = Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(ApiRoutes.Estandar.TiposDocumentoIdentidadCombobox);
+        var tTiposMedioContacto = Http.SafeGetAsync<List<ComboboxItem>>(ApiRoutes.Comercial.TiposMedioContactoCombobox);
+        // SHOWCOMBOX de TIPOS_USO no alias sus columnas como Id/Texto (igual que
+        // ClasesDesarrollo), así que se trae el DTO propio y se mapea a ComboboxItem acá.
+        var tTiposUso = Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<KONSolutions.Shared.Models.Estandar.TiposUso>>>(ApiRoutes.Estandar.TiposUsoCombobox);
+        var tCfg = CfgSvc.GetCurrentAsync();
+        var tParaDepender = CargarEntidadesParaDependerAsync();
+        await Task.WhenAll(tTiposDoc, tTiposMedioContacto, tTiposUso, tCfg, tParaDepender);
+        _tiposDoc = (await tTiposDoc)?.Data ?? new();
+        _tiposMedioContacto = (await tTiposMedioContacto) ?? new();
+        _tiposUso = ((await tTiposUso)?.Data ?? new())
+            .Select(t => new ComboboxItem { Id = t.COD_TIPO_USO, Texto = t.DES_TIPO_USO }).ToList();
+        _cfg = await tCfg;
+
+        // Alta nueva con Domiciliado por defecto (true): hereda el País de Configuración General.
+        if (_esNuevo && _model.FLG_DOMICILIADO == true)
+        {
+            _model.COD_PAIS = _cfg?.COD_PAIS ?? "";
+            _model.DES_PAIS = _cfg?.DES_PAIS ?? "";
+        }
+
+        // Tipos de Entidad, Documentos de Identidad y Medios de Contacto (solo aplica en
+        // Editar/Ver/Eliminar, cuando ya existe COD_ENTIDAD).
+        if (!_esNuevo)
+        {
+            await CargarTiposEntidadAsync();
+            await CargarDocumentosAsync();
+            await CargarMediosContactoAsync();
+            await CargarDireccionesAsync();
+            if (BloquearTipoEntidad && CodTipoEntidadFijo == "CLI") await CargarAsesoresComercialesAsync();
+        }
+    }
+
+    private async Task<IEnumerable<ComboboxItem>> BuscarPaisAsync(string texto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(texto) || texto.Length < 2) return [];
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(
+                $"{ApiRoutes.Estandar.PaisesCombobox}?search={Uri.EscapeDataString(texto)}", ct);
+            return r?.Data ?? [];
+        }
+        catch { return []; }
+    }
+
+    private async Task<IEnumerable<ComboboxItem>> BuscarUsuarioEntidadAsync(string texto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(texto) || texto.Length < 2) return [];
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(
+                $"{ApiRoutes.Seguridad.UsuariosCombobox}?search={Uri.EscapeDataString(texto)}", ct);
+            return r?.Data ?? [];
+        }
+        catch { return []; }
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Estandar.Entidades}/{_model.COD_ENTIDAD}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(EntidadesDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        var esNuevo = Modo == CrudModo.Create;
+        var dto = new
+        {
+            _model.COD_ENTIDAD, _model.COD_TIPO_PERSONA,
+            _model.DES_PATERNO, _model.DES_MATERNO, _model.DES_NOMBRE, _model.DES_NOMBRE2,
+            _model.DES_NOMBRE_COMPLETO, _model.DES_COMERCIAL,
+            DES_PREFIJO_USUARIO_COMERCIAL = NullSiVacio(_model.DES_PREFIJO_USUARIO_COMERCIAL),
+            _model.COD_ENTIDAD_DEPENDENCIA,
+            _model.COD_TIPO_DOCUMENTO_IDENTIDAD, _model.NUM_DOCUMENTO_IDENTIDAD,
+            _model.FLG_DOMICILIADO,
+            COD_PAIS = NullSiVacio(_model.COD_PAIS),
+            NUM_DUNS = NullSiVacio(_model.NUM_DUNS),
+            COD_USUARIO_RELACIONADO = NullSiVacio(_model.COD_USUARIO_RELACIONADO),
+            _model.COD_TIPO_ESTADO, _model.COD_ESTADO, _model.IMG_LOGO,
+            // Solo en Create: el SP INSERT (upsert) asigna atómicamente este tipo si viene
+            // seteado. En Update no hace falta reenviarlo — ya quedó asignado la primera vez.
+            COD_TIPO_ENTIDAD = (esNuevo && BloquearTipoEntidad) ? CodTipoEntidadFijo : null
+        };
+        // PROC_ESTANDAR_ENTIDADES_INSERT es upsert — el Controller nunca tuvo endpoint PUT,
+        // siempre se llama al mismo POST.
+        var resp = await Http.PostAsJsonAsync(ApiRoutes.Estandar.Entidades, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(EntidadesDialog), nameof(Submit));
+    }
+
+    static string? NullSiVacio(string? v) => string.IsNullOrWhiteSpace(v) ? null : v;
+}

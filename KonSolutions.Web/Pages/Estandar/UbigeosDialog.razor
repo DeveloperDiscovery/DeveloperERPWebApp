@@ -1,0 +1,84 @@
+@using KONSolutions.Shared.Models.Estandar
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_UBIGEO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="ESTANDAR.UBIGEOS" Columna="COD_UBIGEO"
+                        @bind-Value="_model.COD_UBIGEO"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="ESTANDAR.UBIGEOS" Columna="DES_UBIGEO"
+                        @bind-Value="_model.DES_UBIGEO"
+                        Disabled="_readonly" Obligatorio="true" />
+            <div class="d-flex gap-4 mt-2">
+                <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Public" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool?" @bind-Value="_model.FLG_DEPARTAMENTO" Label="Departamento" Disabled="_readonly" /></div>
+                <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Map" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool?" @bind-Value="_model.FLG_PROVINCIA" Label="Provincia" Disabled="_readonly" /></div>
+                <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.LocationOn" Color="Color.Primary" Size="Size.Medium" />
+                    <MudSwitch T="bool?" @bind-Value="_model.FLG_DISTRITO" Label="Distrito" Disabled="_readonly" /></div>
+            </div>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Ubigeo? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private Ubigeo _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(Ubigeo m) =>
+        _model = new Ubigeo
+        {
+            COD_UBIGEO = m.COD_UBIGEO, DES_UBIGEO = m.DES_UBIGEO,
+            FLG_DEPARTAMENTO = m.FLG_DEPARTAMENTO, FLG_PROVINCIA = m.FLG_PROVINCIA, FLG_DISTRITO = m.FLG_DISTRITO
+        };
+
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<Ubigeo>($"{ApiRoutes.Estandar.Ubigeos}/{Uri.EscapeDataString(_model.COD_UBIGEO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Estandar.Ubigeos}/{Uri.EscapeDataString(_model.COD_UBIGEO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(UbigeosDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // PROC_ESTANDAR_UBIGEOS_INSERT es upsert — el Controller nunca tuvo endpoint PUT,
+        // siempre se llama al mismo POST.
+        var resp = await Http.GuardarAsync(ApiRoutes.Estandar.Ubigeos, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(UbigeosDialog), nameof(Submit));
+    }
+}

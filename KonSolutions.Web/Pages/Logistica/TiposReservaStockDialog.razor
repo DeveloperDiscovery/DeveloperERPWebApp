@@ -1,0 +1,118 @@
+@using Modelo = KONSolutions.Shared.Models.Logistica.TiposReservaStock
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Codigo="@Item?.COD_TIPO_RESERVA" Descripcion="@Item?.DES_TIPO_RESERVA" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="4">
+                    @* El código lo escribe el usuario y es la clave primaria: solo se fija al crear. *@
+                    <CampoTexto Tabla="LOGISTICA.TIPOS_RESERVA_STOCK" Columna="COD_TIPO_RESERVA"
+                                @bind-Value="_model.COD_TIPO_RESERVA"
+                                Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <CampoTexto Tabla="LOGISTICA.TIPOS_RESERVA_STOCK" Columna="DES_TIPO_RESERVA"
+                                @bind-Value="_model.DES_TIPO_RESERVA"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+                <MudItem xs="12">
+                    @* Las marcas dicen en qué operaciones puede usarse este tipo. No son
+                       excluyentes: un mismo tipo puede servir para más de una. *@
+                    <div class="d-flex align-center gap-2" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.PointOfSale"
+                                 Color="@(_model.FLG_VENTA == true ? Color.Primary : Color.Default)"
+                                 Style="@(_model.FLG_VENTA == true ? "" : "opacity:.35;")" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_VENTA" Disabled="_readonly"
+                                   Color="Color.Primary" Label="Venta" />
+                    </div>
+                    <div class="d-flex align-center gap-2" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Factory"
+                                 Color="@(_model.FLG_PRODUCCION == true ? Color.Primary : Color.Default)"
+                                 Style="@(_model.FLG_PRODUCCION == true ? "" : "opacity:.35;")" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_PRODUCCION" Disabled="_readonly"
+                                   Color="Color.Primary" Label="Producción" />
+                    </div>
+                </MudItem>
+            </MudGrid>
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Modelo? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private Modelo _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private void MapearDesdeModelo(Modelo m)
+    {
+        _model = new Modelo
+        {
+            COD_TIPO_RESERVA             = m.COD_TIPO_RESERVA,
+            DES_TIPO_RESERVA             = m.DES_TIPO_RESERVA,
+            FLG_VENTA                    = m.FLG_VENTA,
+            FLG_PRODUCCION               = m.FLG_PRODUCCION,
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID: evita editar sobre datos que la grilla
+    /// puede tener desactualizados.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<Modelo>(
+            $"{ApiRoutes.Logistica.TiposReservaStock}/{Uri.EscapeDataString(_model.COD_TIPO_RESERVA)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    private async Task OnInvalidSubmit(EditContext ctx)
+    {
+        var errores = string.Join(" · ", ctx.GetValidationMessages());
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"]  = "Faltan datos obligatorios",
+                ["Mensaje"] = string.IsNullOrWhiteSpace(errores) ? "Hay campos obligatorios sin completar." : errores
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Logistica.TiposReservaStock;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_TIPO_RESERVA)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposReservaStockDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        // POST al crear, PUT al modificar: el SP de alta es estricto y rechaza la clave repetida.
+        var resp = await Http.GuardarAsync(ruta, _model, _esNuevo);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposReservaStockDialog), nameof(Submit));
+    }
+}

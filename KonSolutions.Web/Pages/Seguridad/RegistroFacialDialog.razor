@@ -1,0 +1,213 @@
+@inject BiometriaService BiometriaSvc
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject IDialogService DialogService
+@implements IAsyncDisposable
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.FaceRetouchingNatural" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">@NombreUsuario</MudText>
+            <MudText Class="mono" Style="opacity:.5;font-size:.78rem;">· @CodUsuario</MudText>
+        </div>
+    </TitleContent>
+
+    <DialogContent>
+        @* ── Cámara ── *@
+        <div style="position:relative;background:#111;border-radius:10px;overflow:hidden;aspect-ratio:4/3;max-width:100%;">
+            <video id="reg-facial-video" autoplay muted playsinline
+                   style="width:100%;height:100%;object-fit:cover;transform:scaleX(-1);
+                          display:@(_camaraActiva ? "block" : "none");" />
+
+            @if (!_camaraActiva && _cargando)
+            {
+                <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#888;">
+                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Large" />
+                    <span style="font-family:monospace;font-size:.8rem;">Cargando modelos faciales...</span>
+                </div>
+            }
+            else if (!_camaraActiva)
+            {
+                <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#555;">
+                    <MudIcon Icon="@Icons.Material.Filled.CameraAlt" Style="font-size:5rem;" />
+                    <span style="font-family:monospace;font-size:.8rem;">Presione INICIAR CÁMARA</span>
+                </div>
+            }
+
+            @* Indicador de rostro *@
+            @if (_camaraActiva)
+            {
+                <div style="position:absolute;top:10px;left:50%;transform:translateX(-50%);
+                            background:@(_hayRostro ? "rgba(0,180,80,.8)" : "rgba(180,0,0,.7)");
+                            color:#fff;padding:5px 16px;border-radius:20px;
+                            font-family:monospace;font-size:.8rem;transition:background .3s;">
+                    @(_hayRostro ? "✓ Rostro detectado" : "⚠ Ubique su rostro")
+                </div>
+            }
+
+            @* Contador de muestras *@
+            @if (_muestras.Count > 0)
+            {
+                <div style="position:absolute;bottom:10px;right:10px;
+                            background:rgba(0,0,0,.75);color:#fff;
+                            padding:4px 12px;border-radius:20px;
+                            font-family:monospace;font-size:.82rem;">
+                    @_muestras.Count / 3 capturas
+                </div>
+            }
+
+            @* Guía visual: óvalo centrado *@
+            @if (_camaraActiva)
+            {
+                <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+                    <div style="width:55%;aspect-ratio:3/4;border:2px dashed @(_hayRostro ? "rgba(0,220,100,.7)" : "rgba(255,255,255,.2)");
+                                border-radius:50%;transition:border-color .3s;"></div>
+                </div>
+            }
+        </div>
+
+        @* ── Instrucciones ── *@
+        <div class="mt-3">
+            @if (_muestras.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Icon="@Icons.Material.Filled.Info">
+                    Se tomarán <strong>3 capturas</strong> con distintos ángulos para mayor precisión.
+                    Coloque su rostro dentro del óvalo guía.
+                </MudAlert>
+            }
+            else if (_muestras.Count < 3)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">
+                    Captura @_muestras.Count de 3 · Gire levemente la cabeza y capture la siguiente muestra.
+                </MudAlert>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Success" Dense="true" Icon="@Icons.Material.Filled.CheckCircle">
+                    3 capturas completadas · Presione <strong>GUARDAR REGISTRO</strong>.
+                </MudAlert>
+            }
+        </div>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="Cancelar" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel"
+                   Style="background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cancelar</MudButton>
+
+        @if (!_camaraActiva)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Videocam"
+                       Style="background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));"
+                       OnClick="IniciarCamara" Disabled="_cargando">
+                Iniciar cámara
+            </MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary"
+                       StartIcon="@Icons.Material.Filled.AddAPhoto"
+                       OnClick="CapturarMuestra"
+                       Disabled="@(!_hayRostro || _muestras.Count >= 3)">
+                Capturar (@_muestras.Count/3)
+            </MudButton>
+
+            @if (_muestras.Count >= 3)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           OnClick="Guardar" Disabled="_guardando">
+                    @if (_guardando) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                    Guardar registro
+                </MudButton>
+            }
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string CodUsuario    { get; set; } = "";
+    [Parameter] public string NombreUsuario { get; set; } = "";
+
+    private bool _camaraActiva, _cargando, _hayRostro, _guardando;
+    private readonly List<double[]> _muestras = new();
+    private System.Threading.CancellationTokenSource? _detCts;
+
+    private async Task IniciarCamara()
+    {
+        _cargando = true;
+        StateHasChanged();
+        bool ok = await JS.InvokeAsync<bool>("faceRec.init");
+        _cargando = false;
+        if (!ok) { Snackbar.Add("No se pudieron cargar los modelos faciales.", Severity.Error); return; }
+        bool cam = await JS.InvokeAsync<bool>("faceRec.startCamera", "reg-facial-video");
+        if (!cam) { Snackbar.Add("No se pudo acceder a la cámara.", Severity.Error); return; }
+        _camaraActiva = true;
+        _ = DeteccionLoop();
+    }
+
+    private async Task DeteccionLoop()
+    {
+        _detCts = new();
+        var ct = _detCts.Token;
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                _hayRostro = await JS.InvokeAsync<bool>("faceRec.isFaceVisible", "reg-facial-video");
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(500, ct);
+            }
+            catch { break; }
+        }
+    }
+
+    private async Task CapturarMuestra()
+    {
+        var desc = await JS.InvokeAsync<double[]?>("faceRec.captureDescriptor", "reg-facial-video");
+        if (desc is null || desc.Length < 128)
+        {
+            Snackbar.Add("No se pudo leer el descriptor. Asegúrese de que su rostro esté centrado.", Severity.Warning);
+            return;
+        }
+        _muestras.Add(desc);
+        Snackbar.Add($"Muestra {_muestras.Count}/3 capturada correctamente.", Severity.Success);
+    }
+
+    private async Task Guardar()
+    {
+        _guardando = true;
+        var (ok, msg) = await BiometriaSvc.RegistrarAsync(CodUsuario, _muestras);
+        _guardando = false;
+        if (ok)
+        {
+            Snackbar.Add("Rostro registrado correctamente.", Severity.Success);
+            await DetenerCamara();
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else { await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(RegistroFacialDialog)); }
+    }
+
+    private async Task Cancelar()
+    {
+        await DetenerCamara();
+        try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { }
+        MudDialog.Cancel();
+    }
+
+    private async Task DetenerCamara()
+    {
+        _detCts?.Cancel();
+        _hayRostro = false;
+        _camaraActiva = false;
+        try { await JS.InvokeVoidAsync("faceRec.stopCamera"); } catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _detCts?.Cancel();
+        try { await JS.InvokeVoidAsync("faceRec.stopCamera"); } catch { }
+    }
+}

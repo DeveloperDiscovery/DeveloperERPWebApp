@@ -1,0 +1,271 @@
+@using AlmacenesModel = KONSolutions.Shared.Models.Logistica.Almacenes
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_ALMACEN" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+            <MudGrid Spacing="2">
+                @if (!_esNuevo)
+                {
+                    @* COD_ALMACEN lo genera el SP (MAX + FNC_ObtenerSiguienteCorrelativo, ver
+                       PROC_LOGISTICA_ALMACENES_INSERT) — no se pide al Crear, igual que
+                       COD_TIPO_MOVIMIENTO en TiposMovimientoDialog.razor. *@
+                    <MudItem xs="12" sm="4">
+                        <CampoTexto Tabla="LOGISTICA.ALMACENES" Columna="COD_ALMACEN"
+                                    @bind-Value="_model.COD_ALMACEN" Disabled="true" />
+                    </MudItem>
+                }
+                <MudItem xs="12" sm="@(_esNuevo ? 12 : 8)">
+                    <CampoTexto Tabla="LOGISTICA.ALMACENES" Columna="DES_ALMACEN"
+                                @bind-Value="_model.DES_ALMACEN"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <CampoTexto Tabla="LOGISTICA.ALMACENES" Columna="DES_ABREVIADA"
+                                @bind-Value="_model.DES_ABREVIADA"
+                                Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_tiposAlmacen"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               @bind-Value="_model.COD_TIPO_ALMACEN"
+                               Label="Tipo de almacén" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @* Al cambiar la Sucursal se limpia la Zonificación y se recarga su combo:
+                       el SP de zonificación filtra por @COD_SUCURSAL. *@
+                    <AriaCombo TItem="ComboboxItem" Items="_sucursales"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               Value="@_model.COD_SUCURSAL"
+                               ValueChanged="OnSucursalChanged"
+                               Label="Sucursal" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_zonificaciones"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               @bind-Value="_model.COD_ZONIFICACION"
+                               Label="Zonificación"
+                               Disabled="@(_readonly || string.IsNullOrWhiteSpace(_model.COD_SUCURSAL))" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @* Entidades puede tener miles de registros: se busca en el servidor
+                       (SP _SEARCH) a partir de 2 caracteres, sin precargar el catálogo —
+                       mismo criterio que SucursalesDialog.razor. *@
+                    <AriaCombo TItem="ComboboxItem" Items="Enumerable.Empty<ComboboxItem>()"
+                               TextFunc="@(x => x.Texto)" ValueFunc="@(x => x.Id)"
+                               Value="@(_model.COD_ENTIDAD_PROPIETARIA?.ToString())"
+                               ValueChanged="@(v => _model.COD_ENTIDAD_PROPIETARIA = decimal.TryParse(v, out var d) ? d : null)"
+                               SearchFunc="BuscarEntidad" MinCharacters="2"
+                               TextoInicial="@(Item?.DES_NOMBRE_COMPLETO)"
+                               Label="Entidad propietaria" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @* Al cambiar el Proceso se limpia el Sub Proceso y se recarga su combo:
+                       el SP de sub procesos filtra por @COD_PROCESO. *@
+                    <AriaCombo TItem="ComboboxItem" Items="_procesos"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               Value="@_model.COD_PROCESO"
+                               ValueChanged="OnProcesoChanged"
+                               Label="Proceso" Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <AriaCombo TItem="ComboboxItem" Items="_subProcesos"
+                               TextFunc="@(x => $"{x.Id} - {x.Texto}")" ValueFunc="@(x => x.Id)"
+                               @bind-Value="_model.COD_SUB_PROCESO"
+                               Label="Sub proceso" Disabled="@(_readonly || string.IsNullOrWhiteSpace(_model.COD_PROCESO))" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <div class="d-flex align-center gap-2" style="height:100%;">
+                        <MudIcon Icon="@Icons.Material.Filled.TrendingDown" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_STOCK_NEGATIVO" Color="Color.Primary"
+                                   Disabled="_readonly" Label="Permite stock negativo" />
+                    </div>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <EstadoCombo DesTabla="LOGISTICA.ALMACENES" @bind-Value="_model.COD_ESTADO"
+                                 CodTipoEstadoChanged="@(v => _model.COD_TIPO_ESTADO = v)"
+                                 Disabled="_readonly" Class="mb-3" />
+                </MudItem>
+            </MudGrid>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public AlmacenesModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private AlmacenesModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _tiposAlmacen = new();
+    private List<ComboboxItem> _sucursales   = new();
+    private List<ComboboxItem> _procesos     = new();
+    private List<ComboboxItem> _subProcesos  = new();
+    private List<ComboboxItem> _zonificaciones = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        _tiposAlmacen = await CargarCombo(ApiRoutes.Logistica.TiposAlmacenCombobox);
+        _sucursales   = await CargarCombo(ApiRoutes.Estandar.SucursalesCombobox);
+        _procesos     = await CargarCombo(ApiRoutes.Produccion.ProcesosCombobox);
+
+        if (!string.IsNullOrWhiteSpace(_model.COD_PROCESO))
+            await CargarSubProcesos(_model.COD_PROCESO);
+        if (!string.IsNullOrWhiteSpace(_model.COD_SUCURSAL))
+            _zonificaciones = await CargarZonificaciones(_model.COD_SUCURSAL);
+    }
+
+    private void MapearDesdeModelo(AlmacenesModel m)
+    {
+        _model = new AlmacenesModel
+        {
+            COD_ALMACEN             = m.COD_ALMACEN,
+            DES_ALMACEN             = m.DES_ALMACEN,
+            DES_ABREVIADA           = m.DES_ABREVIADA,
+            COD_TIPO_ALMACEN        = m.COD_TIPO_ALMACEN,
+            COD_SUCURSAL            = m.COD_SUCURSAL,
+            COD_ZONIFICACION        = m.COD_ZONIFICACION,
+            FLG_STOCK_NEGATIVO      = m.FLG_STOCK_NEGATIVO,
+            COD_ENTIDAD_PROPIETARIA = m.COD_ENTIDAD_PROPIETARIA,
+            COD_PROCESO             = m.COD_PROCESO,
+            COD_SUB_PROCESO         = m.COD_SUB_PROCESO,
+            // Se arrastra aunque no se edite en el formulario: si no viajara en el POST,
+            // guardar desde el CRUD borraría el polígono dibujado sobre el plano.
+            DES_POLIGONO            = m.DES_POLIGONO,
+            COD_TIPO_ESTADO         = m.COD_TIPO_ESTADO,
+            COD_ESTADO              = m.COD_ESTADO
+        };
+    }
+
+    /// <summary>Trae el Almacén fresco desde SHOWBYID — evita mostrar datos desactualizados
+    /// de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<AlmacenesModel>(
+            $"{ApiRoutes.Logistica.Almacenes}/{Uri.EscapeDataString(_model.COD_ALMACEN)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    private async Task OnSucursalChanged(string? val)
+    {
+        _model.COD_SUCURSAL = val ?? "";
+        _model.COD_ZONIFICACION = null;
+        _zonificaciones = string.IsNullOrWhiteSpace(_model.COD_SUCURSAL)
+            ? new() : await CargarZonificaciones(_model.COD_SUCURSAL);
+    }
+
+    // El SHOWCOMBOX de zonificación exige @COD_SUCURSAL: va en la ruta, no en query string.
+    private Task<List<ComboboxItem>> CargarZonificaciones(string codSucursal)
+        => CargarCombo($"{ApiRoutes.Zonificacion.Zonificaciones}/combobox/{Uri.EscapeDataString(codSucursal)}");
+
+    private async Task OnProcesoChanged(string? val)
+    {
+        _model.COD_PROCESO = val ?? "";
+        _model.COD_SUB_PROCESO = null;
+        _subProcesos = string.IsNullOrWhiteSpace(_model.COD_PROCESO)
+            ? new() : await CargarSubProcesosLista(_model.COD_PROCESO);
+    }
+
+    private async Task CargarSubProcesos(string codProceso)
+        => _subProcesos = await CargarSubProcesosLista(codProceso);
+
+    private Task<List<ComboboxItem>> CargarSubProcesosLista(string codProceso)
+        => CargarCombo($"{ApiRoutes.Produccion.SubProcesosCombobox}?COD_PROCESO={Uri.EscapeDataString(codProceso)}");
+
+    private async Task<List<ComboboxItem>> CargarCombo(string ruta)
+    {
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<ComboboxItem>>>(ruta);
+            return r?.Data ?? new();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(AlmacenesDialog), nameof(CargarCombo));
+            await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(AlmacenesDialog));
+            return new();
+        }
+    }
+
+    /// <summary>Busca entidades en el servidor (PROC_ESTANDAR_ENTIDADES_SEARCH) sin precargar
+    /// el catálogo. La SP no filtra bien por texto, así que se refuerza el filtro en cliente.</summary>
+    private async Task<IEnumerable<ComboboxItem>> BuscarEntidad(string? texto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(texto) || texto.Trim().Length < 2)
+            return Enumerable.Empty<ComboboxItem>();
+        try
+        {
+            var r = await Http.GetFromJsonAsync<ApiResponse<List<Entidad>>>(
+                $"{ApiRoutes.Estandar.Entidades}/search?search={Uri.EscapeDataString(texto.Trim())}", ct);
+            var filtro = texto.Trim();
+            return (r?.Data ?? new())
+                .Where(e => e.DES_NOMBRE_COMPLETO.Contains(filtro, StringComparison.OrdinalIgnoreCase))
+                .Take(30)
+                .Select(e => new ComboboxItem { Id = e.COD_ENTIDAD?.ToString() ?? "", Texto = e.DES_NOMBRE_COMPLETO });
+        }
+        catch (OperationCanceledException) { return Enumerable.Empty<ComboboxItem>(); } // superada por la siguiente tecla
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(AlmacenesDialog), nameof(BuscarEntidad));
+            await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(AlmacenesDialog));
+            return Enumerable.Empty<ComboboxItem>();
+        }
+    }
+
+    private async Task OnInvalidSubmit(EditContext ctx)
+    {
+        var errores = string.Join(" · ", ctx.GetValidationMessages());
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"]  = "Faltan datos obligatorios",
+                ["Mensaje"] = string.IsNullOrWhiteSpace(errores) ? "Hay campos obligatorios sin completar." : errores
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Logistica.Almacenes;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_ALMACEN)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(AlmacenesDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        var resp = await Http.PostAsJsonAsync(ruta, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(AlmacenesDialog), nameof(Submit));
+    }
+}

@@ -1,0 +1,45 @@
+@inject AsignacionRolService Service
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject IJSRuntime JS
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">
+            Seleccione el usuario a asignar a este rol.
+        </MudText>
+        <AriaCombo TItem="ComboboxItem"
+                     Items="Disponibles"
+                     TextFunc="@(u => $"{u.Id} — {u.Texto}")"
+                     ValueFunc="@(u => u.Id)"
+                     @bind-Value="_codUsuario"
+                     Label="Usuario" />
+
+        <div class="d-flex justify-end gap-2 mt-4 dialog-acciones-fijas">
+            <MudButton OnClick="@(async () => { try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { } MudDialog.Cancel(); })" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel"
+                       Style="background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cancelar</MudButton>
+            <MudButton OnClick="Asignar" Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.PersonAdd"
+                       Disabled="@(_saving || string.IsNullOrWhiteSpace(_codUsuario))" Style="font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">Asignar</MudButton>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string CodRol { get; set; } = string.Empty;
+    [Parameter] public List<ComboboxItem> Disponibles { get; set; } = new();
+
+    private string? _codUsuario;
+    private bool _saving;
+
+    private async Task Asignar()
+    {
+        if (string.IsNullOrWhiteSpace(_codUsuario)) return;
+        _saving = true;
+        var (ok, msg) = await Service.AsignarAsync(CodRol, _codUsuario);
+        _saving = false;
+        if (ok) { Snackbar.Add("Usuario asignado al rol.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(AgregarUsuarioRolDialog));
+    }
+}

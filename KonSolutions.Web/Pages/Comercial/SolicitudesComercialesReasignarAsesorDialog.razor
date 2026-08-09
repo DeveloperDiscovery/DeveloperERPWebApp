@@ -1,0 +1,106 @@
+@* Diálogo "Reasignar Asesor Comercial" (PROC_COMERCIAL_SOLICITUDES_COMERCIALES_REASIGNAASESOR)
+   — mismo patrón que SolicitudesComercialesAsignarResponsableDialog.razor. El combo de
+   asesores disponibles reusa el mismo endpoint que EntidadesAsesoresComercialesDialog.razor
+   (PROC_ADMINISTRACION_AREAS_CARGOS_ENTIDADES vía /asesores-por-etiqueta): las personas
+   asignadas al Área enlazada a la Etiqueta de Búsqueda indicada por la pantalla que abre
+   este diálogo (CodEtiquetaBusqueda) — cada pantalla (Solicitudes Comerciales, Solicitudes
+   Comerciales Dependencia) puede pasar una etiqueta distinta. *@
+@using SolicitudModel = KONSolutions.Shared.Models.Comercial.SolicitudesComerciales
+@using ComercialRoute = KONSolutions.Web.Services.ApiRoutes.Comercial
+@using AdministracionRoute = KONSolutions.Web.Services.ApiRoutes.Administracion
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:35vw;min-width:420px;">
+    <TitleContent>
+        <CrudDialogTitle Modo="CrudModo.Update" Descripcion="@("Reasignar Asesor Comercial · " + Item?.DES_SOLICITUD_COMERCIAL)" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            <MudGrid Class="align-end">
+                <MudItem xs="12" sm="4">
+                    <MudTextField Value="@Item?.NUM_SOLICITUD_COMERCIAL.ToString()" Label="Nº Solicitud" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <MudTextField Value="@Item?.DES_SOLICITUD_COMERCIAL" Label="Solicitud Comercial" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+                </MudItem>
+            </MudGrid>
+
+            <MudTextField Value="@Item?.DES_NOMBRE_COMPLETO" Label="Entidad Cliente" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+            <MudTextField Value="@(Item?.DES_NOMBRE_COMPLETO_ASESOR_COMERCIAL ?? "(sin asignar)")" Label="Asesor comercial actual" ReadOnly="true" Variant="Variant.Outlined" Class="mb-3" />
+
+            @if (_cargando)
+            {
+                <MudProgressLinear Indeterminate="true" Class="mb-3" />
+            }
+            else if (_asesoresDisponibles.Count == 0)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">
+                    No hay personas asignadas al Área enlazada a esta Etiqueta de Búsqueda todavía
+                    (ESTANDAR.ETIQUETAS_BUSQUEDA_AREAS → ADMINISTRACION.AREAS_CARGOS_ENTIDADES).
+                </MudAlert>
+            }
+            else
+            {
+                <AriaCombo TItem="ComboboxItem" Items="_asesoresDisponibles"
+                           TextFunc="@(a => a.Texto)" ValueFunc="@(a => a.Id)"
+                           @bind-Value="_codAsesorSeleccionado"
+                           Label="Nuevo asesor comercial" Obligatorio="true" Class="mb-3" />
+            }
+
+            <CrudDialogActions Modo="CrudModo.Update" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public SolicitudModel? Item { get; set; }
+
+    // Etiqueta de Búsqueda que resuelve el Área (y de ahí las personas asignables) vía
+    // PROC_ADMINISTRACION_AREAS_CARGOS_ENTIDADES. La define la página que abre el diálogo
+    // (distinta según la pantalla — ver comentario arriba).
+    [Parameter, EditorRequired] public string CodEtiquetaBusqueda { get; set; } = "";
+
+    private List<ComboboxItem> _asesoresDisponibles = new();
+    private string? _codAsesorSeleccionado;
+    private bool _cargando = true;
+    private bool _saving;
+
+    private KONSolutions.Shared.Models.Comercial.SolicitudesComercialesReasignaAsesorDto _model = new();
+
+    protected override void OnInitialized()
+    {
+        if (Item is null) return;
+        _model.NUM_SOLICITUD_COMERCIAL = Item.NUM_SOLICITUD_COMERCIAL;
+        _codAsesorSeleccionado = Item.COD_ENTIDAD_ASESOR_COMERCIAL?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var url = $"{AdministracionRoute.AsesoresPorEtiqueta}?codEtiquetaBusqueda={Uri.EscapeDataString(CodEtiquetaBusqueda)}";
+            _asesoresDisponibles = await Http.SafeGetAsync<List<ComboboxItem>>(url) ?? new();
+        }
+        catch (Exception ex) { await ErrorLog.LogAsync(ex, nameof(SolicitudesComercialesReasignarAsesorDialog), nameof(OnInitializedAsync)); }
+        finally { _cargando = false; }
+    }
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_codAsesorSeleccionado) || !decimal.TryParse(_codAsesorSeleccionado, out var codAsesor)) return;
+        _model.COD_ENTIDAD_ASESOR_COMERCIAL = codAsesor;
+
+        _saving = true;
+        var resp = await Http.PostAsJsonAsync(ComercialRoute.SolicitudesComercialesReasignaAsesor, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add("Asesor comercial reasignado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(SolicitudesComercialesReasignarAsesorDialog), nameof(Submit));
+    }
+}

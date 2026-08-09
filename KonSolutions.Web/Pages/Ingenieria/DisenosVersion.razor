@@ -1,0 +1,80 @@
+@page "/ingenieria/disenos-version"
+@attribute [Authorize]
+@using DisenosModel = KONSolutions.Shared.Models.Ingenieria.Disenos
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ConfigService ConfigSvc
+@inject AccessLogService AccessLog
+@inject ControlCambiosClientService Cambios
+@implements IDisposable
+
+<PageTitle>Diseños Versión · @ConfigSvc.Current.NombreApp</PageTitle>
+
+<div class="d-flex align-center gap-3 mb-4 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <TituloPagina Fallback="Diseños Versión" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">Schema INGENIERIA</MudText>
+    </div>
+</div>
+
+@* Selector de diseño: los SP de DISENOS_VERSION exigen COD_DISENO, así que la pantalla
+   suelta necesita elegirlo primero. Dentro del módulo de Diseños esto no hace falta
+   porque el diseño lo fija la fila desde la que se pulsó "Versiones". *@
+<MudPaper Elevation="0" Class="pa-3 mb-3" Style="border:1px solid var(--line);">
+    <AriaCombo TItem="ComboboxItem" Items="_disenos"
+               TextFunc="@(d => $"{d.Id} - {d.Texto}")" ValueFunc="@(d => d.Id)"
+               Value="_disenoSel?.Id" ValueChanged="OnDisenoChanged"
+               Label="Diseño" Class="" />
+</MudPaper>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <DisenosVersionPanel @ref="_panel"
+                         CodDiseno="@(_disenoSel?.Id ?? "")"
+                         DesDiseno="@_disenoSel?.Texto"
+                         CodAplicacion="@CodAplicacion"
+                         CodOpcionAplicacion="@CodOpcionAplicacion" />
+</MudPaper>
+
+@code {
+    private Func<Task>? _onCambio;
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+
+    private DisenosVersionPanel? _panel;
+    private List<ComboboxItem> _disenos = new();
+    private ComboboxItem?      _disenoSel;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AccessLog.LogNavegacionAsync("INGENIERIA", "DisenosVersion");
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<DisenosModel>>>(
+                ApiRoutes.Ingenieria.Disenos);
+            _disenos = (r?.Data ?? new())
+                .Select(d => new ComboboxItem { Id = d.COD_DISENO, Texto = d.DES_DISENO })
+                .ToList();
+        }
+        catch { _disenos = new(); }
+
+        _disenoSel = _disenos.FirstOrDefault();
+
+        _onCambio = async () => await InvokeAsync(async () =>
+        {
+            if (_panel is not null) await _panel.CargarAsync();
+            StateHasChanged();
+        });
+        Cambios.Suscribir("INGENIERIA.DISENOS_VERSION", _onCambio);
+    }
+
+    private void OnDisenoChanged(string? codDiseno)
+    {
+        // No hace falta recargar a mano: el panel detecta el cambio de CodDiseno
+        // en OnParametersSetAsync y se recarga solo.
+        _disenoSel = _disenos.FirstOrDefault(d => d.Id == codDiseno);
+        StateHasChanged();
+    }
+
+    public void Dispose()
+        => Cambios.Desuscribir("INGENIERIA.DISENOS_VERSION", _onCambio ?? (() => Task.CompletedTask));
+}

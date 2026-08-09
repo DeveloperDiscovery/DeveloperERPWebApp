@@ -1,0 +1,1072 @@
+@page "/estandar/configuracion-general"
+@attribute [Authorize]
+@implements IDisposable
+@inject ConfiguracionGeneralService CfgSvc
+@inject ConfigService Config
+@inject ControlCambiosClientService Cambios
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject HttpClient Http
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+@inject JwtAuthStateProvider AuthStateProvider
+@using KONSolutions.Shared.Models.Config
+@using SharedCfg = KONSolutions.Shared.Models.Estandar.ConfiguracionGeneral
+
+<PageTitle>Configuración General · @Config.Current.NombreApp</PageTitle>
+
+<div class="cfg-page-labels-paper">
+<div class="cfg-titulo-fijo d-flex align-center justify-space-between mb-4">
+    <div>
+        <TituloPagina Fallback="Configuración General" CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion" />
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+            Schema ESTANDAR · @(_cfg.DES_NOMBRE_EMPRESA)
+        </MudText>
+    </div>
+    <div class="d-flex align-center gap-2">
+        <PanelAuditoria CodUsuarioRegistro="@_cfg.COD_USUARIO_REGISTRO"
+                        CodEstacionRegistro="@_cfg.COD_ESTACION_REGISTRO"
+                        FecRegistro="@_cfg.FEC_REGISTRO"
+                        CodUsuarioActualizacion="@_cfg.COD_USUARIO_ACTUALIZACION"
+                        CodEstacionActualizacion="@_cfg.COD_ESTACION_ACTUALIZACION"
+                        FecActualizacion="@_cfg.FEC_ACTUALIZACION" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="Guardar" Disabled="_saving"
+                   Style="font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));">
+            @(_saving ? "Guardando…" : "Guardar")
+        </MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+}
+else
+{
+<MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true" Class="cfg-tabs" PanelClass="pt-4">
+
+    @* ════════════════════════════ EMPRESA ════════════════════════════ *@
+    <MudTabPanel Text="Empresa" Icon="@Icons.Material.Filled.Business">
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Datos de la empresa</MudText>
+                    <CampoTextoEstable @bind-Value="_cfg.DES_NOMBRE_EMPRESA"    Label="Nombre de la empresa"    Variant="Variant.Outlined" Class="mb-3" MaxLength="100" />
+                    <CampoTextoEstable @bind-Value="_cfg.DES_NOMBRE_APLICACION" Label="Nombre de la aplicación" Variant="Variant.Outlined" Class="mb-3" MaxLength="100" />
+                    <CampoTextoEstable @bind-Value="_cfg.NUM_DOCUMENTO_IDENTIDAD" Label="RUC / Documento"       Variant="Variant.Outlined" Class="mb-3" MaxLength="15" />
+                    <CampoTextoEstable @bind-Value="_cfg.DES_DOMICILIO_FISCAL"  Label="Domicilio fiscal"         Variant="Variant.Outlined" Class="mb-3" MaxLength="100" />
+                    <CampoTextoEstable @bind-Value="_cfg.DES_REFERENCIA_FISCAL" Label="Referencia fiscal"        Variant="Variant.Outlined" Class="mb-3" MaxLength="100" />
+                    <AriaCombo TItem="ComboboxItem"
+                               Items="Enumerable.Empty<ComboboxItem>()"
+                               TextFunc="@(x => $"{x.Id} – {x.Texto}")"
+                               ValueFunc="@(x => x.Id)"
+                               Value="@_cfg.COD_PAIS"
+                               ValueChanged="@(v => _cfg.COD_PAIS = v ?? "")"
+                               SearchFunc="BuscarPaisAsync"
+                               MinCharacters="2"
+                               TextoInicial="@_cfg.DES_PAIS"
+                               Label="País" Class="mb-3" />
+                    <AriaCombo TItem="ComboboxItem"
+                               Items="Enumerable.Empty<ComboboxItem>()"
+                               TextFunc="@(x => $"{x.Id} – {x.Texto}")"
+                               ValueFunc="@(x => x.Id)"
+                               Value="@_cfg.COD_UBIGEO"
+                               ValueChanged="@(v => _cfg.COD_UBIGEO = v ?? "")"
+                               SearchFunc="BuscarUbigeoAsync"
+                               MinCharacters="2"
+                               TextoInicial="@_cfg.DES_UBIGEO"
+                               Label="Ubigeo" />
+                    <AriaCombo TItem="ComboboxItem"
+                               Items="Enumerable.Empty<ComboboxItem>()"
+                               TextFunc="@(x => $"{x.Id} – {x.Texto}")"
+                               ValueFunc="@(x => x.Id)"
+                               Value="@_cfg.COD_TIPO_EMPRESA"
+                               ValueChanged="@(v => _cfg.COD_TIPO_EMPRESA = v ?? "")"
+                               SearchFunc="BuscarTipoEmpresaAsync"
+                               MinCharacters="1"
+                               TextoInicial="@_cfg.DES_TIPO_EMPRESA"
+                               Label="Tipo de empresa" />
+                    <CampoTextoEstable @bind-Value="_cfg.COD_TIPO_AUTORIZACION_COMERCIAL" Label="Autorización comercial" Variant="Variant.Outlined" MaxLength="3" />
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Identidad visual</MudText>
+
+                    <MudText Typo="Typo.caption" Class="mono mb-1" Style="opacity:.6;">Logo de la empresa:</MudText>
+                    @if (_cfg.IMG_LOGO_EMPRESA is { Length: > 0 })
+                    {
+                        <div class="d-flex justify-center mb-2 pa-2" style="border:1px dashed var(--line);border-radius:8px;background:#fff;">
+                            <MudImage Src="@($"data:image/png;base64,{Convert.ToBase64String(_cfg.IMG_LOGO_EMPRESA)}")"
+                                      Height="80" Style="object-fit:contain;max-width:100%;" />
+                        </div>
+                    }
+                    <ImagePicker Image="_cfg.IMG_LOGO_EMPRESA" ImageChanged="@(b => _cfg.IMG_LOGO_EMPRESA = b)" Label="Logo empresa" />
+
+                    <MudText Typo="Typo.caption" Class="mono mt-3 mb-1" Style="opacity:.6;">Logo de la aplicación:</MudText>
+                    @if (_cfg.IMG_LOGO_APLICACION is { Length: > 0 })
+                    {
+                        <div class="d-flex justify-center mb-2 pa-2" style="border:1px dashed var(--line);border-radius:8px;background:#fff;">
+                            <MudImage Src="@($"data:image/png;base64,{Convert.ToBase64String(_cfg.IMG_LOGO_APLICACION)}")"
+                                      Height="80" Style="object-fit:contain;max-width:100%;" />
+                        </div>
+                    }
+                    <ImagePicker Image="_cfg.IMG_LOGO_APLICACION" ImageChanged="@(b => _cfg.IMG_LOGO_APLICACION = b)" Label="Logo aplicación" />
+                </MudPaper>
+            </MudItem>
+
+            @* Dominios de correo de la empresa — CRUD in-place en la misma grilla, sin
+               diálogo aparte (tabla mínima: código autonumérico + descripción). Si el
+               usuario puede entrar a Configuración General, puede administrar esto —
+               no hay un permiso separado. *@
+            <MudItem xs="12">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <div class="d-flex align-center justify-space-between mb-3">
+                        <MudText Typo="Typo.h6">Dominios de correo de la empresa</MudText>
+                        <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Filled" Size="Size.Small"
+                                   Style="@EstiloBotonConfirmar" OnClick="AgregarDominio">Agregar dominio</MudButton>
+                    </div>
+                    <table class="tabla-simple-editable" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th>Dominio (ej. empresa.com)</th>
+                                <th style="width:100px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in _dominios)
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="grilla-campo-texto">
+                                            <CampoTexto Tabla="ENTORNO.DOMINIOS_EMPRESA" Columna="DES_DOMINIO_EMPRESA"
+                                                        Label="Dominio" @bind-Value="row.DesDominio" MostrarLabel="false"
+                                                        Margin="Margin.None" Class="mb-0" />
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success"
+                                                       Disabled="@(row.Guardando || string.IsNullOrWhiteSpace(row.DesDominio))"
+                                                       OnClick="@(() => GuardarDominioAsync(row))" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                       Disabled="row.Guardando" OnClick="@(() => EliminarDominioAsync(row))" />
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    @if (_dominios.Count == 0)
+                    {
+                        <MudText Class="pa-2 mono" Style="opacity:.5;">Sin dominios registrados.</MudText>
+                    }
+                </MudPaper>
+            </MudItem>
+
+        </MudGrid>
+    </MudTabPanel>
+
+    @* ════════════════════════════ APARIENCIA ════════════════════════════ *@
+    <MudTabPanel Text="Apariencia" Icon="@Icons.Material.Filled.Palette">
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                @* cfg-page-labels-paper (app.css) pinta el fondo de las etiquetas outlined con
+                   var(--paper) — acá se sobreescribe esa variable SOLO dentro de esta tarjeta con
+                   el "Color de fondo" que se está editando, para previsualizarlo en vivo (el
+                   --paper global recién se actualiza al Guardar, ver Guardar() más abajo). *@
+                <MudPaper Elevation="0" Class="pa-4 cfg-page-labels-paper" Style="@($"border:1px solid var(--line);--paper:{NuloA(_cfg.DES_BACKCOLOR, "#efe9df")};")">
+                    <MudText Typo="Typo.h6" Class="mb-3">Colores de pantalla</MudText>
+                    <ColorConSwatch @bind-Text="_cfg.DES_COLOR_PRIMARY"   Label="Color primario"   Class="mb-3" />
+                    <ColorConSwatch @bind-Text="_cfg.DES_BACKCOLOR"       Label="Color de fondo"   Class="mb-2" />
+                    <div class="d-flex align-center gap-1 mb-2"><MudIcon Icon="@Icons.Material.Filled.Gradient" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch @bind-Value="_cfg.FLG_DEGRADE_BACKGROUND_COLOR" Color="Color.Primary" Label="Degradar color de fondo" /></div>
+                    @if (_cfg.FLG_DEGRADE_BACKGROUND_COLOR && !string.IsNullOrWhiteSpace(_cfg.DES_BACKCOLOR))
+                    {
+                        <div style="height:24px;border-radius:4px;background:linear-gradient(135deg,@_cfg.DES_BACKCOLOR,color-mix(in srgb,@(_cfg.DES_BACKCOLOR) 40%,white));border:1px solid rgba(0,0,0,.12);margin-bottom:8px;" title="Vista previa degradado fondo"></div>
+                    }
+                    <ColorConSwatch @bind-Text="_cfg.DES_FORECOLOR"       Label="Color de texto"   Class="mb-3" />
+                    <ColorConSwatch @bind-Text="_cfg.DES_COLOR_SECONDARY" Label="Color secundario" Class="mb-2" />
+                    <div class="d-flex align-center gap-1 mb-2"><MudIcon Icon="@Icons.Material.Filled.Gradient" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch @bind-Value="_cfg.FLG_DEGRADE_SECUNDARY_COLOR" Color="Color.Primary" Label="Degradar color secundario" /></div>
+                    @if (_cfg.FLG_DEGRADE_SECUNDARY_COLOR && !string.IsNullOrWhiteSpace(_cfg.DES_COLOR_SECONDARY))
+                    {
+                        <div style="height:24px;border-radius:4px;background:linear-gradient(135deg,@_cfg.DES_COLOR_SECONDARY,color-mix(in srgb,@(_cfg.DES_COLOR_SECONDARY) 40%,white));border:1px solid rgba(0,0,0,.12);" title="Vista previa degradado secundario"></div>
+                    }
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Tipografía</MudText>
+
+                    <MudText Typo="Typo.subtitle2" Class="mono mt-1">Títulos</MudText>
+                    <div class="d-flex gap-2 mb-3">
+                        <MudSelect T="string" @bind-Value="_cfg.DES_TYPOGRAPHY_TITLE_FONT" Label="Fuente" Variant="Variant.Outlined">
+                            @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                        </MudSelect>
+                        <MudNumericField @bind-Value="_cfg.DES_TYPOGRAPHY_TITLE_SIZE" Label="Tamaño (px)" Variant="Variant.Outlined" Min="8" Max="72" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                        <ColorConSwatch @bind-Text="_cfg.DES_FORECOLOR_TITLE" Label="Color" />
+                    </div>
+
+                    <MudText Typo="Typo.subtitle2" Class="mono">Subtítulos</MudText>
+                    <div class="d-flex gap-2 mb-3">
+                        <MudSelect T="string" @bind-Value="_cfg.DES_TYPOGRAPHY_SUBTITLE_FONT" Label="Fuente" Variant="Variant.Outlined">
+                            @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                        </MudSelect>
+                        <MudNumericField @bind-Value="_cfg.NUM_TYPOGRAPHY_SUBTITLE_SIZE" Label="Tamaño (px)" Variant="Variant.Outlined" Min="8" Max="48" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                        <ColorConSwatch @bind-Text="_cfg.DES_FORECOLOR_SUBTITLE" Label="Color" />
+                    </div>
+
+                    <MudText Typo="Typo.subtitle2" Class="mono">Controles</MudText>
+                    <div class="d-flex gap-2">
+                        <MudSelect T="string" @bind-Value="_cfg.DES_TYPOGRAPHY_CONTROLS_FONT" Label="Fuente" Variant="Variant.Outlined">
+                            @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                        </MudSelect>
+                        <MudNumericField @bind-Value="_cfg.NUM_TYPOGRAPHY_CONTROLS_SIZE" Label="Tamaño (px)" Variant="Variant.Outlined" Min="8" Max="32" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                    </div>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Botones de Diálogo y Acciones de Cabecera</MudText>
+                    <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;color:var(--ink);">
+                        Color del botón de confirmación (Crear/Modificar/Regresar) en todos los diálogos de la app,
+                        y de los botones de Refrescar datos / Imprimir en la cabecera de las grillas.
+                        Eliminar siempre usa rojo (color de peligro), independiente de esta configuración.
+                        Vacío = usa el color por defecto de la app.
+                    </MudText>
+                    <div class="d-flex gap-2 mb-2">
+                        <ColorConSwatch @bind-Text="_cfg.DES_BUTTON_BACKCOLOR" Label="Fondo del botón" />
+                        <ColorConSwatch @bind-Text="_cfg.DES_BUTTON_FORECOLOR" Label="Texto del botón" />
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(_cfg.DES_BUTTON_BACKCOLOR))
+                    {
+                        @* No usar Disabled="true": MudBlazor sobreescribe fondo/texto con su gris de
+                           botón deshabilitado, ignorando el color elegido aquí. Se deja "habilitado"
+                           pero sin acción (pointer-events:none) — solo es una vista previa visual. *@
+                        <MudButton Variant="Variant.Filled"
+                                   Style="@($"background:{_cfg.DES_BUTTON_BACKCOLOR};color:{(string.IsNullOrWhiteSpace(_cfg.DES_BUTTON_FORECOLOR) ? "#fff" : _cfg.DES_BUTTON_FORECOLOR)};font-weight:700;opacity:1;pointer-events:none;")"
+                                   StartIcon="@Icons.Material.Filled.Save">
+                            Vista previa
+                        </MudButton>
+                    }
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Colores de Diálogos</MudText>
+                    <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;color:var(--ink);">
+                        Fondo y texto de las ventanas de Crear / Modificar / Consultar / Eliminar en toda la app —
+                        independientes del resto de la pantalla.
+                    </MudText>
+                    <div class="d-flex gap-2 mb-2">
+                        <ColorConSwatch @bind-Text="_cfg.DES_BACKCOLOR_DIALOG" Label="Fondo del diálogo" />
+                        <ColorConSwatch @bind-Text="_cfg.DES_FORECOLOR_DIALOG" Label="Texto del diálogo" />
+                    </div>
+                    <div class="prev-card" style="@($"border-radius:6px;overflow:hidden;border:1px solid var(--line);background:{(string.IsNullOrWhiteSpace(_cfg.DES_BACKCOLOR_DIALOG) ? "#efe9df" : _cfg.DES_BACKCOLOR_DIALOG)};color:{(string.IsNullOrWhiteSpace(_cfg.DES_FORECOLOR_DIALOG) ? "#16130f" : _cfg.DES_FORECOLOR_DIALOG)};")">
+                        <div class="pa-3" style="font-weight:700;">Vista previa · Nuevo registro</div>
+                        <div class="pa-3 pt-0" style="font-size:.85rem;opacity:.85;">Así se vería el contenido del diálogo con estos colores.</div>
+                    </div>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    </MudTabPanel>
+
+    @* ════════════════════════════ GRILLAS ════════════════════════════ *@
+    <MudTabPanel Text="Grillas" Icon="@Icons.Material.Filled.TableChart">
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Grillas e imágenes</MudText>
+                    <MudText Typo="Typo.subtitle2" Class="mono mb-2">Iconos de acción</MudText>
+                    <div class="d-flex gap-2 mb-3">
+                        <MudNumericField @bind-Value="_cfg.NUM_ICONS_GRID_WIDTH_SIZE"  Label="Ancho (px)" Variant="Variant.Outlined" Min="12" Max="64" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                        <MudNumericField @bind-Value="_cfg.NUM_ICONS_GRID_HEIGHT_SIZE" Label="Alto (px)"  Variant="Variant.Outlined" Min="12" Max="64" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                    </div>
+                    <div class="d-flex gap-2 mb-3">
+                        <ColorConSwatch @bind-Text="_cfg.DES_ICONCOLOR_ACTIONS" Label="Color de iconos de acción" />
+                    </div>
+                    <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;color:var(--ink);">
+                        Aplica a los íconos de acciones (Editar, Ver, etc.) en las grillas. Dejar vacío usa el color calculado por defecto.
+                        El ícono de Eliminar siempre se muestra en rojo, sin importar este color.
+                    </MudText>
+                    <MudText Typo="Typo.subtitle2" Class="mono mb-2">Imágenes en grilla</MudText>
+                    <div class="d-flex gap-2 mb-3">
+                        <MudNumericField @bind-Value="_cfg.NUM_IMAGES_GRID_WIDTH_SIZE"  Label="Ancho (px)" Variant="Variant.Outlined" Min="16" Max="200" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                        <MudNumericField @bind-Value="_cfg.NUM_IMAGES_GRID_HEIGHT_SIZE" Label="Alto (px)"  Variant="Variant.Outlined" Min="16" Max="200" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                    </div>
+                    <MudNumericField @bind-Value="_cfg.NUM_IMAGENES_MEGAS_UPLOAD" Label="Tamaño máx. imágenes (MB)" Variant="Variant.Outlined" Min="1" Max="50" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                    <MudText Typo="Typo.subtitle2" Class="mono mt-3 mb-2">Filas por página</MudText>
+                    <div class="d-flex gap-2">
+                        <MudNumericField @bind-Value="_cfg.NUM_ROWS_SHOW_GRID_UNIQUE"   Label="Única"  Variant="Variant.Outlined" Min="5" Max="200" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                        <MudNumericField @bind-Value="_cfg.NUM_ROWS_SHOW_GRID_FATHER"   Label="Padre"  Variant="Variant.Outlined" Min="5" Max="200" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                        <MudNumericField @bind-Value="_cfg.NUM_ROWS_SHOW_GRID_CHILDREN" Label="Hijo"   Variant="Variant.Outlined" Min="5" Max="200" Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                    </div>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Fila con foco / seleccionada</MudText>
+                    <div class="d-flex gap-2 mb-3">
+                        <ColorConSwatch @bind-Text="_cfg.DES_BACKCOLOR_ROWS_FOCUS" Label="Fondo del foco" />
+                        <ColorConSwatch @bind-Text="_cfg.DES_FORECOLOR_ROWS_FOCUS" Label="Texto del foco" />
+                    </div>
+                    <MudSelect T="string" @bind-Value="_cfg.DES_TIPOGRAFIA_ROWS_FOCUS" Label="Fuente del foco" Variant="Variant.Outlined" Class="mb-3">
+                        @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                    </MudSelect>
+                    <MudText Typo="Typo.subtitle2" Class="mono mb-2">Campos obligatorios</MudText>
+                    <ColorConSwatch @bind-Text="_cfg.DES_BACKCOLOR_CONTROLS_REQUIRED" Label="Fondo obligatorio" />
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Colores de la grilla</MudText>
+                    <MudGrid>
+                        <MudItem xs="12" sm="6" md="4">
+                            <ColorConSwatch @bind-Text="_cfg.DES_BACKCOLOR_GRID_HEADER" Label="Cabecera · fondo" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="4">
+                            <ColorConSwatch @bind-Text="_cfg.DES_FORECOLOR_GRID_HEADER" Label="Cabecera · texto" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="4">
+                            <ColorConSwatch @bind-Text="_cfg.DES_FORECOLOR_GRID_ROWS" Label="Filas · texto" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="4">
+                            <ColorConSwatch @bind-Text="_cfg.DES_BACKCOLOR_GRID_ROWS_EVEN" Label="Fila par (even)" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="4">
+                            <ColorConSwatch @bind-Text="_cfg.DES_BACKCOLOR_GRID_ROWS_ODD" Label="Fila impar (odd)" />
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="4">
+                            <ColorConSwatch @bind-Text="_cfg.DES_LINECOLOR_GRID_ROWS" Label="Líneas / bordes" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudText Typo="Typo.subtitle2" Class="mono mt-3 mb-2">Fuentes de filas</MudText>
+                    <div class="d-flex gap-2">
+                        <MudSelect T="string" @bind-Value="_cfg.DES_TIPOGRAFIA_GRID_ROWS"      Label="Todas las filas" Variant="Variant.Outlined">
+                            @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                        </MudSelect>
+                        <MudSelect T="string" @bind-Value="_cfg.DES_TIPOGRAFIA_GRID_ROWS_EVEN" Label="Fila par"        Variant="Variant.Outlined">
+                            @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                        </MudSelect>
+                        <MudSelect T="string" @bind-Value="_cfg.DES_TIPOGRAFIA_GRID_ROWS_ODD"  Label="Fila impar"      Variant="Variant.Outlined">
+                            @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                        </MudSelect>
+                        <MudSelect T="string" @bind-Value="_cfg.DES_TYPOGRAPHY_GRID_ROWS"      Label="Tipografía grilla" Variant="Variant.Outlined">
+                            @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                        </MudSelect>
+                    </div>
+
+                    <MudText Typo="Typo.subtitle2" Class="mono mt-3 mb-2">Alto y tamaño de fuente</MudText>
+                    <MudText Typo="Typo.caption" Style="opacity:.6;display:block;margin-bottom:8px;">
+                        Vacío = automático (según el tamaño de fuente de Controles).
+                    </MudText>
+                    <div class="d-flex gap-2">
+                        <MudNumericField @bind-Value="_cfg.NUM_HIGH_ROW_GRID" Label="Alto de fila (px)"
+                                         Variant="Variant.Outlined"
+                                         Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                        <MudNumericField @bind-Value="_cfg.NUM_FONT_ROW_SIZE" Label="Fuente de fila (px)"
+                                         Variant="Variant.Outlined"
+                                         Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                        <MudNumericField @bind-Value="_cfg.NUM_HIGH_HEAD_GRID" Label="Alto de cabecera (px)"
+                                         Variant="Variant.Outlined"
+                                         Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                        <MudNumericField @bind-Value="_cfg.NUM_FONT_HEAD_SIZE" Label="Fuente de cabecera (px)"
+                                         Variant="Variant.Outlined"
+                                         Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                    </div>
+
+                    @* Vista previa en vivo: usa los valores actuales de _cfg directamente
+                       (no las variables CSS ya guardadas), así refleja los cambios sin
+                       grabar todavía — 7 filas de muestra, la 4ª con foco. *@
+                    <MudText Typo="Typo.subtitle2" Class="mono mt-4 mb-2">Vista previa (7 filas, foco en la 4ª)</MudText>
+                    @{
+                        var cabFontSize = _cfg.NUM_FONT_HEAD_SIZE is > 0 ? $"{_cfg.NUM_FONT_HEAD_SIZE}px" : ".8rem";
+                        var cabAlto     = _cfg.NUM_HIGH_HEAD_GRID  is > 0 ? $"{_cfg.NUM_HIGH_HEAD_GRID}px"  : "auto";
+                        var filaFontSize = _cfg.NUM_FONT_ROW_SIZE is > 0 ? $"{_cfg.NUM_FONT_ROW_SIZE}px" : ".82rem";
+                        var filaAlto     = _cfg.NUM_HIGH_ROW_GRID is > 0 ? $"{_cfg.NUM_HIGH_ROW_GRID}px" : "auto";
+                    }
+                    <div style="border:1px solid @(_cfg.DES_LINECOLOR_GRID_ROWS ?? "#ccc");border-radius:4px;overflow:hidden;">
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;background:@_cfg.DES_BACKCOLOR_GRID_HEADER;color:@_cfg.DES_FORECOLOR_GRID_HEADER;font-weight:700;font-size:@cabFontSize;">
+                            <div style="padding:8px 12px;min-height:@cabAlto;box-sizing:border-box;display:flex;align-items:center;border-bottom:1px solid @(_cfg.DES_LINECOLOR_GRID_ROWS ?? "#ccc");">Código</div>
+                            <div style="padding:8px 12px;min-height:@cabAlto;box-sizing:border-box;display:flex;align-items:center;border-bottom:1px solid @(_cfg.DES_LINECOLOR_GRID_ROWS ?? "#ccc");">Descripción</div>
+                            <div style="padding:8px 12px;min-height:@cabAlto;box-sizing:border-box;display:flex;align-items:center;border-bottom:1px solid @(_cfg.DES_LINECOLOR_GRID_ROWS ?? "#ccc");">Estado</div>
+                        </div>
+                        @for (var i = 1; i <= 7; i++)
+                        {
+                            var fila = i;
+                            var esFoco = fila == 4;
+                            var esPar  = fila % 2 == 0;
+                            var fondo   = esFoco ? _cfg.DES_BACKCOLOR_ROWS_FOCUS : (esPar ? _cfg.DES_BACKCOLOR_GRID_ROWS_EVEN : _cfg.DES_BACKCOLOR_GRID_ROWS_ODD);
+                            var texto   = esFoco ? _cfg.DES_FORECOLOR_ROWS_FOCUS : _cfg.DES_FORECOLOR_GRID_ROWS;
+                            var fuente  = esFoco ? _cfg.DES_TIPOGRAFIA_ROWS_FOCUS : (esPar ? _cfg.DES_TIPOGRAFIA_GRID_ROWS_EVEN : _cfg.DES_TIPOGRAFIA_GRID_ROWS_ODD);
+                            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;background:@fondo;color:@texto;font-family:@(string.IsNullOrWhiteSpace(fuente) ? _cfg.DES_TIPOGRAFIA_GRID_ROWS : fuente);font-size:@filaFontSize;">
+                                <div style="padding:6px 12px;min-height:@filaAlto;box-sizing:border-box;display:flex;align-items:center;border-bottom:1px solid @(_cfg.DES_LINECOLOR_GRID_ROWS ?? "#ccc");">FILA-@fila.ToString("00")</div>
+                                <div style="padding:6px 12px;min-height:@filaAlto;box-sizing:border-box;display:flex;align-items:center;border-bottom:1px solid @(_cfg.DES_LINECOLOR_GRID_ROWS ?? "#ccc");">@(esFoco ? "Registro con foco" : $"Registro de ejemplo {fila}")</div>
+                                <div style="padding:6px 12px;min-height:@filaAlto;box-sizing:border-box;display:flex;align-items:center;border-bottom:1px solid @(_cfg.DES_LINECOLOR_GRID_ROWS ?? "#ccc");">ACTIVO</div>
+                            </div>
+                        }
+                    </div>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Búsqueda en grillas</MudText>
+                    <MudText Typo="Typo.body2" Class="mb-3" Style="opacity:.7;">
+                        Mínimo de caracteres antes de consultar a la base de datos al escribir en el buscador —
+                        aplica a todas las pantallas que tienen ese campo.
+                    </MudText>
+                    <MudNumericField T="int" @bind-Value="_cfg.NUM_CHARACTERS_MIO_SEARCH" Label="Mínimo de caracteres"
+                                      Variant="Variant.Outlined" Min="1" Max="10"
+                                      Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    </MudTabPanel>
+
+    @* ════════════════════════════ ENTORNO Y NAVEGACIÓN ════════════════════════════ *@
+    <MudTabPanel Text="Entorno y navegación" Icon="@Icons.Material.Filled.Menu">
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Modo de entorno</MudText>
+                    <AriaCombo TItem="ComboboxItem" Items="_opcionesEntorno"
+                               TextFunc="@(o => o.Texto)" ValueFunc="@(o => o.Id)"
+                               @bind-Value="_cfg.DES_SKIN_COLOR" Label="Entorno" />
+                    <AriaCombo TItem="ComboboxItem" Items="_opcionesModoTexto"
+                               TextFunc="@(o => o.Texto)" ValueFunc="@(o => o.Id)"
+                               @bind-Value="_cfg.DES_MODE_TEXT" Label="Modo de texto" />
+                    <div class="prev-card mt-3" style="border-radius:6px;overflow:hidden;border:1px solid var(--line);padding:.7rem 1rem;background:var(--paper);color:var(--ink);">
+                        <MudText Typo="Typo.caption" Style="opacity:.55;">Vista previa</MudText>
+                        <div style="font-weight:700;">@TransformarTexto("Texto de ejemplo")</div>
+                    </div>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Entorno (cabecera / sidebar)</MudText>
+                    <div class="d-flex gap-2 mb-2">
+                        <ColorConSwatch @bind-Text="_cfg.DES_BACKCOLOR_ENVIRONMENT" Label="Fondo del entorno" />
+                        <ColorConSwatch @bind-Text="_cfg.DES_FORECOLOR_ENVIRONMENT" Label="Texto del entorno" />
+                    </div>
+                    <div class="d-flex align-center gap-1 mb-2"><MudIcon Icon="@Icons.Material.Filled.Gradient" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch @bind-Value="_cfg.FLG_DEGRADE_ENVIRONMENT" Color="Color.Primary" Label="Degradar colores del entorno" /></div>
+                    @if (_cfg.FLG_DEGRADE_ENVIRONMENT && !string.IsNullOrWhiteSpace(_cfg.DES_BACKCOLOR_ENVIRONMENT))
+                    {
+                        <div style="height:24px;border-radius:4px;background:linear-gradient(to bottom,@_cfg.DES_BACKCOLOR_ENVIRONMENT,color-mix(in srgb,@(_cfg.DES_BACKCOLOR_ENVIRONMENT) 40%,white));border:1px solid rgba(0,0,0,.12);margin-bottom:8px;" title="Vista previa degradado entorno"></div>
+                    }
+                    <MudSelect T="string" @bind-Value="_cfg.DES_TYPOGRAPHY_ENVIRONMENT_FONT" Label="Fuente del entorno" Variant="Variant.Outlined" Class="mb-3">
+                        @foreach (var f in _fuentes) { <MudSelectItem Value="@f">@f</MudSelectItem> }
+                    </MudSelect>
+                    <div style="border-radius:6px;overflow:hidden;border:1px solid var(--line);font-size:.78rem;font-family:@(_cfg.DES_TYPOGRAPHY_ENVIRONMENT_FONT);">
+                        <div style="display:flex;align-items:center;gap:.5rem;padding:.5rem .7rem;background:@(NuloA(_cfg.DES_BACKCOLOR_ENVIRONMENT,"#01162a"));color:@(NuloA(_cfg.DES_FORECOLOR_ENVIRONMENT,"#dcdb60"));">
+                            <span style="font-weight:700;">@TransformarTexto("KonSolutions ERP")</span>
+                        </div>
+                        <div style="display:flex;">
+                            <div style="width:96px;padding:.6rem .5rem;display:flex;flex-direction:column;gap:.4rem;background:@(NuloA(_cfg.DES_BACKCOLOR_ENVIRONMENT,"#01162a"));color:@(NuloA(_cfg.DES_FORECOLOR_ENVIRONMENT,"#dcdb60"));">
+                                <div style="padding:.25rem .35rem;border-radius:3px;font-weight:700;background:@(NuloA(_cfg.DES_FORECOLOR_ENVIRONMENT,"#dcdb60"));color:@(NuloA(_cfg.DES_BACKCOLOR_ENVIRONMENT,"#01162a"));">@TransformarTexto("Inicio")</div>
+                                <div>@TransformarTexto("Usuarios")</div>
+                            </div>
+                            <div style="flex:1;background:var(--paper);color:var(--ink);opacity:.5;padding:.6rem;">contenido…</div>
+                        </div>
+                    </div>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Login</MudText>
+                    <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;color:var(--ink);">
+                        Colores propios de la pantalla de ingreso — independientes de los del entorno.
+                    </MudText>
+                    <div class="d-flex gap-2 mb-3">
+                        <ColorConSwatch @bind-Text="_cfg.DES_BACKCOLOR_LOGIN" Label="Fondo del login" />
+                        <ColorConSwatch @bind-Text="_cfg.DES_FORECOLOR_LOGIN" Label="Texto del login" />
+                    </div>
+                    <div style="max-width:220px;border-radius:6px;overflow:hidden;border:1px solid var(--line);padding:1rem;text-align:center;background:@(NuloA(_cfg.DES_BACKCOLOR_LOGIN,"#16130f"));color:@(NuloA(_cfg.DES_FORECOLOR_LOGIN,"#efe9df"));">
+                        <div style="width:32px;height:32px;border-radius:50%;margin:0 auto .5rem;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.15);">
+                            <MudIcon Icon="@Icons.Material.Filled.Person" Style="color:inherit;" Size="Size.Small" />
+                        </div>
+                        <div style="font-weight:700;margin-bottom:.4rem;font-size:.85rem;">Iniciar sesión</div>
+                        <div style="border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:.35rem .5rem;font-size:.72rem;margin-bottom:.4rem;opacity:.85;text-align:left;">Usuario</div>
+                        <div style="border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:.35rem .5rem;font-size:.72rem;opacity:.85;text-align:left;">Contraseña</div>
+                    </div>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Menú contextual</MudText>
+                    <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;color:var(--ink);">
+                        Colores de los menús de clic derecho (Workspace, árboles de Opciones/Especificaciones, Asignación de Roles).
+                    </MudText>
+                    <div class="d-flex gap-2 mb-3">
+                        <ColorConSwatch @bind-Text="_cfg.DES_BACKCOLOR_CONTEXTUALMENU" Label="Fondo del menú" />
+                        <ColorConSwatch @bind-Text="_cfg.DES_FORECOLOR_CONTEXTUALMENU" Label="Texto del menú" />
+                    </div>
+                    <div style="max-width:220px;border-radius:4px;padding:.3rem;font-size:.8rem;box-shadow:3px 3px 0 rgba(0,0,0,.25);background:@(NuloA(_cfg.DES_BACKCOLOR_CONTEXTUALMENU,"#2b2622"));color:@(NuloA(_cfg.DES_FORECOLOR_CONTEXTUALMENU,"#fff"));">
+                        <div style="padding:.4rem .6rem;border-radius:3px;display:flex;align-items:center;gap:.5rem;opacity:.85;">
+                            <MudIcon Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Style="color:inherit;" /> Modificar
+                        </div>
+                        <div style="padding:.4rem .6rem;border-radius:3px;display:flex;align-items:center;gap:.5rem;">
+                            <MudIcon Icon="@Icons.Material.Filled.Search" Size="Size.Small" Style="color:inherit;" /> Consultar
+                        </div>
+                        <div style="padding:.4rem .6rem;border-radius:3px;display:flex;align-items:center;gap:.5rem;">
+                            <MudIcon Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Style="color:inherit;" /> Eliminar
+                        </div>
+                    </div>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    </MudTabPanel>
+
+    @* ════════════════════════════ COMPORTAMIENTO ════════════════════════════ *@
+    <MudTabPanel Text="Comportamiento" Icon="@Icons.Material.Filled.Tune">
+        <MudGrid>
+            <MudItem xs="12" md="4">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Refresco automático</MudText>
+                    <div class="d-flex align-center gap-1 mb-2"><MudIcon Icon="@Icons.Material.Filled.Sync" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch @bind-Value="_cfg.FLG_ACTIVATE_REFRESH_AUTOMATIC" Color="Color.Primary" Label="Activar refresco automático" /></div>
+                    <MudNumericField @bind-Value="_cfg.NUM_SECONDS_REFRESH_GRID" Label="Intervalo (segundos)"
+                                     Variant="Variant.Outlined" Min="3" Max="300"
+                                     Disabled="@(!_cfg.FLG_ACTIVATE_REFRESH_AUTOMATIC)"
+                                     Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                    <div class="d-flex align-center gap-1 mt-2"><MudIcon Icon="@Icons.Material.Filled.History" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch @bind-Value="_cfg.FLG_CONTROL_CAMBIOS_ACTIVO" Color="Color.Primary" Label="Activar control de cambios" /></div>
+                    <MudText Typo="Typo.caption" Style="opacity:.6;">Determina si las grillas se refrescan automáticamente al detectar cambios de otros usuarios.</MudText>
+                    <MudDivider Class="my-3" />
+                    <div class="d-flex align-center gap-1"><MudIcon Icon="@Icons.Material.Filled.Keyboard" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch @bind-Value="_cfg.FLG_TECLADO_VIRTUAL" Color="Color.Primary" Label="Habilitar teclado virtual" /></div>
+                    <MudText Typo="Typo.caption" Style="opacity:.6;">Global. El teclado aparece solo si además la opción y el usuario lo tienen activo.</MudText>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="4">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Bloqueo por inactividad</MudText>
+                    <div class="d-flex align-center gap-1 mb-3"><MudIcon Icon="@Icons.Material.Filled.Lock" Color="Color.Primary" Size="Size.Medium" />
+                        <MudSwitch @bind-Value="_cfg.FLG_ACTIVAR_LOCKOUT_SCREEN" Color="Color.Primary" Label="Activar bloqueo" /></div>
+                    <div class="d-flex align-center gap-2">
+                        <MudNumericField @bind-Value="_cfg.NUM_MINUTOS_LOCKOUT_SCREEN" Label="Minutos de inactividad"
+                                         Variant="Variant.Outlined" Min="1" Max="120"
+                                         Disabled="@(!_cfg.FLG_ACTIVAR_LOCKOUT_SCREEN)"
+                                         Culture="@System.Globalization.CultureInfo.CurrentCulture" Class="flex-grow-1" />
+                        @if (_tokenRestante is not null)
+                        {
+                            <MudTooltip Text="Tiempo restante de la sesión (token)">
+                                <div class="d-flex align-center gap-1" style="color:var(--mud-palette-primary);white-space:nowrap;">
+                                    <MudIcon Icon="@Icons.Material.Filled.Timer" Size="Size.Small" Color="Color.Primary" />
+                                    <span class="mono" style="font-size:.85rem;font-weight:700;">@FormatearRestante(_tokenRestante.Value)</span>
+                                </div>
+                            </MudTooltip>
+                        }
+                    </div>
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="4">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Reconocimiento facial</MudText>
+                    <MudNumericField @bind-Value="_cfg.NUM_SECONDS_OUT_FACIAL_RECOGNITION"
+                                     Label="Segundos de espera" Variant="Variant.Outlined" Min="10" Max="120"
+                                     Culture="@System.Globalization.CultureInfo.CurrentCulture" />
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    </MudTabPanel>
+
+    @* ════════════════════════════ REGIONAL ════════════════════════════ *@
+    <MudTabPanel Text="Regional" Icon="@Icons.Material.Filled.Language">
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Formato regional</MudText>
+                    <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;color:var(--ink);">
+                        Define el separador decimal y formato de fechas/números en toda la app.
+                    </MudText>
+                    <MudSelect T="string" @bind-Value="_cfg.DES_CULTURE"
+                               Label="Cultura regional" Variant="Variant.Outlined"
+                               SearchFunc="@((string s, CancellationToken ct) => FiltrarCultura(s, ct))" ToStringFunc="@(c => _culturas.TryGetValue(c, out var n) ? $"{n} ({c})" : c)"
+                               Dense="true">
+                        @foreach (var (code, name) in _culturasFiltradas)
+                        {
+                            <MudSelectItem T="string" Value="@(code)">@name (@(code))</MudSelectItem>
+                        }
+                    </MudSelect>
+                    @if (!string.IsNullOrWhiteSpace(_cfg.DES_CULTURE))
+                    {
+                        <MudText Class="mono mt-2" Style="font-size:.78rem;opacity:.55;">
+                            Ejemplo: @(GetEjemploCultura(_cfg.DES_CULTURE))
+                        </MudText>
+                    }
+                </MudPaper>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Monedas</MudText>
+                    <AriaCombo TItem="ComboboxItem"
+                                 Items="_monedas"
+                                 ValueFunc="@(x => x.Id)"
+                                 TextFunc="@(x => $"{x.Id} – {x.Texto}")"
+                                 @bind-Value="_cfg.COD_MONEDA_OFICIAL"
+                                 Label="Moneda oficial"
+                                 Class="mb-3" />
+                    <AriaCombo TItem="ComboboxItem"
+                                 Items="_monedas"
+                                 ValueFunc="@(x => x.Id)"
+                                 TextFunc="@(x => $"{x.Id} – {x.Texto}")"
+                                 @bind-Value="_cfg.COD_MONEDA_EXTRANJERA_REFERENCIA"
+                                 Label="Moneda extranjera de referencia"
+                                 Class="mb-3" />
+                    <AriaCombo TItem="ComboboxItem"
+                                 Items="_monedas"
+                                 ValueFunc="@(x => x.Id)"
+                                 TextFunc="@(x => $"{x.Id} – {x.Texto}")"
+                                 @bind-Value="_cfg.COD_MONEDA_PIVOT_TIPO_CAMBIO"
+                                 Label="Moneda pivot tipo de cambio"
+                                 Class="mb-3" />
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    </MudTabPanel>
+
+    @* ════════════════════════════ ADMINISTRACIÓN ════════════════════════════ *@
+    <MudTabPanel Text="Administración" Icon="@Icons.Material.Filled.AccountTree">
+        <MudGrid>
+            <MudItem xs="12">
+                <MudPaper Elevation="0" Class="pa-4" Style="border:1px solid var(--line);">
+                    <MudText Typo="Typo.h6" Class="mb-3">Etiquetas de Búsqueda por Área</MudText>
+                    <MudText Typo="Typo.caption" Class="mono mb-3" Style="opacity:.6;color:var(--ink);">
+                        Enlaza cada Etiqueta de Búsqueda con el Área responsable y los niveles jerárquicos
+                        a los que aplica (tabla ESTANDAR.ETIQUETAS_BUSQUEDA_AREAS).
+                    </MudText>
+
+                    <div class="d-flex align-center justify-space-between mb-3">
+                        <MudText Typo="Typo.subtitle2">Enlaces registrados</MudText>
+                        <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Filled" Size="Size.Small"
+                                   Style="@EstiloBotonConfirmar" OnClick="AgregarFilaEba">Agregar</MudButton>
+                    </div>
+                    <table class="tabla-simple-editable" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th>Etiqueta de Búsqueda</th>
+                                <th>Área</th>
+                                <th style="width:70px;text-align:center;" title="Gerencia">GER</th>
+                                <th style="width:70px;text-align:center;" title="Sub Gerencia">SGER</th>
+                                <th style="width:70px;text-align:center;" title="Jefatura">JEF</th>
+                                <th style="width:70px;text-align:center;" title="Subjefatura">SJEF</th>
+                                <th style="width:70px;text-align:center;" title="Supervisor">SUP</th>
+                                <th style="width:120px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in _filasEba)
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="grilla-campo-texto">
+                                            <MudTextField T="string" @bind-Value="row.CodEtiquetaBusqueda"
+                                                          ReadOnly="@(!row.EditModo)" MaxLength="25"
+                                                          Margin="Margin.None"
+                                                          Class="mb-0" Style="margin-top:0;" />
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <AriaCombo TItem="ComboboxItem"
+                                                     Items="_areasEba"
+                                                     ValueFunc="@(x => x.Id)"
+                                                     TextFunc="@(x => x.Texto)"
+                                                     @bind-Value="row.CodAreaId"
+                                                     Disabled="@(!row.EditModo)"
+                                                     Class="mb-0" Style="margin-top:0;" />
+                                    </td>
+                                    <td style="text-align:center;"><div class="d-flex justify-center"><MudSwitch T="bool" @bind-Value="row.FlgGerencia" Color="Color.Primary" Disabled="@(!row.EditModo)" Class="ma-0" /></div></td>
+                                    <td style="text-align:center;"><div class="d-flex justify-center"><MudSwitch T="bool" @bind-Value="row.FlgSubGerencia" Color="Color.Primary" Disabled="@(!row.EditModo)" Class="ma-0" /></div></td>
+                                    <td style="text-align:center;"><div class="d-flex justify-center"><MudSwitch T="bool" @bind-Value="row.FlgJefatura" Color="Color.Primary" Disabled="@(!row.EditModo)" Class="ma-0" /></div></td>
+                                    <td style="text-align:center;"><div class="d-flex justify-center"><MudSwitch T="bool" @bind-Value="row.FlgSubjefatura" Color="Color.Primary" Disabled="@(!row.EditModo)" Class="ma-0" /></div></td>
+                                    <td style="text-align:center;"><div class="d-flex justify-center"><MudSwitch T="bool" @bind-Value="row.FlgSupervisor" Color="Color.Primary" Disabled="@(!row.EditModo)" Class="ma-0" /></div></td>
+                                    <td>
+                                        <div class="d-flex align-center">
+                                            @if (row.EditModo)
+                                            {
+                                                <MudIconButton Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success"
+                                                               Disabled="@(row.Guardando || string.IsNullOrWhiteSpace(row.CodEtiquetaBusqueda))"
+                                                               OnClick="@(() => GuardarFilaEbaAsync(row))" />
+                                            }
+                                            else
+                                            {
+                                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Info"
+                                                               OnClick="@(() => row.EditModo = true)" />
+                                            }
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                           Disabled="row.Guardando" OnClick="@(() => EliminarFilaEbaAsync(row))" />
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    @if (_filasEba.Count == 0)
+                    {
+                        <MudText Class="pa-2 mono" Style="opacity:.5;">Sin registros.</MudText>
+                    }
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    </MudTabPanel>
+
+</MudTabs>
+}
+</div>
+
+@code {
+    [Parameter] public string CodAplicacion          { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion    { get; set; } = "";
+
+    private SharedCfg _cfg = new();
+    private bool _loading = true;
+    private bool _saving  = false;
+
+    private List<ComboboxItem> _monedas = new();
+
+    private readonly string[] _fuentes =
+    {
+        "Archivo", "Spline Sans Mono", "Arial", "Roboto",
+        "Georgia", "Courier New", "Verdana", "Times New Roman"
+    };
+
+    private readonly List<ComboboxItem> _opcionesEntorno = new()
+    {
+        new ComboboxItem { Id = "claro",  Texto = "Claro" },
+        new ComboboxItem { Id = "oscuro", Texto = "Oscuro" }
+    };
+    private readonly List<ComboboxItem> _opcionesModoTexto = new()
+    {
+        new ComboboxItem { Id = "normal", Texto = "Normal" },
+        new ComboboxItem { Id = "upper",  Texto = "MAYÚSCULAS" },
+        new ComboboxItem { Id = "lower",  Texto = "minúsculas" }
+    };
+
+    // Cultura regional
+    private Dictionary<string, string> _culturas = new();
+    private IEnumerable<KeyValuePair<string, string>> _culturasFiltradas => _culturas;
+    private string _searchCultura = "";
+
+    // Mismo estándar que CrudDialogActions.razor: el botón de acción usa el color
+    // configurado en ESTANDAR.CONFIGURACION_GENERAL (--boton-backcolor/--boton-forecolor).
+    private const string EstiloBotonConfirmar =
+        "font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));";
+
+    // ── Dominios de correo de la empresa (ficha Empresa, grilla in-place) ──
+    private class DominioEmpresaRow
+    {
+        public byte CodDominio { get; set; }
+        public string DesDominio { get; set; } = "";
+        public bool EsNueva { get; set; }
+        public bool Guardando { get; set; }
+    }
+    private List<DominioEmpresaRow> _dominios = new();
+
+    private async Task CargarDominiosAsync()
+    {
+        var lista = await Http.SafeGetAsync<List<KONSolutions.Shared.Models.Entorno.DominiosEmpresa>>(ApiRoutes.Entorno.DominiosEmpresa) ?? new();
+        _dominios = lista.Select(d => new DominioEmpresaRow { CodDominio = d.COD_DOMINIO_EMPRESA, DesDominio = d.DES_DOMINIO_EMPRESA }).ToList();
+    }
+
+    private void AgregarDominio() => _dominios.Add(new DominioEmpresaRow { EsNueva = true });
+
+    private async Task GuardarDominioAsync(DominioEmpresaRow row)
+    {
+        row.Guardando = true;
+        try
+        {
+            var dto = new { COD_DOMINIO_EMPRESA = row.CodDominio, DES_DOMINIO_EMPRESA = row.DesDominio };
+            // PROC_ENTORNO_DOMINIOS_EMPRESA_INSERT es upsert — siempre POST. Al crear, el
+            // código va en 0 y el SP devuelve el SCOPE_IDENTITY() asignado — se recarga la
+            // grilla completa para tomarlo (evita parsear el WriteResult a mano).
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Entorno.DominiosEmpresa, dto);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Guardado.", Severity.Success);
+                if (row.EsNueva) await CargarDominiosAsync(); else row.EsNueva = false;
+            }
+            else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ConfiguracionGeneral), nameof(GuardarDominioAsync));
+        }
+        finally { row.Guardando = false; }
+    }
+
+    private async Task EliminarDominioAsync(DominioEmpresaRow row)
+    {
+        if (row.EsNueva) { _dominios.Remove(row); return; }
+        row.Guardando = true;
+        try
+        {
+            var resp = await Http.DeleteAsync($"{ApiRoutes.Entorno.DominiosEmpresa}/{row.CodDominio}");
+            if (resp.IsSuccessStatusCode) { _dominios.Remove(row); Snackbar.Add("Eliminado.", Severity.Success); }
+            else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ConfiguracionGeneral), nameof(EliminarDominioAsync), "No se pudo eliminar el registro");
+        }
+        finally { row.Guardando = false; }
+    }
+
+    // ── Etiquetas de Búsqueda por Área (ficha Administración, grilla in-place) ──
+    // Fila 100% autocontenida: Etiqueta + Área + niveles jerárquicos editables en la misma
+    // celda, con ✎ para habilitar edición, ✓ para grabar (varias filas, cada una
+    // independiente) y 🗑 para eliminar.
+    private class EtiquetaBusquedaAreaRow
+    {
+        public string CodEtiquetaBusqueda { get; set; } = "";
+        public string? CodAreaId { get; set; }
+        public bool FlgGerencia { get; set; }
+        public bool FlgSubGerencia { get; set; }
+        public bool FlgJefatura { get; set; }
+        public bool FlgSubjefatura { get; set; }
+        public bool FlgSupervisor { get; set; }
+        // Clave con la que quedó grabada en la BD (vacía si es nueva) — al grabar, si la
+        // Etiqueta cambió respecto a esto, hay que borrar la fila vieja e insertar la
+        // nueva en vez de un simple upsert (la PK real cambió).
+        public string CodEtiquetaBusquedaOriginal { get; set; } = "";
+        public bool EsNueva { get; set; }
+        public bool EditModo { get; set; }
+        public bool Guardando { get; set; }
+    }
+
+    private List<ComboboxItem> _areasEba = new();
+    private List<EtiquetaBusquedaAreaRow> _filasEba = new();
+
+    private async Task CargarEtiquetasBusquedaAreasAsync()
+    {
+        var tAreas = Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>($"{ApiRoutes.Administracion.Areas}/combobox");
+        var tFilas = Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<KONSolutions.Shared.Models.Estandar.EtiquetasBusquedaAreas>>>(ApiRoutes.Estandar.EtiquetasBusquedaAreas);
+        await Task.WhenAll(tAreas, tFilas);
+        _areasEba = tAreas.Result?.Data ?? new();
+
+        _filasEba = (tFilas.Result?.Data ?? new()).Select(f => new EtiquetaBusquedaAreaRow
+        {
+            CodEtiquetaBusqueda = f.COD_ETIQUETA_BUSQUEDA,
+            CodAreaId = f.COD_AREA?.ToString(),
+            FlgGerencia = f.FLG_GERENCIA ?? false,
+            FlgSubGerencia = f.FLG_SUB_GERENCIA ?? false,
+            FlgJefatura = f.FLG_JEFATURA ?? false,
+            FlgSubjefatura = f.FLG_SUBJEFATURA ?? false,
+            FlgSupervisor = f.FLG_SUPERVISOR ?? false,
+            CodEtiquetaBusquedaOriginal = f.COD_ETIQUETA_BUSQUEDA
+        }).ToList();
+    }
+
+    private void AgregarFilaEba() => _filasEba.Add(new EtiquetaBusquedaAreaRow { EsNueva = true, EditModo = true });
+
+    private async Task GuardarFilaEbaAsync(EtiquetaBusquedaAreaRow row)
+    {
+        if (string.IsNullOrWhiteSpace(row.CodEtiquetaBusqueda)) return;
+        row.Guardando = true;
+        try
+        {
+            // Si la fila ya existía y la PK (Etiqueta) cambió, no alcanza con el upsert del
+            // INSERT (matchearía por la clave NUEVA, dejando huérfana la fila vieja) —
+            // primero hay que borrar el registro original.
+            var cambioClave = !row.EsNueva && row.CodEtiquetaBusqueda != row.CodEtiquetaBusquedaOriginal;
+            if (cambioClave)
+            {
+                var del = await Http.DeleteAsync(
+                    $"{ApiRoutes.Estandar.EtiquetasBusquedaAreas}/{Uri.EscapeDataString(row.CodEtiquetaBusquedaOriginal)}");
+                if (!del.IsSuccessStatusCode)
+                { await ErrorDialogHelper.MostrarAsync(del, ErrorLog, DialogService, nameof(ConfiguracionGeneral), nameof(GuardarFilaEbaAsync)); return; }
+            }
+
+            var dto = new
+            {
+                COD_ETIQUETA_BUSQUEDA = row.CodEtiquetaBusqueda,
+                COD_AREA = string.IsNullOrWhiteSpace(row.CodAreaId) ? (byte?)null : byte.Parse(row.CodAreaId),
+                FLG_GERENCIA = row.FlgGerencia,
+                FLG_SUB_GERENCIA = row.FlgSubGerencia,
+                FLG_JEFATURA = row.FlgJefatura,
+                FLG_SUBJEFATURA = row.FlgSubjefatura,
+                FLG_SUPERVISOR = row.FlgSupervisor
+            };
+            var resp = await Http.PostAsJsonAsync(ApiRoutes.Estandar.EtiquetasBusquedaAreas, dto);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Guardado.", Severity.Success);
+                row.EsNueva = false;
+                row.EditModo = false;
+                row.CodEtiquetaBusquedaOriginal = row.CodEtiquetaBusqueda;
+            }
+            else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ConfiguracionGeneral), nameof(GuardarFilaEbaAsync));
+        }
+        finally { row.Guardando = false; }
+    }
+
+    private async Task EliminarFilaEbaAsync(EtiquetaBusquedaAreaRow row)
+    {
+        if (row.EsNueva) { _filasEba.Remove(row); return; }
+        row.Guardando = true;
+        try
+        {
+            var resp = await Http.DeleteAsync(
+                $"{ApiRoutes.Estandar.EtiquetasBusquedaAreas}/{Uri.EscapeDataString(row.CodEtiquetaBusquedaOriginal)}");
+            if (resp.IsSuccessStatusCode) { _filasEba.Remove(row); Snackbar.Add("Eliminado.", Severity.Success); }
+            else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ConfiguracionGeneral), nameof(EliminarFilaEbaAsync), "No se pudo eliminar el registro");
+        }
+        finally { row.Guardando = false; }
+    }
+
+    private async Task<IEnumerable<ComboboxItem>> BuscarPaisAsync(string texto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(texto) || texto.Length < 2) return [];
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(
+                $"{ApiRoutes.Estandar.PaisesCombobox}?search={Uri.EscapeDataString(texto)}", ct);
+            return r?.Data ?? [];
+        }
+        catch { return []; }
+    }
+
+    private async Task<IEnumerable<ComboboxItem>> BuscarUbigeoAsync(string texto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(texto) || texto.Length < 2) return [];
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(
+                $"{ApiRoutes.Estandar.UbigeosCombobox}?search={Uri.EscapeDataString(texto)}", ct);
+            return r?.Data ?? [];
+        }
+        catch { return []; }
+    }
+
+    private async Task<IEnumerable<ComboboxItem>> BuscarTipoEmpresaAsync(string texto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(texto)) return [];
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(
+                $"{ApiRoutes.Estandar.TiposEmpresaCombobox}?search={Uri.EscapeDataString(texto)}", ct);
+            return r?.Data ?? [];
+        }
+        catch { return []; }
+    }
+
+    private Task<IEnumerable<string>> FiltrarCultura(string? texto, CancellationToken _)
+    {
+        _searchCultura = texto ?? "";
+        return Task.FromResult(
+            _culturas
+                .Where(kv => string.IsNullOrWhiteSpace(_searchCultura)
+                          || kv.Key.Contains(_searchCultura, StringComparison.OrdinalIgnoreCase)
+                          || kv.Value.Contains(_searchCultura, StringComparison.OrdinalIgnoreCase))
+                .Select(kv => kv.Key));
+    }
+
+    private static string GetEjemploCultura(string code)
+    {
+        try
+        {
+            var ciFecha = new System.Globalization.CultureInfo(code);
+            var ci = KONSolutions.Web.Services.CultureHelper.Construir(code);
+            var nf = ci.NumberFormat;
+            var num = (1234567.89).ToString("N2", ci);
+            var dec = nf.NumberDecimalSeparator;
+            var mil = nf.NumberGroupSeparator;
+            return $"{num}  (dec='{dec}'  miles='{mil}')  ·  {DateTime.Today.ToString("d", ciFecha)}";
+        }
+        catch { return ""; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _culturas = System.Globalization.CultureInfo
+            .GetCultures(System.Globalization.CultureTypes.SpecificCultures)
+            .OrderBy(c => c.DisplayName)
+            .ToDictionary(c => c.Name, c => c.DisplayName);
+
+        var tMonedas = Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<ComboboxItem>>>(ApiRoutes.Estandar.MonedasCombobox);
+        var tData    = CfgSvc.GetCurrentAsync();
+
+        await Task.WhenAll(tMonedas, tData);
+
+        _monedas = tMonedas.Result?.Data ?? new();
+        var data = tData.Result;
+        if (data is not null) _cfg = data;
+        await CargarDominiosAsync();
+        await CargarEtiquetasBusquedaAreasAsync();
+        _loading = false;
+
+        _tokenExpira = await AuthStateProvider.GetExpiracionTokenAsync();
+        ActualizarTokenRestante();
+        _timerToken = new System.Threading.Timer(_ => InvokeAsync(() => { ActualizarTokenRestante(); StateHasChanged(); }),
+            null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    // ── Tiempo restante del token (al costado del bloqueo por inactividad) ──
+    private DateTimeOffset? _tokenExpira;
+    private TimeSpan? _tokenRestante;
+    private System.Threading.Timer? _timerToken;
+
+    private void ActualizarTokenRestante()
+    {
+        if (_tokenExpira is null) { _tokenRestante = null; return; }
+        var restante = _tokenExpira.Value - DateTimeOffset.UtcNow;
+        _tokenRestante = restante > TimeSpan.Zero ? restante : TimeSpan.Zero;
+    }
+
+    private static string FormatearRestante(TimeSpan t) =>
+        t.TotalHours >= 1 ? $"{(int)t.TotalHours:00}:{t.Minutes:00}:{t.Seconds:00}" : $"{t.Minutes:00}:{t.Seconds:00}";
+
+    public void Dispose() => _timerToken?.Dispose();
+
+    private string TransformarTexto(string texto) => _cfg.DES_MODE_TEXT switch
+    {
+        "upper" => texto.ToUpperInvariant(),
+        "lower" => texto.ToLowerInvariant(),
+        _ => texto
+    };
+
+    private static string NuloA(string? valor, string fallback) => string.IsNullOrWhiteSpace(valor) ? fallback : valor;
+
+    private async Task Guardar()
+    {
+        _saving = true;
+        var resp = await CfgSvc.SaveRawAsync(_cfg);
+        if (resp.IsSuccessStatusCode)
+        {
+            // Aplica a la web en caliente — mapea los campos de BD → AppConfig
+            // (mismo mapeo que usa MainLayout al arrancar la app, ver ConfigService)
+            var app = Config.Current;
+            ConfigService.MapearDesdeConfiguracionGeneral(_cfg, app);
+
+            await Config.SaveAsync(app);   // guarda en localStorage Y aplica CSS en caliente
+
+            // Aplicar cultura regional en caliente
+            if (!string.IsNullOrWhiteSpace(_cfg.DES_CULTURE))
+            {
+                try
+                {
+                    var ci = new System.Globalization.CultureInfo(_cfg.DES_CULTURE);
+                    System.Globalization.CultureInfo.DefaultThreadCurrentCulture   = ci;
+                    System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = ci;
+                }
+                catch { }
+            }
+
+            if (app.RefrescoAutomatico && app.ControlCambiosActivo) Cambios.Iniciar(app.RefrescoIntervaloSegs);
+            else Cambios.Detener();
+
+            Snackbar.Add("Configuración guardada y aplicada.", Severity.Success);
+        }
+        else
+        {
+            await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(ConfiguracionGeneral), nameof(Guardar));
+        }
+        _saving = false;
+    }
+}

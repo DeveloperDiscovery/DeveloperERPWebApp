@@ -1,0 +1,229 @@
+@using FamiliasProductoModel = KONSolutions.Shared.Models.Estandar.FamiliasProducto
+@using GruposProductoModel = KONSolutions.Shared.Models.Estandar.GruposProducto
+@using FamiliasProductoRoute = KONSolutions.Web.Services.ApiRoutes.Estandar
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_FAMILIA_PRODUCTO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <AriaCombo TItem="ComboboxItem" Items="_grupos"
+                       TextFunc="@(g => $"{g.Id} - {g.Texto}")" ValueFunc="@(g => g.Id)"
+                       Value="@_model.COD_GRUPO_PRODUCTO" ValueChanged="@(v => OnGrupoChanged(v ?? ""))"
+                       Label="Grupo de Producto" Disabled="@(!_esNuevo || _readonly)" />
+            <CampoTexto Tabla="ESTANDAR.FAMILIAS_PRODUCTO" Columna="COD_FAMILIA_PRODUCTO_ALIAS"
+                        @bind-Value="_model.COD_FAMILIA_PRODUCTO_ALIAS"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            @if (!_esNuevo)
+            {
+                <CampoTexto Tabla="ESTANDAR.FAMILIAS_PRODUCTO" Columna="COD_FAMILIA_PRODUCTO"
+                            @bind-Value="_model.COD_FAMILIA_PRODUCTO"
+                            Disabled="true" />
+            }
+            <CampoTexto Tabla="ESTANDAR.FAMILIAS_PRODUCTO" Columna="DES_FAMILIA_PRODUCTO"
+                        @bind-Value="_model.DES_FAMILIA_PRODUCTO"
+                        Disabled="_readonly" Obligatorio="true" />
+            <AriaCombo TItem="ComboboxItem" Items="_tiposProducto"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       @bind-Value="_model.COD_TIPO_PRODUCTO"
+                       Label="Tipo de Producto" Disabled="_readonly" />
+            <AriaCombo TItem="ComboboxItem" Items="_cubso"
+                       TextFunc="@(c => $"{c.Id} - {c.Texto}")" ValueFunc="@(c => c.Id)"
+                       @bind-Value="_model.COD_CUBSO"
+                       Label="Código UNSPSC (CUBSO)" Disabled="_readonly" />
+            <CampoTexto Tabla="ESTANDAR.FAMILIAS_PRODUCTO" Columna="COD_PARTIDA_ARANCELARIA"
+                        @bind-Value="_model.COD_PARTIDA_ARANCELARIA"
+                        Disabled="_readonly" />
+            <AriaCombo TItem="ComboboxItem" Items="_tiposValorCalculo"
+                       TextFunc="@(t => $"{t.Id} - {t.Texto}")" ValueFunc="@(t => t.Id)"
+                       @bind-Value="_model.COD_TIPO_VALOR_CALCULO"
+                       Label="Tipo de Valor de Cálculo" Disabled="_readonly" />
+            <AriaCombo TItem="ComboboxItem" Items="_unidadesMedida"
+                       TextFunc="@(u => $"{u.Id} - {u.Texto}")" ValueFunc="@(u => u.Id)"
+                       @bind-Value="_model.COD_UNIDAD_MEDIDA"
+                       Label="Unidad de Medida" Disabled="_readonly" />
+            <AriaCombo TItem="ComboboxItem" Items="_unidadesMedida"
+                       TextFunc="@(u => $"{u.Id} - {u.Texto}")" ValueFunc="@(u => u.Id)"
+                       @bind-Value="_model.COD_UNIDAD_MEDIDA_SECUNDARIA"
+                       Label="Unidad de Medida Secundaria" Disabled="_readonly" />
+            <div class="d-flex align-center justify-space-between py-1 mb-2">
+                <div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.Inventory2" Size="Size.Small" Style="opacity:.6;" /><MudText Typo="Typo.body2">Bien</MudText></div>
+                <MudSwitch T="bool?" @bind-Value="_model.FLG_BIEN" Color="Color.Primary" Disabled="_readonly" />
+            </div>
+            <EstadoCombo DesTabla="ESTANDAR.FAMILIAS_PRODUCTO" @bind-Value="_model.COD_ESTADO"
+                         CodTipoEstadoChanged="@(v => _codTipoEstado = v ?? 0)" Disabled="_readonly" Class="mb-3" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())">
+                <LeftContent>
+                    <PanelAuditoria CodUsuarioRegistro="@Item?.COD_USUARIO_REGISTRO"
+                                    CodEstacionRegistro="@Item?.COD_ESTACION_REGISTRO"
+                                    FecRegistro="@Item?.FEC_REGISTRO"
+                                    CodUsuarioActualizacion="@Item?.COD_USUARIO_ACTUALIZACION"
+                                    CodEstacionActualizacion="@Item?.COD_ESTACION_ACTUALIZACION"
+                                    FecActualizacion="@Item?.FEC_ACTUALIZACION" />
+                </LeftContent>
+            </CrudDialogActions>
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public FamiliasProductoModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    // Grupos ya cargados en la grilla de la pantalla que abre este diálogo — igual que en
+    // SubFamiliasProductoDialog, se usan directamente en vez de PROC_..._GRUPOS_PRODUCTO_SHOWCOMBOX
+    // (que no devuelve datos), con respaldo de fetch al endpoint principal si no llegan.
+    [Parameter] public List<GruposProductoModel>? GruposDisponibles { get; set; }
+
+    private FamiliasProductoModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private List<ComboboxItem> _grupos           = new();
+    private List<ComboboxItem> _tiposProducto    = new();
+    private List<ComboboxItem> _cubso            = new();
+    private List<ComboboxItem> _tiposValorCalculo= new();
+    private List<ComboboxItem> _unidadesMedida   = new();
+    private List<EstadoItem>   _estados          = new();
+    private int                _codTipoEstado;
+
+    // Grupos con sus datos completos — se usa para heredar FLG_BIEN del Grupo padre.
+    private List<GruposProductoModel> _gruposCompletos = new();
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        _gruposCompletos = GruposDisponibles ?? new();
+        _grupos = _gruposCompletos
+            .Select(g => new ComboboxItem { Id = g.COD_GRUPO_PRODUCTO.Trim(), Texto = g.DES_GRUPO_PRODUCTO })
+            .ToList();
+
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(FamiliasProductoModel m)
+    {
+        _model = new FamiliasProductoModel
+        {
+            COD_GRUPO_PRODUCTO      = m.COD_GRUPO_PRODUCTO?.Trim() ?? "",
+            COD_FAMILIA_PRODUCTO    = m.COD_FAMILIA_PRODUCTO,
+            COD_FAMILIA_PRODUCTO_ALIAS = m.COD_FAMILIA_PRODUCTO_ALIAS,
+            DES_FAMILIA_PRODUCTO    = m.DES_FAMILIA_PRODUCTO,
+            COD_CUBSO               = m.COD_CUBSO?.Trim(),
+            FLG_BIEN                = m.FLG_BIEN,
+            COD_TIPO_PRODUCTO       = m.COD_TIPO_PRODUCTO,
+            COD_PARTIDA_ARANCELARIA = m.COD_PARTIDA_ARANCELARIA,
+            COD_TIPO_VALOR_CALCULO  = m.COD_TIPO_VALOR_CALCULO,
+            COD_UNIDAD_MEDIDA       = m.COD_UNIDAD_MEDIDA,
+            COD_UNIDAD_MEDIDA_SECUNDARIA = m.COD_UNIDAD_MEDIDA_SECUNDARIA,
+            COD_TIPO_ESTADO         = m.COD_TIPO_ESTADO,
+            COD_ESTADO              = m.COD_ESTADO,
+        };
+    }
+
+    /// <summary>Trae la Familia de Producto fresca desde SHOWBYID (clave compuesta
+    /// Grupo/Familia) — evita mostrar datos desactualizados de la grilla al
+    /// Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<FamiliasProductoModel>(
+            $"{FamiliasProductoRoute.FamiliasProducto}/{Uri.EscapeDataString(_model.COD_GRUPO_PRODUCTO)}/{Uri.EscapeDataString(_model.COD_FAMILIA_PRODUCTO)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+
+        var tGrupos = _grupos.Any() ? Task.FromResult<List<GruposProductoModel>?>(null)
+            : Http.SafeGetAsync<List<GruposProductoModel>>(FamiliasProductoRoute.GruposProducto);
+        var tLoadcombos = Http.SafeGetAsync<FamiliasProductoLoadCombosResult>(FamiliasProductoRoute.FamiliasProductoLoadcombos);
+        var tCubso = Http.SafeGetAsync<List<ComboboxItem>>(KONSolutions.Web.Services.ApiRoutes.Sunat.CubsoSunatCombobox);
+        await Task.WhenAll(tGrupos, tLoadcombos, tCubso);
+        _cubso = (await tCubso) ?? new();
+        var gruposRespaldo = await tGrupos;
+        if (gruposRespaldo is not null)
+        {
+            _gruposCompletos = gruposRespaldo;
+            _grupos = _gruposCompletos.Select(g => new ComboboxItem { Id = g.COD_GRUPO_PRODUCTO.Trim(), Texto = g.DES_GRUPO_PRODUCTO }).ToList();
+        }
+
+        // Al abrir "Nueva" ya con un Grupo fijado por contexto (ej. desde la grilla de Grupos
+        // de Producto), hereda el "Bien" del Grupo padre — el switch sigue editable, solo se
+        // precarga el valor inicial.
+        if (_esNuevo && !string.IsNullOrEmpty(_model.COD_GRUPO_PRODUCTO))
+        {
+            var grupoPadre = _gruposCompletos.FirstOrDefault(g => g.COD_GRUPO_PRODUCTO.Trim() == _model.COD_GRUPO_PRODUCTO);
+            if (grupoPadre is not null)
+            {
+                if (_model.FLG_BIEN is null) _model.FLG_BIEN = grupoPadre.FLG_BIEN;
+                if (string.IsNullOrEmpty(_model.COD_CUBSO)) _model.COD_CUBSO = grupoPadre.COD_CUBSO?.Trim();
+                if (string.IsNullOrEmpty(_model.COD_TIPO_VALOR_CALCULO)) _model.COD_TIPO_VALOR_CALCULO = grupoPadre.COD_TIPO_VALOR_CALCULO?.Trim();
+                if (string.IsNullOrEmpty(_model.COD_UNIDAD_MEDIDA)) _model.COD_UNIDAD_MEDIDA = grupoPadre.COD_UNIDAD_MEDIDA?.Trim();
+                if (string.IsNullOrEmpty(_model.COD_UNIDAD_MEDIDA_SECUNDARIA)) _model.COD_UNIDAD_MEDIDA_SECUNDARIA = grupoPadre.COD_UNIDAD_MEDIDA_SECUNDARIA?.Trim();
+            }
+        }
+
+        var lc  = await tLoadcombos;
+        if (lc is not null)
+        {
+            _codTipoEstado     = lc.CodTipoEstado;
+            _tiposProducto     = lc.TiposProducto;
+            _estados           = lc.Estados;
+            _unidadesMedida    = lc.UnidadesMedida;
+            _tiposValorCalculo = lc.TiposValorCalculo;
+            if (_esNuevo && _model.COD_ESTADO is null && _estados.Any())
+            {
+                var def = _estados.FirstOrDefault(e => e.EsDefault) ?? _estados.First();
+                _model.COD_ESTADO      = def.CodEstado;
+                _model.COD_TIPO_ESTADO = _codTipoEstado;
+            }
+        }
+    }
+    // Al elegir/cambiar el Grupo (combo editable en modo Crear), hereda su "Bien" — el
+    // usuario puede seguir cambiándolo después, es solo el valor inicial sugerido.
+    private void OnGrupoChanged(string val)
+    {
+        _model.COD_GRUPO_PRODUCTO = val;
+        var grupoPadre = _gruposCompletos.FirstOrDefault(g => g.COD_GRUPO_PRODUCTO.Trim() == val);
+        _model.FLG_BIEN = grupoPadre?.FLG_BIEN;
+        _model.COD_CUBSO = grupoPadre?.COD_CUBSO?.Trim();
+        _model.COD_TIPO_VALOR_CALCULO = grupoPadre?.COD_TIPO_VALOR_CALCULO?.Trim();
+        _model.COD_UNIDAD_MEDIDA = grupoPadre?.COD_UNIDAD_MEDIDA?.Trim();
+        _model.COD_UNIDAD_MEDIDA_SECUNDARIA = grupoPadre?.COD_UNIDAD_MEDIDA_SECUNDARIA?.Trim();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = FamiliasProductoRoute.FamiliasProducto;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync(
+                $"{ruta}/{Uri.EscapeDataString(_model.COD_GRUPO_PRODUCTO)}/{Uri.EscapeDataString(_model.COD_FAMILIA_PRODUCTO)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(FamiliasProductoDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        _model.COD_TIPO_ESTADO = _codTipoEstado;
+        // Nueva: el SP ignora COD_FAMILIA_PRODUCTO y lo genera desde el ALIAS.
+        var dto = new { _model.COD_GRUPO_PRODUCTO, COD_FAMILIA_PRODUCTO = _esNuevo ? "" : _model.COD_FAMILIA_PRODUCTO,
+                        _model.COD_FAMILIA_PRODUCTO_ALIAS, _model.DES_FAMILIA_PRODUCTO, _model.COD_CUBSO,
+                        _model.FLG_BIEN, _model.COD_TIPO_PRODUCTO, _model.COD_PARTIDA_ARANCELARIA,
+                        _model.COD_TIPO_VALOR_CALCULO, _model.COD_UNIDAD_MEDIDA, _model.COD_UNIDAD_MEDIDA_SECUNDARIA,
+                        _model.COD_TIPO_ESTADO, _model.COD_ESTADO };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(FamiliasProductoDialog), nameof(Submit));
+    }
+}

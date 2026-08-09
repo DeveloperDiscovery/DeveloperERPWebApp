@@ -1,0 +1,116 @@
+@using TiposZonificacionModel = KONSolutions.Shared.Models.Zonificacion.TiposZonificacion
+@using KONSolutions.Shared.Common
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_TIPO_ZONIFICACION" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit" OnInvalidSubmit="OnInvalidSubmit">
+            <DataAnnotationsValidator />
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="4">
+                    @* El código lo escribe el usuario (no hay correlativo automático) y es
+                       parte de la PK: solo se puede fijar al crear. *@
+                    <CampoTexto Tabla="ZONIFICACION.TIPOS_ZONIFICACION" Columna="COD_TIPO_ZONIFICACION"
+                                @bind-Value="_model.COD_TIPO_ZONIFICACION"
+                                Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+                </MudItem>
+                <MudItem xs="12" sm="8">
+                    <CampoTexto Tabla="ZONIFICACION.TIPOS_ZONIFICACION" Columna="DES_TIPO_ZONIFICACION"
+                                @bind-Value="_model.DES_TIPO_ZONIFICACION"
+                                Disabled="_readonly" Obligatorio="true" />
+                </MudItem>
+                <MudItem xs="12">
+                    @* Decide qué zonas llevan mapa. Se marca acá, en el catálogo, y no se
+                       compara contra un código fijo en la pantalla del plano. *@
+                    <div class="d-flex align-center gap-2 mb-3" style="height:40px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Map"
+                                 Color="@(_model.FLG_MAPEABLE == true ? Color.Primary : Color.Default)"
+                                 Style="@(_model.FLG_MAPEABLE == true ? "" : "opacity:.35;")" />
+                        <MudSwitch T="bool?" @bind-Value="_model.FLG_MAPEABLE" Disabled="_readonly"
+                                   Color="Color.Primary" Label="Se dibuja en el Mapa de Piso" />
+                    </div>
+                </MudItem>
+                <MudItem xs="12">
+                    <ImagePicker Image="_model.IMG_ICONO" ImageChanged="@(v => _model.IMG_ICONO = v)"
+                                 Label="Ícono del tipo" ReadOnly="_readonly" />
+                </MudItem>
+            </MudGrid>
+            <CrudDialogActions Modo="Modo" Saving="_saving" OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TiposZonificacionModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private TiposZonificacionModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private void MapearDesdeModelo(TiposZonificacionModel m)
+    {
+        _model = new TiposZonificacionModel
+        {
+            COD_TIPO_ZONIFICACION = m.COD_TIPO_ZONIFICACION,
+            DES_TIPO_ZONIFICACION = m.DES_TIPO_ZONIFICACION,
+            IMG_ICONO             = m.IMG_ICONO,
+            FLG_MAPEABLE          = m.FLG_MAPEABLE
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID — evita mostrar datos desactualizados
+    /// de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<TiposZonificacionModel>(
+            $"{ApiRoutes.Zonificacion.TiposZonificacion}/{Uri.EscapeDataString(_model.COD_TIPO_ZONIFICACION)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    private async Task OnInvalidSubmit(EditContext ctx)
+    {
+        var errores = string.Join(" · ", ctx.GetValidationMessages());
+        await DialogService.ShowAsync<KONSolutions.Web.Pages.Shared.ErrorSqlDialog>("",
+            new DialogParameters
+            {
+                ["Titulo"]  = "Faltan datos obligatorios",
+                ["Mensaje"] = string.IsNullOrWhiteSpace(errores) ? "Hay campos obligatorios sin completar." : errores
+            },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = false, BackdropClick = false, CloseOnEscapeKey = false });
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = ApiRoutes.Zonificacion.TiposZonificacion;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ruta}/{Uri.EscapeDataString(_model.COD_TIPO_ZONIFICACION)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TiposZonificacionDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        // El SP INSERT hace upsert: Crear y Modificar usan el mismo POST.
+        var resp = await Http.PostAsJsonAsync(ruta, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TiposZonificacionDialog), nameof(Submit));
+    }
+}

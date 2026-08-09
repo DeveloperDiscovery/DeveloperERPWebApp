@@ -1,0 +1,70 @@
+@using CubsoSunatModel = KONSolutions.Shared.Models.Sunat.CubsoSunat
+
+@* Nodo recursivo del árbol de Cubso Sunat (jerarquía UNSPSC vía COD_CUBSO_PARENT). *@
+
+<div>
+    <div class="tl-row-spec" style="grid-template-columns: 1fr 140px 90px;cursor:pointer;user-select:none;"
+         @onclick="Toggle">
+        <div class="d-flex align-center gap-1" style="@($"padding-left:{8 + Nivel * 18}px;")">
+            @if (Hijos.Any())
+            {
+                <MudIcon Icon="@(_expandido ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                         Style="font-size:1rem;opacity:.6;flex-shrink:0;" />
+            }
+            else
+            {
+                <span style="width:20px;flex-shrink:0;"></span>
+            }
+            <MudIcon Icon="@Icons.Material.Filled.Numbers" Style="font-size:.95rem;opacity:.7;flex-shrink:0;" />
+            <span style="font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                <b>@Nodo.COD_CUBSO</b> — @Nodo.DES_CUBSO
+            </span>
+        </div>
+
+        <div class="mono" style="font-size:.74rem;opacity:.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            @Nodo.COD_UNSPS
+        </div>
+
+        <div @onclick:stopPropagation="true" style="justify-self:end;">
+            <AccionesBotones CodAplicacion="@CodAplicacion" CodOpcionAplicacion="@CodOpcionAplicacion"
+                             Zona="@AccionesBotones.ZonaBotones.Grilla" OnAccion="@(b=>OnAccion.InvokeAsync((Nodo,b)))" />
+        </div>
+    </div>
+
+    @if (_expandido && Hijos.Any())
+    {
+        @foreach (var hijo in Hijos)
+        {
+            <CubsoSunatNodo Nodo="hijo"
+                       Nivel="@(Nivel + 1)"
+                       PorPadre="PorPadre"
+                       CodAplicacion="CodAplicacion"
+                       CodOpcionAplicacion="CodOpcionAplicacion"
+                       ForzarExpandido="ForzarExpandido"
+                       OnAccion="OnAccion" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public CubsoSunatModel Nodo { get; set; } = null!;
+    [Parameter] public int Nivel { get; set; } = 0;
+    [Parameter] public Dictionary<string, List<CubsoSunatModel>> PorPadre { get; set; } = new();
+    [Parameter] public string CodAplicacion       { get; set; } = "";
+    [Parameter] public string CodOpcionAplicacion { get; set; } = "";
+    [Parameter] public bool? ForzarExpandido { get; set; }
+    [Parameter] public EventCallback<(CubsoSunatModel, BotonTreeviewItem)> OnAccion { get; set; }
+
+    private bool _expandido;
+    private List<CubsoSunatModel> Hijos => PorPadre.TryGetValue(Nodo.COD_CUBSO, out var h) ? h : new();
+
+    protected override void OnParametersSet()
+    {
+        if (ForzarExpandido.HasValue) _expandido = ForzarExpandido.Value;
+    }
+
+    private void Toggle()
+    {
+        if (Hijos.Any()) _expandido = !_expandido;
+    }
+}

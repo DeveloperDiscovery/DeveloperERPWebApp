@@ -1,0 +1,433 @@
+@inject ISnackbar Snackbar
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject IAuthService AuthService
+@inject IDialogService DialogService
+@implements IAsyncDisposable
+
+<style>
+    /* MudBlazor le pone padding propio a .mud-dialog-content — lo anulamos y manejamos
+       nosotros el padding interno (24px) para controlar el ancho exacto sin scroll. */
+    .notif-aprob-dlg .mud-dialog-content { padding: 0 !important; }
+    /* Tablas de "Documentos vinculados" e "Historial de aprobaciones": máximo 4 filas
+       visibles, de ahí en adelante cada una scrollea por su cuenta (no toda la ficha). */
+    .notif-scroll-4 { max-height: 168px; overflow-y: auto; }
+    .notif-scroll-4-hist { max-height: 210px; overflow-y: auto; padding-right: 2px; }
+    /* Botones de acción (Firmar/Rechazar/Observar/Posponer) 25% más grandes, agrupados
+       de a 2 en una grilla (en vez de apilados en una sola columna) para que la sección
+       ocupe menos alto en total. */
+    .notif-btn-lg.mud-button-root { padding: 12px 16px !important; font-size: .95rem !important; }
+    .notif-btn-lg .mud-icon-root { font-size: 1.35rem !important; }
+    .notif-botonera { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    /* Oculta la barra de scroll de la ficha (sigue siendo desplazable con la rueda del
+       mouse) — visualmente no debe verse ese scroll a la derecha. */
+    .notif-ficha-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+    .notif-ficha-scroll::-webkit-scrollbar { width: 0; height: 0; }
+    /* Chips discretos de Cargo/Área — junto al notificador y en cada fila del historial. */
+    .chip-meta {
+        display: inline-flex; align-items: center; gap: 3px;
+        font-size: .62rem; font-weight: 700; color: var(--ink-dim, #6b6358);
+        background: rgba(0,0,0,.04); border-radius: 4px; padding: 1px 6px;
+        white-space: nowrap;
+    }
+    .chip-meta b { color: inherit; font-weight: 700; opacity: .75; }
+</style>
+
+@* En vez de forzarle un ancho al Paper del diálogo (MudBlazor termina ganando esa pelea
+   de CSS, como ya vimos), NO le ponemos width al MudDialog — dejamos que se ajuste solo
+   al contenido (shrink-to-fit, igual que hacía el Paper del bosquejo original). El ancho
+   real vive en el div interno de abajo, que sí controlamos por completo. *@
+<MudDialog Class="notif-aprob-dlg" Style="max-width:96vw;max-height:96vh;">
+    <DialogContent>
+        @if (Data?.Ficha is null)
+        {
+            <div class="d-flex flex-column align-center justify-center" style="width:662px;max-width:96vw;height:200px;box-sizing:border-box;gap:8px;opacity:.6;">
+                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Style="font-size:2.5rem;" />
+                <MudText>No se pudo cargar la notificación.</MudText>
+            </div>
+        }
+        else
+        {
+            var f = Data.Ficha;
+            <div style="@($"display:flex;height:88vh;max-height:1093px;width:{(_pdfAbierto ? "1684px" : "662px")};max-width:96vw;transition:width .32s cubic-bezier(.4,0,.2,1);")">
+                @* ── Ficha: ancho fijo, no se achica (igual que el bosquejo original). ── *@
+                <div style="width:662px;flex-shrink:0;display:flex;flex-direction:column;height:100%;
+                            box-sizing:border-box;padding:10px 24px 24px 24px;
+                            @(_pdfAbierto ? "border-right:1px solid var(--line,#d9d2c5);" : "")">
+                    <div style="display:flex;align-items:center;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--line,#d9d2c5);margin-bottom:12px;">
+                        <div style="width:41px;height:41px;border-radius:7px;background:var(--rust,#b8472d);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                            @if (f.IMG_TIPO_NOTIFICACION is { Length: > 0 })
+                            {
+                                <img src="@Base64Img(f.IMG_TIPO_NOTIFICACION)" style="width:18px;height:18px;object-fit:contain;" alt="" />
+                            }
+                            else
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Notifications" Style="color:#fff;font-size:18px;" />
+                            }
+                        </div>
+                        <div style="flex:1;min-width:0;">
+                            <div class="mono" style="font-size:.68rem;opacity:.55;">Notificación · #@f.NUM_NOTIFICACION</div>
+                            <div style="font-weight:800;font-size:.92rem;line-height:1.25;">@f.DES_NOTIFICACION</div>
+                        </div>
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                       OnClick="@(() => MudDialog.Cancel())" />
+                    </div>
+
+                    @* Franja de fecha/estado: fija (fuera del área con scroll), siempre visible. *@
+                    <div class="d-flex gap-2" style="flex-wrap:wrap;flex-shrink:0;padding:10px 0;border-bottom:1px solid var(--line,#d9d2c5);margin-bottom:10px;">
+                        <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.Event">Notificado @f.FEC_NOTIFICACION.ToString("dd/MM/yyyy")</MudChip>
+                        @if (f.FEC_VENCIMIENTO is not null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Icon="@Icons.Material.Filled.HourglassBottom"
+                                     Style="@($"background:{ColorVencimiento(f.FEC_VENCIMIENTO.Value)}22;color:{ColorVencimiento(f.FEC_VENCIMIENTO.Value)};font-weight:700;")">
+                                Vence @f.FEC_VENCIMIENTO.Value.ToString("dd/MM/yyyy")
+                            </MudChip>
+                        }
+                        <MudChip T="string" Size="Size.Small"
+                                 Style="@($"background:{(string.IsNullOrWhiteSpace(f.DES_BACKCOLOR) ? "#e8f5ec" : f.DES_BACKCOLOR)};color:{(string.IsNullOrWhiteSpace(f.DES_FORECOLOR) ? "#1f8a4c" : f.DES_FORECOLOR)};font-weight:700;")">
+                            @f.DES_ESTADO
+                        </MudChip>
+                    </div>
+
+                    <div class="notif-ficha-scroll" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding-right:4px;">
+                        <div style="display:flex;gap:12px;border:1px solid var(--line,#d9d2c5);border-radius:8px;padding:12px;">
+                            <div style="flex:1;font-size:.82rem;line-height:1.5;">
+                                <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;opacity:.5;font-weight:700;margin-bottom:4px;">Información</div>
+                                <div style="white-space:pre-line;">@f.DES_INFORMACION</div>
+                            </div>
+                            <div style="width:115px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;">
+                                @if (f.IMG_FOTO_NOTIFICADOR is { Length: > 0 })
+                                {
+                                    <img src="@Base64Img(f.IMG_FOTO_NOTIFICADOR)" style="width:62px;height:62px;border-radius:50%;object-fit:cover;border:1px solid var(--line,#d9d2c5);" alt="" />
+                                }
+                                else
+                                {
+                                    <MudAvatar Size="Size.Medium" Color="Color.Default">@Iniciales(f.DES_NOTIFICADOR)</MudAvatar>
+                                }
+                                <div style="font-size:.7rem;font-weight:700;line-height:1.2;">@f.DES_NOTIFICADOR</div>
+                                <div style="font-size:.62rem;opacity:.55;word-break:break-all;">@f.DES_CORREO_INSTITUCIONAL</div>
+                                @if (!string.IsNullOrWhiteSpace(f.DES_CARGO) || !string.IsNullOrWhiteSpace(f.DES_AREA))
+                                {
+                                    <div style="display:flex;flex-direction:column;align-items:center;gap:2px;margin-top:2px;">
+                                        @if (!string.IsNullOrWhiteSpace(f.DES_CARGO))
+                                        {
+                                            <span class="chip-meta"><b>Cargo:</b> @f.DES_CARGO</span>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(f.DES_AREA))
+                                        {
+                                            <span class="chip-meta"><b>Área:</b> @f.DES_AREA</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <div>
+                            <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;font-weight:700;opacity:.55;margin-bottom:6px;">Documentos vinculados</div>
+                            @if (Data.Documentos.Count == 0)
+                            {
+                                <div style="font-size:.78rem;opacity:.5;font-style:italic;">Sin documentos vinculados.</div>
+                            }
+                            else
+                            {
+                                @* Máximo 4 filas visibles: de ahí en adelante scrollea esta tabla sola. *@
+                                <div class="notif-scroll-4" style="border:1px solid var(--line,#d9d2c5);border-radius:8px;">
+                                <MudSimpleTable Dense="true" FixedHeader="true" Style="border:none;" Class="grilla-simple">
+                                    <thead>
+                                        <tr><th>#</th><th>Tipo</th><th>N° comprobante</th><th></th></tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var doc in Data.Documentos)
+                                        {
+                                            <tr class="@(_docSeleccionado == doc ? "fila-foco" : "")">
+                                                <td>@doc.NUM_SECUENCIA</td>
+                                                <td>@doc.DES_TIPO_COMPROBANTE_PAGO</td>
+                                                <td class="mono">@doc.NUM_COMPROBANTE_PAGO</td>
+                                                <td>
+                                                    <MudTooltip Text="Ver PDF">
+                                                        <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                                                       Color="Color.Primary" OnClick="@(() => VerPdf(doc))" />
+                                                    </MudTooltip>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </MudSimpleTable>
+                                </div>
+                            }
+                        </div>
+
+                        @if (Data.Historial.Count > 0)
+                        {
+                            <div>
+                                <div style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;font-weight:700;opacity:.55;margin-bottom:6px;">Historial de aprobaciones</div>
+                                <div class="notif-scroll-4-hist" style="display:flex;flex-direction:column;gap:6px;">
+                                    @foreach (var h in Data.Historial)
+                                    {
+                                        var esUsuarioActual = !string.IsNullOrWhiteSpace(_codUsuarioSesion) && h.COD_USUARIO == _codUsuarioSesion;
+                                        <div style="@(esUsuarioActual
+                                                        ? "display:flex;align-items:center;gap:8px;border-radius:6px;padding:6px 10px;background:var(--foco-fondo,#b8472d);color:var(--foco-texto,#fff);"
+                                                        : "display:flex;align-items:center;gap:8px;border:1px solid var(--line,#d9d2c5);border-radius:6px;padding:6px 10px;")">
+                                            @if (h.IMG_FOTO is { Length: > 0 })
+                                            {
+                                                <img src="@Base64Img(h.IMG_FOTO)" style="width:34px;height:34px;border-radius:50%;object-fit:cover;flex-shrink:0;" alt="" />
+                                            }
+                                            else
+                                            {
+                                                <MudAvatar Size="Size.Small" Color="Color.Default">@Iniciales(h.DES_USUARIO)</MudAvatar>
+                                            }
+                                            <div style="flex:1;min-width:0;">
+                                                <div style="font-size:.76rem;font-weight:700;">@h.DES_USUARIO</div>
+                                                <div style="font-size:.66rem;opacity:.55;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                                                    @h.DES_ACCION_CORRESPONDIENTE
+                                                    @if (string.Equals(h.DES_APROBADOR_FINAL, "SI", StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        <span style="color:var(--rust,#b8472d);font-weight:700;"> · Aprobador final</span>
+                                                    }
+                                                </div>
+                                                @if (!string.IsNullOrWhiteSpace(h.DES_CARGO) || !string.IsNullOrWhiteSpace(h.DES_AREA))
+                                                {
+                                                    <div style="display:flex;align-items:center;gap:6px;margin-top:2px;">
+                                                        <span class="chip-meta"><b>Cargo:</b> @(string.IsNullOrWhiteSpace(h.DES_CARGO) ? "-" : h.DES_CARGO)</span>
+                                                        <span class="chip-meta"><b>Área:</b> @(string.IsNullOrWhiteSpace(h.DES_AREA) ? "-" : h.DES_AREA)</span>
+                                                    </div>
+                                                }
+                                            </div>
+                                            @if (!string.IsNullOrWhiteSpace(h.DES_ESTADO))
+                                            {
+                                                <span style="@($"display:flex;align-items:center;gap:4px;font-size:.66rem;font-weight:700;padding:3px 8px;border-radius:6px;flex-shrink:0;background:{(string.IsNullOrWhiteSpace(h.DES_BACKCOLOR) ? "#e8e4dc" : h.DES_BACKCOLOR)};color:{(string.IsNullOrWhiteSpace(h.DES_FORECOLOR) ? "#4a453d" : h.DES_FORECOLOR)};")">
+                                                    @if (h.IMG_ESTADO is { Length: > 0 })
+                                                    {
+                                                        <img src="@Base64Img(h.IMG_ESTADO)" style="width:13px;height:13px;object-fit:contain;" alt="" />
+                                                    }
+                                                    @h.DES_ESTADO
+                                                </span>
+                                            }
+                                            @if (h.FEC_ACTUALIZACION is not null)
+                                            {
+                                                <span class="mono" style="opacity:.5;font-size:.66rem;flex-shrink:0;">@h.FEC_ACTUALIZACION.Value.ToString("dd/MM/yyyy HH:mm")</span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="notif-botonera" style="padding-top:12px;border-top:1px solid var(--line,#d9d2c5);margin-top:12px;">
+                        @if (SoloLectura)
+                        {
+                            @* Consulta (Recibidas/Emitidas): sin acciones, solo Regresar. *@
+                            <MudButton Variant="Variant.Filled" FullWidth="true" Class="notif-btn-lg" StartIcon="@Icons.Material.Filled.ArrowBack"
+                                       Style="background:#8a8478;color:#fff;grid-column:1 / -1;" OnClick="@(() => MudDialog.Cancel())">Regresar</MudButton>
+                        }
+                        else
+                        {
+                            @* ── Acciones disponibles: vienen del resultset de NOTIFICACIONES_EJECUCION,
+                               varían según la notificación/estado — nada de esto es fijo. ── *@
+                            @foreach (var ej in Data.Ejecucion)
+                            {
+                                <MudButton Variant="Variant.Filled" FullWidth="true" Class="notif-btn-lg"
+                                           Style="@(EstiloAccion(ej))"
+                                           OnClick="@(() => Accion(ej))">
+                                    @if (ej.IMG_ESTADO is { Length: > 0 })
+                                    {
+                                        <img src="@Base64Img(ej.IMG_ESTADO)" style="width:15px;height:15px;object-fit:contain;margin-right:6px;" alt="" />
+                                    }
+                                    @ej.DES_ACCION
+                                </MudButton>
+                            }
+                            @* Posponer: acción genérica de la UI (no viene del SP) — solo pospone
+                               el recordatorio, no cambia estado en la notificación. *@
+                            <MudButton Variant="Variant.Filled" FullWidth="true" Class="notif-btn-lg" StartIcon="@Icons.Material.Filled.Schedule"
+                                       Style="background:#8a8478;color:#fff;" OnClick="Posponer">Posponer</MudButton>
+                        }
+                    </div>
+                </div>
+
+                @* ── Panel PDF: solo existe en el DOM si hay un documento seleccionado; se
+                   achica junto con la ventana en vez de cortarse (flex en vez de ancho fijo). ── *@
+                @if (_pdfAbierto && _docSeleccionado is not null)
+                {
+                    <div style="width:1022px;flex-shrink:0;display:flex;flex-direction:column;background:#2b2622;box-sizing:border-box;height:100%;">
+                        <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.1);">
+                            <div style="flex:1;color:#fff;font-size:.8rem;font-weight:700;line-height:1.3;">
+                                @_docSeleccionado.DES_TIPO_COMPROBANTE_PAGO
+                                <span class="mono" style="opacity:.6;font-weight:400;"> · @_docSeleccionado.NUM_COMPROBANTE_PAGO</span>
+                            </div>
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
+                                       Style="color:#fff;border-color:rgba(255,255,255,.25);"
+                                       Disabled="@(string.IsNullOrWhiteSpace(_blobUrl))"
+                                       Href="@_blobUrl" Target="_blank">Descargar</MudButton>
+                        </div>
+                        <div style="flex:1;min-height:400px;">
+                            @if (_pdfCargando)
+                            {
+                                <div style="height:100%;display:flex;align-items:center;justify-content:center;">
+                                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                                </div>
+                            }
+                            else if (string.IsNullOrWhiteSpace(_docSeleccionado.DES_PATHFILE) || string.IsNullOrWhiteSpace(_blobUrl))
+                            {
+                                <div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:rgba(255,255,255,.35);">
+                                    <MudIcon Icon="@Icons.Material.Filled.PictureAsPdf" Style="font-size:2.5rem;" />
+                                    <span class="mono" style="font-size:.78rem;">Este documento no tiene archivo cargado (DES_PATHFILE vacío).</span>
+                                </div>
+                            }
+                            else
+                            {
+                                <iframe src="@_blobUrl" style="width:100%;height:100%;border:none;"></iframe>
+                            }
+                        </div>
+                        <div style="padding:12px 16px;border-top:1px solid rgba(255,255,255,.1);display:flex;justify-content:flex-end;">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowBack"
+                                       OnClick="CerrarPdf">Regresar</MudButton>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>Ya viene cargado desde MainLayout (AbrirNotificacionAprobacion) ANTES de
+    /// abrir el diálogo — así este nace completo, sin un estado de carga intermedio que
+    /// haga "saltar" el tamaño cuando llegan los datos.</summary>
+    [Parameter] public NotificacionAprobacionResult? Data { get; set; }
+
+    /// <summary>Modo solo lectura: oculta las acciones (Firmar/Rechazar/... y Posponer)
+    /// y muestra únicamente un botón "Regresar". Usado por el módulo de consulta de
+    /// notificaciones (Recibidas/Emitidas).</summary>
+    [Parameter] public bool SoloLectura { get; set; }
+
+    private bool _pdfAbierto;
+    private bool _pdfCargando;
+    private NotificacionAprobacionDocumento? _docSeleccionado;
+    private string? _blobUrl;
+    private string? _codUsuarioSesion;
+
+    /// <summary>Verde = falta más de un día, amarillo = vence hoy, rojo = ya venció.</summary>
+    private string ColorVencimiento(DateTime fecVencimiento)
+    {
+        var dias = fecVencimiento.Date.Subtract(DateTime.Today).Days;
+        if (dias > 0) return "#2f8f5b";
+        if (dias == 0) return "#c27803";
+        return "#d0342c";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var sesion = await AuthService.GetSesionAsync();
+        _codUsuarioSesion = sesion?.COD_USUARIO;
+    }
+
+    /// <summary>
+    /// DES_PATHFILE viene como ruta UNC (\\servidor\Recurso\...) desde la BD. Un <iframe>
+    /// no puede cargar rutas UNC, y poner la URL http:// equivalente del servidor de
+    /// archivos directo en el iframe choca con Mixed Content (la app corre en HTTPS).
+    /// En vez de eso: la API (HTTPS) hace de proxy — lee el archivo de la ruta UNC del
+    /// lado del servidor y lo devuelve como bytes; acá se arma un blob: URL con esos bytes,
+    /// que el navegador sí puede mostrar en el iframe sin bloqueos.
+    /// </summary>
+    private async Task VerPdf(NotificacionAprobacionDocumento doc)
+    {
+        await LiberarBlobActual();
+        _docSeleccionado = doc;
+        _pdfAbierto = true;
+
+        if (string.IsNullOrWhiteSpace(doc.DES_PATHFILE)) return;
+
+        _pdfCargando = true;
+        StateHasChanged();
+        try
+        {
+            var url = $"api/v1/entorno/documentos/ver?ruta={Uri.EscapeDataString(doc.DES_PATHFILE)}";
+            var bytes = await Http.GetByteArrayAsync(url);
+            _blobUrl = await JS.InvokeAsync<string>("blobViewer.crear", bytes, "application/pdf");
+        }
+        catch (Exception ex)
+        {
+            await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(NotificacionAprobacionDialog));
+        }
+        finally
+        {
+            _pdfCargando = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LiberarBlobActual()
+    {
+        if (_blobUrl is null) return;
+        try { await JS.InvokeVoidAsync("blobViewer.liberar", _blobUrl); } catch { }
+        _blobUrl = null;
+    }
+
+    /// <summary>Cierra el panel del PDF (no todo el diálogo) — el diálogo se contrae de
+    /// vuelta a su ancho original, manteniéndose centrado en pantalla.</summary>
+    private async Task CerrarPdf()
+    {
+        await LiberarBlobActual();
+        _pdfAbierto = false;
+        _docSeleccionado = null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("blobViewer.liberarTodo"); } catch { }
+    }
+
+    /// <summary>Pospone el recordatorio de esta notificación — acción de la UI, no del SP
+    /// (no cambia estado; solo debería posponer cuándo se le vuelve a avisar al usuario).</summary>
+    private void Posponer()
+    {
+        // TODO: falta definir/almacenar dónde se guarda el "posponer hasta" — por ahora
+        // solo cierra el diálogo.
+        Snackbar.Add("Notificación pospuesta.", Severity.Info);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private bool _ejecutandoAccion;
+
+    private async Task Accion(NotificacionAprobacionEjecucion ej)
+    {
+        if (_ejecutandoAccion || string.IsNullOrWhiteSpace(ej.DES_COMMANDSQL)) return;
+        _ejecutandoAccion = true;
+        var dto = new EjecutarSentenciaDto { DES_SENTENCIA = ej.DES_COMMANDSQL };
+        var resp = await Http.PostAsJsonAsync(ApiRoutes.Entorno.EjecutarSentencias, dto);
+        _ejecutandoAccion = false;
+        if (resp.IsSuccessStatusCode)
+        {
+            Snackbar.Add($"\"{ej.DES_ACCION}\" ejecutado.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        else
+        {
+            var msg = await resp.Content.ReadAsStringAsync();
+            Snackbar.Add($"No se pudo ejecutar \"{ej.DES_ACCION}\": {msg}", Severity.Error);
+        }
+    }
+
+    /// <summary>Color real del botón, tal como viene del SP (DES_BACKCOLOR/DES_FORECOLOR
+    /// del estado asociado a la acción) — con un gris neutro de respaldo si vinieran vacíos.</summary>
+    private static string EstiloAccion(NotificacionAprobacionEjecucion ej)
+    {
+        var back = string.IsNullOrWhiteSpace(ej.DES_BACKCOLOR) ? "#6b6358" : ej.DES_BACKCOLOR;
+        var fore = string.IsNullOrWhiteSpace(ej.DES_FORECOLOR) ? "#fff" : ej.DES_FORECOLOR;
+        return $"background:{back};color:{fore};";
+    }
+
+    private static string Base64Img(byte[]? bytes) =>
+        bytes is { Length: > 0 } ? $"data:image/png;base64,{Convert.ToBase64String(bytes)}" : "";
+
+    private static string Iniciales(string? nombre)
+    {
+        if (string.IsNullOrWhiteSpace(nombre)) return "?";
+        var partes = nombre.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return partes.Length >= 2 ? $"{partes[0][0]}{partes[1][0]}".ToUpperInvariant()
+                                   : partes[0][0].ToString().ToUpperInvariant();
+    }
+}

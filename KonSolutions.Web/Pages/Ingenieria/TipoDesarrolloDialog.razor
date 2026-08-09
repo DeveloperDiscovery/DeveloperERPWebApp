@@ -1,0 +1,124 @@
+@using TipoDesarrolloModel = KONSolutions.Shared.Models.Ingenieria.TipoDesarrollo
+@using TipoDesarrolloRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(640px,95vw);">
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Codigo="@Item?.COD_TIPO_DESARROLLO" Descripcion="@Item?.DES_TIPO_DESARROLLO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+
+            @* Layout con flex en vez de MudGrid: MudItem agrega un gutter horizontal propio,
+               así que los campos de la fila quedaban indentados respecto de la Descripción
+               (que va fuera de la grilla) y el borde izquierdo no coincidía.
+               Label explícito en los CampoTexto: el Diccionario de Etiquetas todavía no tiene
+               rótulo para estas columnas nuevas y salían sin etiqueta. *@
+            <div class="d-flex gap-3" style="align-items:flex-start;">
+                <div style="flex:1;min-width:0;">
+                    @* La clase llega fija desde la pantalla: forma parte de la clave compuesta,
+                       así que nunca se edita desde el diálogo. *@
+                    <MudTextField Value="@ClaseTexto" Label="Clase de desarrollo"
+                                  Variant="Variant.Outlined" Disabled="true"
+                                  Class="mb-3" Margin="Margin.Normal" />
+                </div>
+                <div style="width:180px;flex-shrink:0;">
+                    <CampoTexto Tabla="INGENIERIA.TIPOS_DESARROLLO" Columna="COD_TIPO_DESARROLLO"
+                                Label="Código"
+                                @bind-Value="_model.COD_TIPO_DESARROLLO"
+                                Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+                </div>
+            </div>
+
+            <CampoTexto Tabla="INGENIERIA.TIPOS_DESARROLLO" Columna="DES_TIPO_DESARROLLO"
+                        Label="Descripción"
+                        @bind-Value="_model.DES_TIPO_DESARROLLO"
+                        Disabled="_readonly" Obligatorio="true" />
+
+            @* Sin EstadoCombo ni PanelAuditoria: la tabla solo tiene los tres códigos. *@
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public TipoDesarrolloModel? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+    [Parameter] public string CodClaseDesarrollo { get; set; } = "";
+    [Parameter] public string DesClaseDesarrollo { get; set; } = "";
+
+    private TipoDesarrolloModel _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private string ClaseTexto => string.IsNullOrWhiteSpace(DesClaseDesarrollo)
+        ? CodClaseDesarrollo
+        : $"{CodClaseDesarrollo} - {DesClaseDesarrollo}";
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+        _model.COD_CLASE_DESARROLLO = CodClaseDesarrollo;
+    }
+
+    private void MapearDesdeModelo(TipoDesarrolloModel m)
+    {
+        _model = new TipoDesarrolloModel
+        {
+            COD_CLASE_DESARROLLO = m.COD_CLASE_DESARROLLO,
+            COD_TIPO_DESARROLLO  = m.COD_TIPO_DESARROLLO,
+            DES_TIPO_DESARROLLO  = m.DES_TIPO_DESARROLLO,
+            DES_CLASE_DESARROLLO = m.DES_CLASE_DESARROLLO,
+        };
+    }
+
+    /// <summary>Trae el registro fresco desde SHOWBYID — evita mostrar datos
+    /// desactualizados de la grilla al Modificar/Eliminar/Ver.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        try
+        {
+            var url = $"{TipoDesarrolloRoute.TiposDesarrollo}" +
+                      $"/{Uri.EscapeDataString(_model.COD_CLASE_DESARROLLO)}" +
+                      $"/{Uri.EscapeDataString(_model.COD_TIPO_DESARROLLO)}";
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<TipoDesarrolloModel>>(url);
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        var ruta = TipoDesarrolloRoute.TiposDesarrollo;
+
+        if (Modo == CrudModo.Delete)
+        {
+            var url = $"{ruta}/{Uri.EscapeDataString(_model.COD_CLASE_DESARROLLO)}/{Uri.EscapeDataString(_model.COD_TIPO_DESARROLLO)}";
+            var rd = await Http.DeleteAsync(url);
+            _saving = false;
+            if (rd.IsSuccessStatusCode) { Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(TipoDesarrolloDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+
+        // El SP INSERT es upsert: sirve tanto para crear como para modificar.
+        var dto = new { _model.COD_CLASE_DESARROLLO, _model.COD_TIPO_DESARROLLO, _model.DES_TIPO_DESARROLLO };
+        var resp = await Http.PostAsJsonAsync(ruta, dto);
+        _saving = false;
+        if (resp.IsSuccessStatusCode) { Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(TipoDesarrolloDialog), nameof(Submit));
+    }
+}

@@ -1,0 +1,322 @@
+@* Diálogo "Ayuda Memoria" de Versiones de Diseño (INGENIERIA.DISENOS_VERSIONES_MEMORIAS)
+   — gemelo de DisenosMemoriasDialog.razor, pero la bitácora cuelga de una versión concreta
+   (COD_DISENO + NUM_VERSION). Cada fila es independiente (NUM_SECUENCIA), con su propio
+   ✎/🗑 y auditoría, y el texto admite dictado por voz (wwwroot/js/dictadoVoz.js).
+   Si la versión está ANULADA ('ANU'), las memorias quedan en solo lectura. *@
+@using DisenoVersionModel = KONSolutions.Shared.Models.Ingenieria.DisenoVersion
+@using MemoriaModel = KONSolutions.Shared.Models.Ingenieria.DisenosVersionesMemorias
+@using IngenieriaRoute = KONSolutions.Web.Services.ApiRoutes.Ingenieria
+@using System.Net.Http.Json
+@implements IAsyncDisposable
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog Style="width:min(920px,92vw);min-height:55vh;">
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.RecordVoiceOver" />
+            <span>Ayuda Memoria · @Item?.DES_DISENO · versión @Item?.NUM_VERSION</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid Class="align-end mb-3">
+            <MudItem xs="12" sm="3">
+                <MudTextField Value="@Item?.COD_DISENO" Label="Código de Diseño" ReadOnly="true" Variant="Variant.Outlined" Class="mb-0" />
+            </MudItem>
+            <MudItem xs="12" sm="2">
+                <MudTextField Value="@Item?.NUM_VERSION.ToString()" Label="Versión" ReadOnly="true" Variant="Variant.Outlined" Class="mb-0" />
+            </MudItem>
+            <MudItem xs="12" sm="7">
+                <MudTextField Value="@Item?.DES_VERSION" Label="Descripción de la Versión" ReadOnly="true" Variant="Variant.Outlined" Class="mb-0" />
+            </MudItem>
+        </MudGrid>
+
+        @if (_soloLectura)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                La versión está anulada: las memorias solo se pueden consultar.
+            </MudAlert>
+        }
+
+        <div class="d-flex align-center gap-3 mb-3">
+            <BarraBusqueda @bind-Value="_search" Placeholder="Buscar en las memorias..." DebounceInterval="400" MaxWidth="360px" />
+            <MudSpacer />
+            @if (!_mostrarForm && !_soloLectura)
+            {
+                <MudButton StartIcon="@Icons.Material.Filled.Add" Variant="Variant.Filled" Style="@EstiloBotonConfirmar" OnClick="AbrirNueva">
+                    Nueva memoria
+                </MudButton>
+            }
+        </div>
+
+        @if (_cargando)
+        {
+            <MudProgressLinear Indeterminate="true" Class="mb-3" />
+        }
+
+        @if (_mostrarForm)
+        {
+            <MudPaper Outlined="true" Class="pa-4 mb-4" Style="border-style:dashed;">
+                <div class="d-flex align-center justify-space-between mb-2">
+                    <MudText Typo="Typo.subtitle2">@(_editando ? $"Editando memoria Nº {_filaSecuencia}" : "Nueva memoria")</MudText>
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="CerrarForm" />
+                </div>
+
+                <div style="position:relative;">
+                    <MudTextField @bind-Value="_textoMemoria" Immediate="true" Variant="Variant.Outlined" Lines="10"
+                                  Placeholder="Escribe o dicta la memoria — se respetan los saltos de línea..."
+                                  Style="width:100%;" Class="mb-0" />
+                    <MudTooltip Text="@(_dictadoDisponible ? (_grabando ? "Detener dictado" : "Dictar por micrófono") : "Este navegador no soporta dictado por voz")">
+                        <MudIconButton Icon="@(_grabando ? Icons.Material.Filled.Stop : Icons.Material.Filled.Mic)"
+                                       Color="@(_grabando ? Color.Error : Color.Primary)"
+                                       Variant="Variant.Filled"
+                                       Disabled="!_dictadoDisponible"
+                                       Style="position:absolute;top:10px;right:10px;"
+                                       OnClick="ToggleDictado" />
+                    </MudTooltip>
+                </div>
+
+                @* Botones simples, NO CrudDialogActions: su Cancelar dispara dialogAnim.cerrar(),
+                   que anima el MudDialog entero como si fuera a cerrarse — acá solo se oculta el
+                   formulario interno, con lo que el overlay quedaría bloqueando la página. *@
+                <div class="d-flex align-center gap-3 mt-2">
+                    <MudText Typo="Typo.caption" Class="mono" Style="opacity:.55;">@(_textoMemoria?.Length ?? 0) caracteres</MudText>
+                    @if (_grabando)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text" Icon="@Icons.Material.Filled.FiberManualRecord">Escuchando…</MudChip>
+                    }
+                    <MudSpacer />
+                    <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel" Style="@EstiloBotonCancelar" OnClick="CerrarForm">
+                        Cancelar
+                    </MudButton>
+                    <MudButton Variant="Variant.Filled" StartIcon="@(_editando ? Icons.Material.Filled.Save : Icons.Material.Filled.NoteAdd)"
+                               Style="@EstiloBotonConfirmar" Disabled="@(_guardando || string.IsNullOrWhiteSpace(_textoMemoria))" OnClick="GuardarAsync">
+                        @(_editando ? "Modificar" : "Crear")
+                    </MudButton>
+                </div>
+            </MudPaper>
+        }
+
+        @if (!_cargando && _visibles.Count == 0)
+        {
+            <MudText Class="pa-6 mono" Style="opacity:.5;text-align:center;">Sin memorias registradas.</MudText>
+        }
+        else
+        {
+            <div class="d-flex flex-column gap-3">
+                @foreach (var m in _visibles)
+                {
+                    <MudPaper Outlined="true" Class="pa-3 d-flex gap-3">
+                        <div class="mono" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;background:var(--paper-2,#f2ece0);border:1px solid var(--line,rgba(0,0,0,.14));display:flex;align-items:center;justify-content:center;font-size:.78rem;opacity:.65;">
+                            @m.NUM_SECUENCIA
+                        </div>
+                        <div style="flex:1;min-width:0;">
+                            <MudText Typo="Typo.caption" Class="mono" Style="opacity:.55;display:block;margin-bottom:4px;">
+                                @(m.FEC_REGISTRO?.ToString("dd/MM/yyyy HH:mm")) · @m.COD_USUARIO_REGISTRO
+                                @if (m.FEC_ACTUALIZACION is not null && m.FEC_ACTUALIZACION != m.FEC_REGISTRO)
+                                {
+                                    <text> · editado @(m.FEC_ACTUALIZACION?.ToString("dd/MM/yyyy HH:mm"))</text>
+                                }
+                            </MudText>
+                            <div style="white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font-size:.9rem;line-height:1.55;">@m.DES_MEMORIA</div>
+                        </div>
+                        <div class="d-flex flex-column gap-1" style="flex-shrink:0;">
+                            @if (!_soloLectura)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Info" OnClick="@(() => AbrirEditar(m))" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => EliminarAsync(m))" />
+                            }
+                            <PanelAuditoria Class=""
+                                CodUsuarioRegistro="@m.COD_USUARIO_REGISTRO" CodEstacionRegistro="@m.COD_ESTACION_REGISTRO" FecRegistro="@m.FEC_REGISTRO"
+                                CodUsuarioActualizacion="@m.COD_USUARIO_ACTUALIZACION" CodEstacionActualizacion="@m.COD_ESTACION_ACTUALIZACION" FecActualizacion="@m.FEC_ACTUALIZACION" />
+                        </div>
+                    </MudPaper>
+                }
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => MudDialog.Close(DialogResult.Ok(true)))" Variant="Variant.Filled"
+                   Style="font-weight:700;background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cerrar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public DisenoVersionModel? Item { get; set; }
+
+    private List<MemoriaModel> _items = new();
+    private string _search = "";
+    private bool _cargando = true;
+
+    // Regla general de la app: si la versión está ANULADA ('ANU'), sus memorias quedan
+    // congeladas — se pueden leer, pero no crear, editar ni eliminar.
+    private bool _soloLectura => EstadoAlias.EsAnulado(Item?.COD_ESTADO_ALIAS);
+
+    // NUM_VERSION es int? en DisenoVersion pero short en la tabla de memorias (smallint).
+    private short NumVersion => (short)(Item?.NUM_VERSION ?? 0);
+
+    // Mismo estándar de color que el resto de la app (Configuración General →
+    // DES_BUTTON_BACKCOLOR/FORECOLOR), ver CrudDialogActions.razor.
+    private const string EstiloBotonConfirmar =
+        "font-weight:700;background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));";
+    private const string EstiloBotonCancelar =
+        "font-weight:700;background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));";
+    private bool _guardando;
+
+    private bool _mostrarForm;
+    private bool _editando;
+    private short _filaSecuencia;
+    private string? _textoMemoria;
+
+    private bool _grabando;
+    private bool _dictadoDisponible = true;
+    private DotNetObjectReference<DisenosVersionesMemoriasDialog>? _dotNetRef;
+
+    private List<MemoriaModel> _visibles => string.IsNullOrWhiteSpace(_search)
+        ? _items
+        : _items.Where(m => (m.DES_MEMORIA ?? "").Contains(_search, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _dotNetRef = DotNetObjectReference.Create(this);
+        try { _dictadoDisponible = await JS.InvokeAsync<bool>("dictadoVoz.disponible"); }
+        catch { _dictadoDisponible = false; }
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        if (Item is null || string.IsNullOrWhiteSpace(Item.COD_DISENO)) return;
+        _cargando = true;
+        try
+        {
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<List<MemoriaModel>>>(
+                $"{IngenieriaRoute.DisenosVersionesMemorias}?codDiseno={Uri.EscapeDataString(Item.COD_DISENO)}&numVersion={NumVersion}");
+            _items = (r?.Data ?? new()).OrderByDescending(m => m.NUM_SECUENCIA).ToList();
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(DisenosVersionesMemoriasDialog), nameof(Load));
+            Snackbar.Add("No se pudo cargar la información. Ver detalle en el log de errores.", Severity.Error);
+        }
+        finally { _cargando = false; }
+    }
+
+    private void AbrirNueva()
+    {
+        if (_soloLectura) return;
+        _editando = false;
+        _filaSecuencia = (short)((_items.Count == 0 ? 0 : _items.Max(x => x.NUM_SECUENCIA)) + 1);
+        _textoMemoria = "";
+        _mostrarForm = true;
+    }
+
+    private void AbrirEditar(MemoriaModel m)
+    {
+        if (_soloLectura) return;
+        _editando = true;
+        _filaSecuencia = m.NUM_SECUENCIA;
+        _textoMemoria = m.DES_MEMORIA;
+        _mostrarForm = true;
+    }
+
+    private async Task CerrarForm()
+    {
+        if (_grabando) await DetenerDictadoAsync();
+        _mostrarForm = false;
+    }
+
+    private async Task GuardarAsync()
+    {
+        if (Item is null || _soloLectura || string.IsNullOrWhiteSpace(_textoMemoria)) return;
+        if (_grabando) await DetenerDictadoAsync();
+        _guardando = true;
+        try
+        {
+            var dto = new KONSolutions.Shared.Models.Ingenieria.DisenosVersionesMemoriasInsertDto
+            {
+                COD_DISENO = Item.COD_DISENO,
+                NUM_VERSION = NumVersion,
+                NUM_SECUENCIA = _filaSecuencia,
+                DES_MEMORIA = _textoMemoria
+            };
+            var resp = await Http.PostAsJsonAsync(IngenieriaRoute.DisenosVersionesMemorias, dto);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Memoria guardada.", Severity.Success);
+                _mostrarForm = false;
+                await Load();
+            }
+            else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(DisenosVersionesMemoriasDialog), nameof(GuardarAsync));
+        }
+        finally { _guardando = false; }
+    }
+
+    private async Task EliminarAsync(MemoriaModel m)
+    {
+        if (Item is null || _soloLectura) return;
+        var confirmar = await DialogService.ShowMessageBox("Confirmar", "¿Eliminar esta memoria?", yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirmar != true) return;
+        var resp = await Http.DeleteAsync($"{IngenieriaRoute.DisenosVersionesMemorias}/{Uri.EscapeDataString(Item.COD_DISENO)}/{NumVersion}/{m.NUM_SECUENCIA}");
+        if (resp.IsSuccessStatusCode) { Snackbar.Add("Memoria eliminada.", Severity.Success); await Load(); }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(DisenosVersionesMemoriasDialog), nameof(EliminarAsync));
+    }
+
+    // ── Dictado por voz ──────────────────────────────────────────────────────
+    private async Task ToggleDictado()
+    {
+        if (_grabando) await DetenerDictadoAsync();
+        else await IniciarDictadoAsync();
+    }
+
+    private async Task IniciarDictadoAsync()
+    {
+        _grabando = true;
+        try { await JS.InvokeVoidAsync("dictadoVoz.iniciar", _dotNetRef, "es-PE"); }
+        catch (Exception ex)
+        {
+            _grabando = false;
+            await ErrorLog.LogAsync(ex, nameof(DisenosVersionesMemoriasDialog), nameof(IniciarDictadoAsync));
+        }
+    }
+
+    private async Task DetenerDictadoAsync()
+    {
+        _grabando = false;
+        try { await JS.InvokeVoidAsync("dictadoVoz.detener"); } catch { /* diálogo ya se puede haber cerrado */ }
+    }
+
+    // Cada frase reconocida se AGREGA al texto ya escrito (con salto de línea si había
+    // contenido), nunca lo reemplaza — se puede alternar voz y teclado libremente.
+    [JSInvokable]
+    public void OnDictadoTexto(string texto)
+    {
+        _textoMemoria = string.IsNullOrWhiteSpace(_textoMemoria) ? texto : $"{_textoMemoria}\n{texto}";
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnDictadoError(string mensaje)
+    {
+        _grabando = false;
+        Snackbar.Add(mensaje, Severity.Warning);
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnDictadoFin()
+    {
+        _grabando = false;
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_grabando) { try { await JS.InvokeVoidAsync("dictadoVoz.detener"); } catch { } }
+        _dotNetRef?.Dispose();
+    }
+}

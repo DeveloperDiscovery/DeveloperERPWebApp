@@ -1,0 +1,100 @@
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <div class="d-flex align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Secondary" />
+            <MudText Typo="Typo.h6">Cargar países desde JSON</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudText Class="mono mb-2" Style="opacity:.6;font-size:.82rem;">
+            Pegue el array JSON de países. Se insertarán los nuevos y se actualizarán los que tengan cambios.
+        </MudText>
+        <CampoTextoEstable @bind-Value="_json" Label="JSON Array [ {...}, {...} ]"
+                      Variant="Variant.Outlined" Lines="12"
+                      Placeholder='[{"uuid":"...","names":{...},"codes":{...},...}]'
+                      Class="mono" Style="font-size:.78rem;" />
+
+        @if (_resultado is not null)
+        {
+            <MudAlert Severity="@(_resultado.Errores > 0 ? Severity.Warning : Severity.Success)"
+                      Dense="true" Class="mt-3">
+                <strong>Insertados:</strong> @_resultado.Insertados &nbsp;
+                <strong>Actualizados:</strong> @_resultado.Actualizados &nbsp;
+                <strong>Sin cambios:</strong> @_resultado.SinCambios &nbsp;
+                @if (_resultado.Errores > 0)
+                { <span><strong>Errores:</strong> @_resultado.Errores</span> }
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(async () => { try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { } MudDialog.Cancel(); })"
+                   Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Cancel"
+                   Style="background-color:var(--boton-forecolor,var(--paper));color:var(--boton-backcolor,var(--ink));">Cancelar</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Secondary"
+                   StartIcon="@Icons.Material.Filled.CloudUpload"
+                   OnClick="Procesar" Disabled="@(_procesando || string.IsNullOrWhiteSpace(_json))">
+            @if (_procesando) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            Procesar
+        </MudButton>
+        @if (_resultado is not null)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Check"
+                       Style="background-color:var(--boton-backcolor,var(--ink));color:var(--boton-forecolor,var(--paper));"
+                       OnClick="@(async () => { try { await JS.InvokeVoidAsync("dialogAnim.cerrar"); } catch { } MudDialog.Close(DialogResult.Ok(true)); })">
+                Aceptar y recargar
+            </MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _json = "";
+    private bool   _procesando;
+    private UploadResultado? _resultado;
+
+    private async Task Procesar()
+    {
+        if (string.IsNullOrWhiteSpace(_json)) return;
+        _procesando = true;
+        _resultado  = null;
+        StateHasChanged();
+        try
+        {
+            var resp = await Http.PostAsJsonAsync(
+                $"{ApiRoutes.Estandar.Paises}/upload",
+                new { JsonArray = _json });
+
+            if (resp.IsSuccessStatusCode)
+            {
+                var r = await resp.Content.ReadFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<UploadResultado>>(
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                _resultado = r?.Data;
+                Snackbar.Add("JSON procesado correctamente.", Severity.Success);
+            }
+            else
+            {
+                await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(PaisesUploadDialog), nameof(Procesar));
+            }
+        }
+        catch (Exception ex) { await ErrorDialogHelper.MostrarMensajeAsync(ex.Message, DialogService, nameof(PaisesUploadDialog)); await ErrorLog.LogAsync(ex, nameof(PaisesUploadDialog), nameof(Procesar)); }
+        _procesando = false;
+    }
+
+    private class UploadResultado
+    {
+        public int Insertados   { get; set; }
+        public int Actualizados { get; set; }
+        public int SinCambios   { get; set; }
+        public int Errores      { get; set; }
+    }
+}

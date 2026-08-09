@@ -1,0 +1,82 @@
+@using KONSolutions.Shared.Models.Entorno
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject IDialogService DialogService
+@inject EtiquetasService EtiquetasSvc
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo" Descripcion="@Item?.DES_ETIQUETA" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <CampoTexto Tabla="ENTORNO.DICCIONARIO_ETIQUETAS" Columna="COD_ETIQUETA"
+                        Label="Código" @bind-Value="_model.COD_ETIQUETA"
+                        Disabled="@(!_esNuevo || _readonly)" Obligatorio="@_esNuevo" />
+            <CampoTexto Tabla="ENTORNO.DICCIONARIO_ETIQUETAS" Columna="DES_ETIQUETA"
+                        Label="Descripción" @bind-Value="_model.DES_ETIQUETA"
+                        Disabled="_readonly" Obligatorio="true" IgnorarModoTexto="true" />
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public DiccionarioEtiqueta? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private DiccionarioEtiqueta _model = new();
+    private bool _esNuevo, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    protected override void OnInitialized()
+    {
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(DiccionarioEtiqueta m) =>
+        _model = new DiccionarioEtiqueta { COD_ETIQUETA = m.COD_ETIQUETA, DES_ETIQUETA = m.DES_ETIQUETA };
+
+    /// <summary>Trae el registro fresco desde SHOWBYID — se usa al abrir el diálogo
+    /// (Modificar/Eliminar/Ver, nunca Crear) para no mostrar datos desactualizados de la grilla.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        var fresco = await Http.SafeGetAsync<DiccionarioEtiqueta>($"{ApiRoutes.Entorno.DiccionarioEtiquetas}/{Uri.EscapeDataString(_model.COD_ETIQUETA)}");
+        if (fresco is not null) MapearDesdeModelo(fresco);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var rd = await Http.DeleteAsync($"{ApiRoutes.Entorno.DiccionarioEtiquetas}/{Uri.EscapeDataString(_model.COD_ETIQUETA)}");
+            _saving = false;
+            if (rd.IsSuccessStatusCode)
+            {
+                await EtiquetasSvc.CargarAsync(forzar: true);
+                Snackbar.Add("Eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true));
+            }
+            else await ErrorDialogHelper.MostrarAsync(rd, ErrorLog, DialogService, nameof(DiccionarioEtiquetasDialog), nameof(Submit), "No se pudo eliminar el registro");
+            return;
+        }
+        // PROC_ENTORNO_DICCIONARIO_ETIQUETAS_INSERT es upsert — siempre POST.
+        var resp = await Http.PostAsJsonAsync(ApiRoutes.Entorno.DiccionarioEtiquetas, _model);
+        _saving = false;
+        if (resp.IsSuccessStatusCode)
+        {
+            await EtiquetasSvc.CargarAsync(forzar: true);
+            Snackbar.Add(_esNuevo ? "Creado." : "Modificado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true));
+        }
+        else await ErrorDialogHelper.MostrarAsync(resp, ErrorLog, DialogService, nameof(DiccionarioEtiquetasDialog), nameof(Submit));
+    }
+}

@@ -1,0 +1,116 @@
+@using System.Net.Http.Json
+@inject CatalogoService<EstadoEstandar, EstadoEstandarDto> Service
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<MudDialog>
+    <TitleContent>
+        <CrudDialogTitle Modo="Modo"
+                         Descripcion="@Item?.DES_ESTADO" />
+    </TitleContent>
+    <DialogContent>
+        <EditForm Model="_model" OnValidSubmit="Submit">
+            <DataAnnotationsValidator />
+            <MudGrid>
+                <MudItem xs="12" sm="8">
+                    <CampoTexto Tabla="ESTANDAR.ESTADOS_ESTANDAR" Columna="DES_ESTADO"
+                                @bind-Value="_model.DES_ESTADO" Disabled="_readonly" Class="" />
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <CampoTexto Tabla="ESTANDAR.ESTADOS_ESTANDAR" Columna="COD_ESTADO_ALIAS"
+                                @bind-Value="_model.COD_ESTADO_ALIAS" Disabled="_readonly" Class="" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudText Typo="Typo.caption" Class="mono mb-1" Style="opacity:.6;">Color de fondo</MudText>
+                    <ColorConSwatch @bind-Text="_model.DES_BACKCOLOR" Label="Fondo" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudText Typo="Typo.caption" Class="mono mb-1" Style="opacity:.6;">Color de texto (Font)</MudText>
+                    <ColorConSwatch @bind-Text="_model.DES_FORECOLOR" Label="Texto" Disabled="_readonly" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudText Typo="Typo.caption" Class="mono mb-1" Style="opacity:.6;">Vista previa:</MudText>
+                    <MudChip T="string" Style="@($"background-color:{_model.DES_BACKCOLOR};color:{_model.DES_FORECOLOR};")">
+                        @(string.IsNullOrWhiteSpace(_model.DES_ESTADO) ? "Estado" : _model.DES_ESTADO)
+                    </MudChip>
+                </MudItem>
+                <MudItem xs="12">
+                    <ImagePicker Image="_model.IMG_PICTURE" ImageChanged="@(v => _model.IMG_PICTURE = v)" Label="Imagen del estado estándar" />
+                </MudItem>
+            </MudGrid>
+            <CrudDialogActions Modo="Modo" Saving="_saving"
+                               OnCancel="@(() => MudDialog.Cancel())" />
+        </EditForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public EstadoEstandar? Item { get; set; }
+    [Parameter] public CrudModo Modo { get; set; } = CrudModo.Create;
+
+    private EstadoEstandarDto _model = new();
+    private bool _isEdit, _saving;
+    private bool _readonly => Modo == CrudModo.Read || Modo == CrudModo.Delete;
+
+    private bool _esNuevo;
+
+    protected override void OnInitialized()
+    {
+        _isEdit = Modo == CrudModo.Update;
+        _esNuevo = Modo == CrudModo.Create;
+        if (Item is not null) MapearDesdeModelo(Item);
+    }
+
+    private void MapearDesdeModelo(EstadoEstandar m)
+    {
+        _model = new EstadoEstandarDto
+        {
+            COD_INDICE = m.COD_INDICE,
+            COD_ESTADO = m.COD_ESTADO,
+            DES_ESTADO = m.DES_ESTADO ?? "",
+            COD_ESTADO_ALIAS = m.COD_ESTADO_ALIAS,
+            DES_BACKCOLOR = string.IsNullOrWhiteSpace(m.DES_BACKCOLOR) ? "#FFFFFF" : m.DES_BACKCOLOR,
+            DES_FORECOLOR = string.IsNullOrWhiteSpace(m.DES_FORECOLOR) ? "#000000" : m.DES_FORECOLOR,
+            IMG_PICTURE = m.IMG_PICTURE
+        };
+    }
+
+    /// <summary>Trae el Estado Estándar fresco desde SHOWBYID (clave compuesta
+    /// COD_INDICE/COD_ESTADO) — evita mostrar datos desactualizados de la grilla al
+    /// Modificar/Eliminar/Ver. Se usa HttpClient directo (no Service.GetByIdAsync) porque
+    /// esa ruta necesita dos segmentos, no uno solo.</summary>
+    private async Task RecargarDesdeShowbyidAsync()
+    {
+        try
+        {
+            var url = $"{ApiRoutes.Estandar.EstadosEstandar}/{Uri.EscapeDataString(_model.COD_INDICE?.ToString() ?? "")}/{Uri.EscapeDataString(_model.COD_ESTADO?.ToString() ?? "")}";
+            var r = await Http.GetFromJsonAsync<KONSolutions.Shared.Common.ApiResponse<EstadoEstandar>>(url);
+            if (r?.Data is not null) MapearDesdeModelo(r.Data);
+        }
+        catch { }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!_esNuevo && Item is not null) await RecargarDesdeShowbyidAsync();
+    }
+
+    private async Task Submit()
+    {
+        _saving = true;
+        if (Modo == CrudModo.Delete)
+        {
+            var (okd, msgd) = await Service.EliminarAsync($"{_model.COD_INDICE}/{_model.COD_ESTADO}");
+            _saving = false;
+            if (okd) { Snackbar.Add("Estado estándar eliminado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+            else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(EstadoEstandarDialog));
+            return;
+        }
+        var (ok, msg) = await Service.GuardarAsync(_model, _esNuevo);
+        _saving = false;
+        if (ok) { Snackbar.Add(_isEdit ? "Estado estándar actualizado." : "Estado estándar creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
+        else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(EstadoEstandarDialog));
+    }
+}
