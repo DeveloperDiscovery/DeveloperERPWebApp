@@ -394,9 +394,18 @@
 
     private async Task Accion(NotificacionAprobacionEjecucion ej)
     {
-        if (_ejecutandoAccion || string.IsNullOrWhiteSpace(ej.DES_COMMANDSQL)) return;
+        // Ya no se manda DES_COMMANDSQL: la API resuelve el comando real del lado del
+        // servidor a partir de NUM_NOTIFICACION + DES_ACCION, releyendo la notificación
+        // (ver EjecutarSentenciasService). El chequeo de DES_COMMANDSQL acá es solo para
+        // no mostrar el botón como accionable si el admin no configuró ningún comando.
+        if (_ejecutandoAccion || string.IsNullOrWhiteSpace(ej.DES_COMMANDSQL)
+            || string.IsNullOrWhiteSpace(ej.DES_ACCION) || Data?.Ficha is null) return;
         _ejecutandoAccion = true;
-        var dto = new EjecutarSentenciaDto { DES_SENTENCIA = ej.DES_COMMANDSQL };
+        var dto = new EjecutarSentenciaDto
+        {
+            NUM_NOTIFICACION = Data.Ficha.NUM_NOTIFICACION,
+            DES_ACCION       = ej.DES_ACCION
+        };
         var resp = await Http.PostAsJsonAsync(ApiRoutes.Entorno.EjecutarSentencias, dto);
         _ejecutandoAccion = false;
         if (resp.IsSuccessStatusCode)
