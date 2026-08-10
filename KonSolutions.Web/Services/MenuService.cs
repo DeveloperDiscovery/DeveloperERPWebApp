@@ -172,7 +172,9 @@ public class MenuService
                 _ = RefrescarBotonesEnSegundoPlanoAsync(cacheKey, tsKey);
             else
                 _ = MergeFlagsExigePasswordAsync(cached.Opciones);
-            _ = CargarLogosEnSegundoPlanoAsync();
+            // Los íconos YA NO se disparan desde acá — el llamador (MainLayout) los pide
+            // explícitamente recién cuando el menú terminó de pintarse (splash cerrado),
+            // así no compiten por red/CPU con el resto de la carga inicial.
             return;
         }
 
@@ -235,8 +237,9 @@ public class MenuService
 
             // Experimento: el primer render de tile/lateral/circular sale sin íconos (texto
             // ya alcanza para pintar el menú); los íconos llegan aparte y sin bloquear, vía
-            // CargarLogosEnSegundoPlanoAsync() abajo — igual que Entidades y Opciones de
-            // Aplicaciones. Se limpian aquí por si el SP TREEVIEW todavía los trae embebidos
+            // CargarLogosEnSegundoPlanoAsync() — que ahora dispara el llamador (MainLayout)
+            // recién cuando el menú de texto terminó de pintarse, no este método. Se limpian
+            // aquí por si el SP TREEVIEW todavía los trae embebidos
             // (si el SP en BD todavía hace SELECT de esas columnas, esto NO evita que viajen
             // por la red desde SQL Server hasta la API — solo evita que crucen a memoria del
             // browser/UI. Para que el primer render sea realmente liviano de punta a punta,
@@ -253,7 +256,7 @@ public class MenuService
             // aquí (una ronda HTTP por cada app distinta del menú) y retrasaba la aparición
             // del menú de tiles/lateral/circular tanto como el ícono mismo.
             _ = MergeFlagsExigePasswordAsync(data.Opciones);
-            _ = CargarLogosEnSegundoPlanoAsync();
+            // Íconos: idem caso de caché arriba — el llamador los pide después, no acá.
             try
             {
                 // Los íconos (base64) NO se persisten en localStorage — solo viven en memoria
@@ -303,13 +306,15 @@ public class MenuService
     }
 
     /// <summary>
-    /// Experimento: pide los íconos de TODO el árbol del rol activo (apps/opciones/botones)
-    /// en un endpoint aparte del texto (TreeviewLogos) — no bloquea el primer render de los
-    /// menús tile/lateral/circular, que ya se pintaron solo con texto. Al llegar, fusiona los
-    /// íconos en _botones/_opciones (en memoria, sin localStorage) y avisa via IconosActualizados
-    /// para que las pantallas de menú abiertas se repinten.
+    /// Pide los íconos de TODO el árbol del rol activo (apps/opciones/botones) en un endpoint
+    /// aparte del texto (TreeviewLogos). Público: lo dispara el llamador (MainLayout) recién
+    /// cuando el menú de texto ya terminó de cargar y pintarse — antes se disparaba solo,
+    /// en paralelo con el resto de la carga inicial (foto, config, favoritos), compitiendo
+    /// por red y CPU justo en el tramo más lento del login. Al llegar, fusiona los íconos en
+    /// _botones/_opciones (en memoria, sin localStorage) y avisa via IconosActualizados para
+    /// que las pantallas de menú abiertas se repinten.
     /// </summary>
-    private async Task CargarLogosEnSegundoPlanoAsync()
+    public async Task CargarLogosEnSegundoPlanoAsync()
     {
         if (string.IsNullOrWhiteSpace(_rolActivo)) return;
         var t0 = DateTime.Now;
