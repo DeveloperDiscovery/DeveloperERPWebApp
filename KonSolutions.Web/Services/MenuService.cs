@@ -322,6 +322,11 @@ public class MenuService
             var data = resp?.Data;
             if (data is null) return;
 
+            // Los tres primeros resultados vienen SIN la imagen: solo con un ICONO_ID que
+            // apunta a la lista Iconos, donde cada imagen distinta viaja una sola vez.
+            // Acá se deshace esa indirección y el resto del método sigue igual que antes.
+            ResolverIconos(data);
+
             var iconosApp = data.Aplicaciones.ToDictionary(a => a.COD_APLICACION, a => a.IMG_ICONO_APLICACION);
             var iconosOpcion = data.Opciones.ToDictionary(o => (o.COD_APLICACION, o.COD_OPCION_APLICACION), o => o.IMG_ICONO_OPCION);
             var iconosBoton = data.Botones
@@ -349,6 +354,38 @@ public class MenuService
         {
             Console.WriteLine($"[ERROR] CARGA DE ICONOS - MenuService.CargarLogosEnSegundoPlanoAsync falló (+{(DateTime.Now - t0).TotalMilliseconds:0}ms): {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Deshace la deduplicación de íconos: copia cada imagen de la lista Iconos al item
+    /// que la referencia por ICONO_ID.
+    ///
+    /// La misma imagen se comparte entre muchos items (el ícono de NUEVO lo usan 122
+    /// botones), y acá se asigna la MISMA referencia de string a todos — no se duplica
+    /// en memoria del navegador, solo se apunta al mismo objeto.
+    ///
+    /// Tolera respuestas del formato viejo: si Iconos viene vacío pero los items ya traen
+    /// IMG_ICONO*, no se toca nada y todo sigue funcionando (útil si se despliega el
+    /// frontend antes que el SP nuevo).
+    /// </summary>
+    private static void ResolverIconos(TreeviewLogosResult data)
+    {
+        if (data.Iconos.Count == 0) return;
+
+        var porId = new Dictionary<int, string?>(data.Iconos.Count);
+        foreach (var i in data.Iconos) porId[i.ICONO_ID] = i.IMG_ICONO;
+
+        foreach (var a in data.Aplicaciones)
+            if (a.IMG_ICONO_APLICACION is null && a.ICONO_ID is int idApp && porId.TryGetValue(idApp, out var imgApp))
+                a.IMG_ICONO_APLICACION = imgApp;
+
+        foreach (var o in data.Opciones)
+            if (o.IMG_ICONO_OPCION is null && o.ICONO_ID is int idOpc && porId.TryGetValue(idOpc, out var imgOpc))
+                o.IMG_ICONO_OPCION = imgOpc;
+
+        foreach (var b in data.Botones)
+            if (b.IMG_ICONO is null && b.ICONO_ID is int idBtn && porId.TryGetValue(idBtn, out var imgBtn))
+                b.IMG_ICONO = imgBtn;
     }
 
     /// <summary>

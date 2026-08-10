@@ -10,7 +10,9 @@ namespace KONSolutions.Web.Services;
 public interface IAuthService
 {
     Task<(bool ok, string? error)> LoginAsync(LoginRequest request);
-    Task LogoutAsync();
+    /// <param name="conservarCacheMenu">true solo para el logout de arranque de MainLayout
+    /// — ver el comentario completo en la implementación.</param>
+    Task LogoutAsync(bool conservarCacheMenu = false);
     Task<UsuarioSesion?> GetSesionAsync();
     Task<(bool ok, string? error)> ValidarPasswordAsync(string codUsuario, string password);
     /// <summary>Logo de la entidad de dependencia — solo en memoria (no persiste en
@@ -104,7 +106,22 @@ public class AuthService : IAuthService
         }
     }
 
-    public async Task LogoutAsync()
+    /// <param name="conservarCacheMenu">
+    /// true = no borra la caché del árbol de menú (botonesTreeview_*).
+    ///
+    /// Lo usa el logout de ARRANQUE de MainLayout, que corre en cada primera carga de la
+    /// aplicación para forzar el login. Ese logout borraba la caché justo antes de cada
+    /// login, así que el mecanismo stale-while-revalidate de MenuService (que pinta el
+    /// menú al instante desde localStorage y refresca en segundo plano) NUNCA llegaba a
+    /// usarse en el camino de login: todos los logins pagaban la carga completa y
+    /// bloqueante. Medido: 33,4 s de splash.
+    ///
+    /// Se puede conservar sin riesgo de mezclar datos entre usuarios porque la caché está
+    /// segmentada por rol (botonesTreeview_{rol}), tiene TTL de 60 min, y el logout REAL
+    /// (el del botón "Cerrar sesión", que llama sin este parámetro) la sigue limpiando —
+    /// igual que CambiarRolAsync y ForzarRecargaAsync.
+    /// </param>
+    public async Task LogoutAsync(bool conservarCacheMenu = false)
     {
         await _accessLog.LogEventoAsync("AUTH", "Logout", "LOGOUT", null);
         JwtMessageHandler.ClearToken();   // que no quede el token cacheado en memoria
@@ -116,13 +133,16 @@ public class AuthService : IAuthService
         // Limpiar TODA la caché del menú (botonesTreeview_*) — si no se limpia aquí,
         // el árbol de menú queda con datos viejos hasta que expire el TTL de 60 min,
         // aunque el usuario cierre sesión y vuelva a entrar (o entre otro usuario/rol).
-        try
+        if (!conservarCacheMenu)
         {
-            var claves = await _localStorage.KeysAsync();
-            foreach (var k in claves.Where(k => k.StartsWith("botonesTreeview_")).ToList())
-                await _localStorage.RemoveItemAsync(k);
+            try
+            {
+                var claves = await _localStorage.KeysAsync();
+                foreach (var k in claves.Where(k => k.StartsWith("botonesTreeview_")).ToList())
+                    await _localStorage.RemoveItemAsync(k);
+            }
+            catch { }
         }
-        catch { }
 
         _authProvider.NotifyUserLogout();
     }

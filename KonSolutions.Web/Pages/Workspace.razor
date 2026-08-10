@@ -288,10 +288,25 @@ else
         _ = CargarLogosAsync(codUsuario);
     }
 
-    /// <summary>Experimento: pide los íconos de los favoritos del Workspace en un endpoint
-    /// aparte del texto (SHOWALLLOGOS) — no bloquea el primer render, ya pintado solo con
+    /// <summary>Evita pedir los mismos íconos varias veces a la vez: CargarLogosAsync se
+    /// dispara desde los DOS caminos de Cargar() (con caché y sin caché), y Cargar() a su vez
+    /// corre desde OnInitializedAsync, desde RefrescarPorCambio y desde el refresco forzado.
+    /// Sin esta guarda se medían 4 llamadas idénticas de ~3 s cada una en un solo arranque,
+    /// compitiendo entre sí y con la carga del menú.</summary>
+    private Task? _logosEnVuelo;
+
+    /// <summary>Pide los íconos de los favoritos del Workspace en un endpoint aparte del
+    /// texto (SHOWALLLOGOS) — no bloquea el primer render, ya pintado solo con
     /// texto/colores. Al llegar, fusiona los íconos en _itemsActuales y reconstruye _grupos.</summary>
-    private async Task CargarLogosAsync(string codUsuario)
+    private Task CargarLogosAsync(string codUsuario)
+    {
+        // Si ya hay una carga en curso, engancharse a esa en vez de lanzar otra.
+        if (_logosEnVuelo is { IsCompleted: false }) return _logosEnVuelo;
+        _logosEnVuelo = CargarLogosCoreAsync(codUsuario);
+        return _logosEnVuelo;
+    }
+
+    private async Task CargarLogosCoreAsync(string codUsuario)
     {
         var t0 = DateTime.Now;
         Console.WriteLine($"[TRACE] {t0:HH:mm:ss.fff} — CARGA DE ICONOS - Workspace: inicio FavoritosWorkspaceLogos");

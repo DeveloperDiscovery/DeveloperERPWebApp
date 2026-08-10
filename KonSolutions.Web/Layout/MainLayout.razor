@@ -1626,11 +1626,17 @@
         {
             await ErrorLog.TraceAsync($"INICIO CARGA MENU — {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
 
-            // Solo en la primera carga de la sesión de navegador: fuerza login
+            // Solo en la primera carga de la sesión de navegador: fuerza login.
+            //
+            // conservarCacheMenu: este logout corría ANTES de cada login y borraba la caché
+            // del árbol de menú, así que el stale-while-revalidate de MenuService (pintar el
+            // menú al instante desde localStorage y refrescar en segundo plano) nunca se
+            // usaba en el login — todos pagaban la carga completa y bloqueante. Sigue
+            // limpiándose en el logout real (botón "Cerrar sesión") y al cambiar de rol.
             if (!_startupLogoutDone)
             {
                 _startupLogoutDone = true;
-                await AuthService.LogoutAsync();
+                await AuthService.LogoutAsync(conservarCacheMenu: true);
             }
 
             Etapa("Cargando configuración general...", 10);

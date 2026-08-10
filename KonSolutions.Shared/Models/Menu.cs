@@ -212,40 +212,64 @@ public class TreeviewResult
     public List<BotonTreeviewItemLite>  Botones      { get; set; } = new();
 }
 
-// ───── Resultado de GET .../treeview/logos (experimento: íconos aparte del texto) ─────
+// ───── Resultado de GET .../treeview/logos (íconos aparte del texto) ─────
+//
+// Los íconos vienen DEDUPLICADOS por contenido: cada item trae un ICONO_ID y las
+// imágenes viajan una sola vez en la lista Iconos. Medición que motivó el cambio
+// (rol SEG): 538 botones traían apenas 34 imágenes distintas — 13,66 MB, de los
+// cuales 12,27 MB eran la misma imagen repetida (el ícono de NUEVO, de 75 KB,
+// viajaba 122 veces). Sumando opciones y aplicaciones la respuesta pesaba
+// 19,55 MB binarios (~26 MB en JSON por el Base64) y tardaba 54,7 s en llegar —
+// y en WASM, que es mono-hilo, deserializar todo ese Base64 bloquea al usuario.
+//
+// IMG_ICONO* se conserva por compatibilidad; MenuService lo rellena resolviendo
+// ICONO_ID contra Iconos (ver ResolverIconos).
 
-/// <summary>1/3: ícono de cada aplicación del rol.</summary>
+/// <summary>1/4: ícono de cada aplicación del rol (referencia por ICONO_ID).</summary>
 public class AplicacionLogoItem
 {
     public string  COD_APLICACION       { get; set; } = string.Empty;
+    public int?    ICONO_ID             { get; set; }
     public string? IMG_ICONO_APLICACION { get; set; }  // base64
 }
 
-/// <summary>2/3: ícono de cada opción del rol.</summary>
+/// <summary>2/4: ícono de cada opción del rol (referencia por ICONO_ID).</summary>
 public class OpcionLogoItem
 {
     public string  COD_APLICACION              { get; set; } = string.Empty;
     public string? COD_OPCION_APLICACION_PADRE { get; set; }
     public string  COD_OPCION_APLICACION       { get; set; } = string.Empty;
+    public int?    ICONO_ID                    { get; set; }
     public string? IMG_ICONO_OPCION            { get; set; }  // base64
 }
 
-/// <summary>3/3: ícono propio de un botón específico — cuando venga NULL, el frontend
-/// cae al ícono calculado por nombre/flags (ver AccionesBotones.IconoEstandar).</summary>
+/// <summary>3/4: ícono propio de un botón específico (referencia por ICONO_ID) — cuando
+/// no tenga ninguno, el frontend cae al ícono calculado por nombre/flags
+/// (ver AccionesBotones.IconoEstandar).</summary>
 public class BotonLogoItem
 {
     public string  COD_APLICACION        { get; set; } = string.Empty;
     public string  COD_OPCION_APLICACION { get; set; } = string.Empty;
     public string? COD_BOTON_OPCION      { get; set; }
+    public int?    ICONO_ID              { get; set; }
     public string? IMG_ICONO             { get; set; }  // base64
 }
 
-/// <summary>Envoltorio de los 3 resultados del TREEVIEWLOGOS.</summary>
+/// <summary>4/4: cada imagen distinta del árbol, UNA sola vez. Acá está todo el ahorro
+/// de peso: ~738 blobs repetidos pasan a ~119 únicos.</summary>
+public class IconoItem
+{
+    public int     ICONO_ID  { get; set; }
+    public string? IMG_ICONO { get; set; }  // base64
+}
+
+/// <summary>Envoltorio de los 4 resultados del TREEVIEWLOGOS.</summary>
 public class TreeviewLogosResult
 {
     public List<AplicacionLogoItem> Aplicaciones { get; set; } = new();
     public List<OpcionLogoItem>     Opciones     { get; set; } = new();
     public List<BotonLogoItem>      Botones      { get; set; } = new();
+    public List<IconoItem>          Iconos       { get; set; } = new();
 }
 
 /// <summary>
