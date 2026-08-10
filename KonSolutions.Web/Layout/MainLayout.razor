@@ -1369,6 +1369,7 @@
         _opciones = MenuService.GetOpciones();
         _arbolMenu = MenuService.GetArbolMenu();
         await InvokeAsync(StateHasChanged);
+        _ = MenuService.CargarLogosEnSegundoPlanoAsync();
     }
 
     // Al cambiar de pestaña/pantalla activa, recalcular si el teclado virtual va habilitado.
@@ -1431,6 +1432,21 @@
         catch { }
         finally { _cargandoNotificaciones = false; }
         await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Dispara la primera carga de notificaciones ("proceso pendientes") y arranca
+    /// el polling de 20s — llamado desde OnInitializedAsync recién cuando _menuCargado pasa
+    /// a true, no antes (ver comentario en OnAfterRenderAsync).</summary>
+    private async Task IniciarNotificacionesAsync()
+    {
+        await CargarNotificacionesAsync();
+        // 20s (antes 2 min): con el polling más corto, las notificaciones nuevas
+        // se detectan casi al instante y disparan el toast estilo Outlook.
+        _notifTimer = new System.Threading.Timer(
+            async _ => await CargarNotificacionesAsync(),
+            null,
+            TimeSpan.FromSeconds(20),
+            TimeSpan.FromSeconds(20));
     }
 
     /// <summary>Tarjetas propias estilo "toast" de Outlook de escritorio (esquina inferior
@@ -1579,6 +1595,10 @@
         _cambiandoRol = false;
         await ErrorLog.TraceAsync($"CAMBIO DE ROL - Completado: [{codRolUsuario}] — {_rol} — {_opciones.Count} opciones cargadas");
         StateHasChanged();
+
+        // Íconos: recién ahora que el menú del nuevo rol ya se pintó (ver comentario en
+        // MenuService.CargarLogosEnSegundoPlanoAsync).
+        _ = MenuService.CargarLogosEnSegundoPlanoAsync();
     }
     private OpcionMenu?      _ctxOpcion;
     private bool             _ctxEsFavorito;
@@ -1626,11 +1646,17 @@
         {
             await ErrorLog.TraceAsync($"INICIO CARGA MENU — {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
 
-            // Solo en la primera carga de la sesión de navegador: fuerza login
+            // Solo en la primera carga de la sesión de navegador: fuerza login.
+            //
+            // conservarCacheMenu: este logout corría ANTES de cada login y borraba la caché
+            // del árbol de menú, así que el stale-while-revalidate de MenuService (pintar el
+            // menú al instante desde localStorage y refrescar en segundo plano) nunca se
+            // usaba en el login — todos pagaban la carga completa y bloqueante. Sigue
+            // limpiándose en el logout real (botón "Cerrar sesión") y al cambiar de rol.
             if (!_startupLogoutDone)
             {
                 _startupLogoutDone = true;
-                await AuthService.LogoutAsync();
+                await AuthService.LogoutAsync(conservarCacheMenu: true);
             }
 
             Etapa("Cargando configuración general...", 10);
@@ -1720,7 +1746,14 @@
             StateHasChanged();
             _ = OcultarPersianaAsync();
 
-            // Límites se cargan en segundo plano sin bloquear la UI
+            // Íconos del menú, notificaciones ("proceso pendientes") y límites: recién ahora,
+            // que el menú de texto ya terminó de cargarse y pintarse — no antes ni en paralelo.
+            // Los íconos y las notificaciones arrancaban antes solas (una desde MenuService, la
+            // otra desde OnAfterRenderAsync(firstRender), que Blazor dispara ni bien sale el
+            // primer render, en paralelo con toda esta carga) y competían por red/CPU justo en
+            // el tramo más lento del login.
+            _ = MenuService.CargarLogosEnSegundoPlanoAsync();
+            _ = IniciarNotificacionesAsync();
             _ = SafeRun(() => Limites.CargarAsync());
 
             TabService.AbrirWorkspace("Workspace", Icons.Material.Filled.Dashboard,
@@ -1812,14 +1845,11 @@
                 TimeSpan.FromMinutes(2),
                 TimeSpan.FromMinutes(2));
 
-            await CargarNotificacionesAsync();
-            // 20s (antes 2 min): con el polling más corto, las notificaciones nuevas
-            // se detectan casi al instante y disparan el toast estilo Outlook.
-            _notifTimer = new System.Threading.Timer(
-                async _ => await CargarNotificacionesAsync(),
-                null,
-                TimeSpan.FromSeconds(20),
-                TimeSpan.FromSeconds(20));
+            // Notificaciones ("proceso pendientes"): NO se arrancan acá. OnAfterRenderAsync
+            // (firstRender) dispara ni bien sale el PRIMER render, en paralelo con la carga
+            // del menú en OnInitializedAsync — arrancarlas acá las hacía competir por red/CPU
+            // con el splash. Las arranca OnInitializedAsync (IniciarNotificacionesAsync) recién
+            // cuando _menuCargado pasa a true.
         }
         if (firstRender && !_bloqueoRestaurado)
         {

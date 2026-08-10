@@ -172,7 +172,9 @@ public class MenuService
                 _ = RefrescarBotonesEnSegundoPlanoAsync(cacheKey, tsKey);
             else
                 _ = MergeFlagsExigePasswordAsync(cached.Opciones);
-            _ = CargarLogosEnSegundoPlanoAsync();
+            // Los íconos YA NO se disparan desde acá — el llamador (MainLayout) los pide
+            // explícitamente recién cuando el menú terminó de pintarse (splash cerrado),
+            // así no compiten por red/CPU con el resto de la carga inicial.
             return;
         }
 
@@ -235,8 +237,9 @@ public class MenuService
 
             // Experimento: el primer render de tile/lateral/circular sale sin íconos (texto
             // ya alcanza para pintar el menú); los íconos llegan aparte y sin bloquear, vía
-            // CargarLogosEnSegundoPlanoAsync() abajo — igual que Entidades y Opciones de
-            // Aplicaciones. Se limpian aquí por si el SP TREEVIEW todavía los trae embebidos
+            // CargarLogosEnSegundoPlanoAsync() — que ahora dispara el llamador (MainLayout)
+            // recién cuando el menú de texto terminó de pintarse, no este método. Se limpian
+            // aquí por si el SP TREEVIEW todavía los trae embebidos
             // (si el SP en BD todavía hace SELECT de esas columnas, esto NO evita que viajen
             // por la red desde SQL Server hasta la API — solo evita que crucen a memoria del
             // browser/UI. Para que el primer render sea realmente liviano de punta a punta,
@@ -253,7 +256,7 @@ public class MenuService
             // aquí (una ronda HTTP por cada app distinta del menú) y retrasaba la aparición
             // del menú de tiles/lateral/circular tanto como el ícono mismo.
             _ = MergeFlagsExigePasswordAsync(data.Opciones);
-            _ = CargarLogosEnSegundoPlanoAsync();
+            // Íconos: idem caso de caché arriba — el llamador los pide después, no acá.
             try
             {
                 // Los íconos (base64) NO se persisten en localStorage — solo viven en memoria
@@ -303,13 +306,15 @@ public class MenuService
     }
 
     /// <summary>
-    /// Experimento: pide los íconos de TODO el árbol del rol activo (apps/opciones/botones)
-    /// en un endpoint aparte del texto (TreeviewLogos) — no bloquea el primer render de los
-    /// menús tile/lateral/circular, que ya se pintaron solo con texto. Al llegar, fusiona los
-    /// íconos en _botones/_opciones (en memoria, sin localStorage) y avisa via IconosActualizados
-    /// para que las pantallas de menú abiertas se repinten.
+    /// Pide los íconos de TODO el árbol del rol activo (apps/opciones/botones) en un endpoint
+    /// aparte del texto (TreeviewLogos). Público: lo dispara el llamador (MainLayout) recién
+    /// cuando el menú de texto ya terminó de cargar y pintarse — antes se disparaba solo,
+    /// en paralelo con el resto de la carga inicial (foto, config, favoritos), compitiendo
+    /// por red y CPU justo en el tramo más lento del login. Al llegar, fusiona los íconos en
+    /// _botones/_opciones (en memoria, sin localStorage) y avisa via IconosActualizados para
+    /// que las pantallas de menú abiertas se repinten.
     /// </summary>
-    private async Task CargarLogosEnSegundoPlanoAsync()
+    public async Task CargarLogosEnSegundoPlanoAsync()
     {
         if (string.IsNullOrWhiteSpace(_rolActivo)) return;
         var t0 = DateTime.Now;
@@ -321,6 +326,11 @@ public class MenuService
             Console.WriteLine($"[TRACE] {DateTime.Now:HH:mm:ss.fff} — CARGA DE ICONOS - MenuService: fin HTTP TreeviewLogos (+{(DateTime.Now - t0).TotalMilliseconds:0}ms, apps={resp?.Data?.Aplicaciones.Count ?? 0}, opciones={resp?.Data?.Opciones.Count ?? 0}, botones={resp?.Data?.Botones.Count ?? 0})");
             var data = resp?.Data;
             if (data is null) return;
+
+            // Los tres primeros resultados vienen SIN la imagen: solo con un ICONO_ID que
+            // apunta a la lista Iconos, donde cada imagen distinta viaja una sola vez.
+            // Acá se deshace esa indirección y el resto del método sigue igual que antes.
+            ResolverIconos(data);
 
             var iconosApp = data.Aplicaciones.ToDictionary(a => a.COD_APLICACION, a => a.IMG_ICONO_APLICACION);
             var iconosOpcion = data.Opciones.ToDictionary(o => (o.COD_APLICACION, o.COD_OPCION_APLICACION), o => o.IMG_ICONO_OPCION);
@@ -349,6 +359,38 @@ public class MenuService
         {
             Console.WriteLine($"[ERROR] CARGA DE ICONOS - MenuService.CargarLogosEnSegundoPlanoAsync falló (+{(DateTime.Now - t0).TotalMilliseconds:0}ms): {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Deshace la deduplicación de íconos: copia cada imagen de la lista Iconos al item
+    /// que la referencia por ICONO_ID.
+    ///
+    /// La misma imagen se comparte entre muchos items (el ícono de NUEVO lo usan 122
+    /// botones), y acá se asigna la MISMA referencia de string a todos — no se duplica
+    /// en memoria del navegador, solo se apunta al mismo objeto.
+    ///
+    /// Tolera respuestas del formato viejo: si Iconos viene vacío pero los items ya traen
+    /// IMG_ICONO*, no se toca nada y todo sigue funcionando (útil si se despliega el
+    /// frontend antes que el SP nuevo).
+    /// </summary>
+    private static void ResolverIconos(TreeviewLogosResult data)
+    {
+        if (data.Iconos.Count == 0) return;
+
+        var porId = new Dictionary<int, string?>(data.Iconos.Count);
+        foreach (var i in data.Iconos) porId[i.ICONO_ID] = i.IMG_ICONO;
+
+        foreach (var a in data.Aplicaciones)
+            if (a.IMG_ICONO_APLICACION is null && a.ICONO_ID is int idApp && porId.TryGetValue(idApp, out var imgApp))
+                a.IMG_ICONO_APLICACION = imgApp;
+
+        foreach (var o in data.Opciones)
+            if (o.IMG_ICONO_OPCION is null && o.ICONO_ID is int idOpc && porId.TryGetValue(idOpc, out var imgOpc))
+                o.IMG_ICONO_OPCION = imgOpc;
+
+        foreach (var b in data.Botones)
+            if (b.IMG_ICONO is null && b.ICONO_ID is int idBtn && porId.TryGetValue(idBtn, out var imgBtn))
+                b.IMG_ICONO = imgBtn;
     }
 
     /// <summary>
