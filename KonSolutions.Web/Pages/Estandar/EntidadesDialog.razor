@@ -624,10 +624,13 @@
                 DAT_TIPO_MEDIO_CONTACTO = row.Dato,
                 COD_TIPO_USO = row.CodTipoUso
             };
-            // PROC_COMERCIAL_ENTIDADES_TIPOS_MEDIO_CONTACTO_INSERT es upsert — siempre POST.
-            // NUM_SECUENCIA se recalcula en el servidor al crear (0/null), así que tras un
-            // alta se recarga la grilla completa para obtener el correlativo asignado.
-            var resp = await Http.PostAsJsonAsync(ApiRoutes.Comercial.EntidadesTiposMedioContacto, dto);
+            // Alta y modificación son procedures separados: en alta, NUM_SECUENCIA se
+            // recalcula en el servidor (0/null), así que tras crear se recarga la grilla
+            // completa para obtener el correlativo asignado. En edición, la ruta lleva
+            // COD_ENTIDAD/NUM_SECUENCIA existentes.
+            var resp = row.EsNueva
+                ? await Http.PostAsJsonAsync(ApiRoutes.Comercial.EntidadesTiposMedioContacto, dto)
+                : await Http.PutAsJsonAsync($"{ApiRoutes.Comercial.EntidadesTiposMedioContacto}/{_model.COD_ENTIDAD}/{row.NumSecuencia}", dto);
             if (resp.IsSuccessStatusCode)
             {
                 Snackbar.Add("Guardado.", Severity.Success);

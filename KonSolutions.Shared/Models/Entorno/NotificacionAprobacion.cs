@@ -67,9 +67,11 @@ public class NotificacionAprobacionResult
     public List<NotificacionAprobacionEjecucion>    Ejecucion   { get; set; } = new();
 }
 
-// DTO para PROC_ENTORNO_EJECUTAR_SENTENCIAS — ejecuta el DES_COMMANDSQL de una acción
-// de notificación (ENTORNO.NOTIFICACIONES_EJECUCION).
+// DTO para PROC_ENTORNO_EJECUTAR_SENTENCIAS. Identifica la acción (notificación + nombre);
+// la API resuelve el DES_COMMANDSQL real del lado del servidor — este DTO ya no manda
+// texto SQL, para que el endpoint no pueda usarse para ejecutar sentencias arbitrarias.
 public class EjecutarSentenciaDto
 {
-    public string DES_SENTENCIA { get; set; } = string.Empty;
+    public int    NUM_NOTIFICACION { get; set; }
+    public string DES_ACCION       { get; set; } = string.Empty;
 }

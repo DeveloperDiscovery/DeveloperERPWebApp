@@ -67,7 +67,10 @@
             else await ErrorDialogHelper.MostrarMensajeAsync(msgd, DialogService, nameof(BancoColorDialog));
             return;
         }
-        var (ok, msg) = await Service.GuardarAsync(_model);
+        // Alta y modificación son procedures separados. COD_BANCO_COLOR queda en 0 en un
+        // alta nueva (el SP lo ignora y asigna el IDENTITY real); en edición, esNuevo:false
+        // hace que el servicio llame por PUT con el COD_BANCO_COLOR existente.
+        var (ok, msg) = await Service.GuardarAsync(_model, esNuevo: !_isEdit);
         _saving = false;
         if (ok) { Snackbar.Add(_isEdit ? "Color actualizado." : "Color creado.", Severity.Success); MudDialog.Close(DialogResult.Ok(true)); }
         else await ErrorDialogHelper.MostrarMensajeAsync(msg, DialogService, nameof(BancoColorDialog));
