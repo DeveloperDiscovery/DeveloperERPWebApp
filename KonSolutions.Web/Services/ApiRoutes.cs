@@ -414,6 +414,10 @@ public static class ApiRoutes
         public const string RequerimientosStockDetalle       = $"{Prefix}/logistica/requerimientos-stock-detalle";
         public const string RequerimientosStockDetallePorDoc = $"{RequerimientosStockDetalle}/por-cabecera";
 
+        // Cobertura de un requerimiento contra el stock del almacén (POST: el procedimiento
+        // reescribe la tabla de stock seleccionado). Devuelve líneas y stock en un solo objeto.
+        public const string MovimientosAlmacenRequerimientoDisponibles = $"{Prefix}/logistica/movimientos-almacen-requerimiento-stock-detalle-disponibles";
+
         public const string ReservasStock               = $"{Prefix}/logistica/reservas-stock";
         public const string ReservasStockCombobox       = $"{ReservasStock}/combobox";
         public const string ReservasStockDetalle        = $"{Prefix}/logistica/reservas-stock-detalle";
