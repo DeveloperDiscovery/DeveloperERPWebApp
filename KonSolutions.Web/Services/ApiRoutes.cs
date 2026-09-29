@@ -414,6 +414,12 @@ public static class ApiRoutes
         public const string RequerimientosStockDetalle       = $"{Prefix}/logistica/requerimientos-stock-detalle";
         public const string RequerimientosStockDetallePorDoc = $"{RequerimientosStockDetalle}/por-cabecera";
 
+        // Cobertura de UN requerimiento contra el stock del almacén, dentro de un movimiento.
+        // POST: el procedimiento reescribe el stock seleccionado del movimiento. Devuelve
+        // { Lineas, Stock } en un solo objeto. criterio: MAYOR | MENOR | LOTE.
+        public static string MovimientosAlmacenRequerimientosCobertura(int numMovimiento, int numRequerimiento, string criterio) =>
+            $"{Prefix}/logistica/movimientos-almacen/{numMovimiento}/requerimientos/disponibles/{numRequerimiento}/cobertura?criterio={Uri.EscapeDataString(criterio)}";
+
         public const string ReservasStock               = $"{Prefix}/logistica/reservas-stock";
         public const string ReservasStockCombobox       = $"{ReservasStock}/combobox";
         public const string ReservasStockDetalle        = $"{Prefix}/logistica/reservas-stock-detalle";

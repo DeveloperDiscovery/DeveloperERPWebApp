@@ -1,0 +1,240 @@
+@using System.Net.Http.Json
+@using Modelo = KONSolutions.Shared.Models.Logistica.CoberturaRequerimientoLinea
+@using KONSolutions.Shared.Models.Logistica
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject ErrorLogService ErrorLog
+@inject AccessLogService AccessLog
+
+@* Cobertura de un requerimiento de stock contra el almacén.
+   Grilla maestra: lo disponible por línea (primer resultado del SP).
+   Al pulsar CAN_ATENDER se despliega la grilla incrustada con el stock a despachar y su
+   reserva de origen (segundo resultado del SP, agrupado por NUM_SECUENCIA).
+   Componente reutilizable: se usa dentro de un movimiento de almacén, pasándole los dos números. *@
+<div class="d-flex align-center gap-3 mb-3 grid-header-compacto">
+    <div class="grid-header-titulo">
+        <MudText Typo="Typo.h6">Cobertura del requerimiento @NumRequerimientoStock</MudText>
+        <MudText Class="mono" Style="opacity:.5;font-size:.82rem;color:var(--subtitulo-color,#6b6358);">
+            Movimiento @NumMovimientoAlmacen · @_lineas.Count líneas
+        </MudText>
+    </div>
+    <div style="width:160px;">
+        <MudSelect T="string" Label="Criterio" Dense="true" Variant="Variant.Outlined"
+                   Value="@_criterio" ValueChanged="OnCriterioChanged">
+            <MudSelectItem T="string" Value="@("MAYOR")">MAYOR</MudSelectItem>
+            <MudSelectItem T="string" Value="@("MENOR")">MENOR</MudSelectItem>
+            <MudSelectItem T="string" Value="@("LOTE")">LOTE</MudSelectItem>
+        </MudSelect>
+    </div>
+    <div class="grid-header-divider"></div>
+    <GridRefreshButton OnRefresh="Cargar" />
+</div>
+
+<MudPaper Elevation="0" Style="border:1px solid var(--line);">
+    <div data-resizable-grid="coberturarequerimiento" style="position:relative;">
+    <MudDataGrid T="Modelo" Items="_lineas" Dense="true" Hover="true" Striped="true"
+                 Loading="_cargando" FixedHeader="true" Height="100%" RowsPerPage="50">
+        <Columns>
+            <HierarchyColumn T="Modelo" Width="48px" />
+            <TemplateColumn Sortable="false" Title="Requerimiento" Width="110px" CellStyle="text-align:right;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Requerimiento" /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.NUM_REQUERIMIENTO_STOCK</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Sec." Width="60px" CellStyle="text-align:right;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Sec." /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.NUM_SECUENCIA</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Código" Width="140px">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Código" /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.COD_PRODUCTO</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Producto" Width="280px">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Producto" /></HeaderTemplate>
+                <CellTemplate>@context.Item.DES_PRODUCTO</CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Cant. requerida" Width="130px" CellStyle="text-align:right;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Cant. requerida" /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.CAN_PRODUCTO.ToString("N3")</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="U.M." Width="70px" CellStyle="text-align:center;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="U.M." /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.COD_UNIDAD_MEDIDA</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Cant. req. sec." Width="130px" CellStyle="text-align:right;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Cant. req. sec." /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.CAN_PRODUCTO_SECUNDARIA?.ToString("N3")</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="U.M. sec." Width="80px" CellStyle="text-align:center;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="U.M. sec." /></HeaderTemplate>
+                <CellTemplate><span class="mono">@context.Item.COD_UNIDAD_MEDIDA_SECUNDARIA</span></CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="A atender" Width="140px" CellStyle="text-align:right;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="A atender" /></HeaderTemplate>
+                <CellTemplate>
+                    @{ var item = context.Item; var hayStock = DetalleDe(item).Any(); }
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                               Disabled="@(!hayStock)" Class="mono"
+                               EndIcon="@Icons.Material.Filled.UnfoldMore"
+                               OnClick="@(() => context.Actions.ToggleHierarchyVisibilityForItemAsync())">
+                        @item.CAN_ATENDER.ToString("N3")
+                    </MudButton>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Pendiente" Width="120px" CellStyle="text-align:right;">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Pendiente" /></HeaderTemplate>
+                <CellTemplate>
+                    <span class="mono" style="@(context.Item.CAN_PENDIENTE_ATENDER > 0 ? "color:var(--mud-palette-warning-darken);font-weight:600;" : "opacity:.5;")">
+                        @context.Item.CAN_PENDIENTE_ATENDER.ToString("N3")
+                    </span>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Sortable="false" Title="Cobertura" Width="140px">
+                <HeaderTemplate><EncabezadoOrdenable Texto="Cobertura" /></HeaderTemplate>
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@ColorCobertura(context.Item.DES_COBERTURA)">
+                        @context.Item.DES_COBERTURA
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <ChildRowContent Context="lineaRow">
+            @{ var linea = lineaRow.Item; var detalle = DetalleDe(linea); }
+            <MudPaper Elevation="0" Class="pa-2" Style="background:var(--mud-palette-background-grey);">
+                <MudText Class="mono px-1 mb-1" Style="font-size:.8rem;opacity:.7;">
+                    Stock a despachar · secuencia @linea.NUM_SECUENCIA · @linea.COD_PRODUCTO
+                </MudText>
+                <MudDataGrid T="CoberturaStockSeleccionado" Items="detalle" Dense="true" Hover="true" FixedHeader="true">
+                    <Columns>
+                        <TemplateColumn Sortable="false" Title="Lote" Width="180px">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="Lote" /></HeaderTemplate>
+                            <CellTemplate>
+                                <span class="mono">@context.Item.DES_LOTE_CONTROL</span>
+                                @if (context.Item.FLG_RESERVA)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" Class="ml-2">RESERVA</MudChip>
+                                }
+                            </CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="Proceso" Width="160px">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="Proceso" /></HeaderTemplate>
+                            <CellTemplate>@context.Item.DES_PROCESO</CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="Orden prod." Width="110px" CellStyle="text-align:right;">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="Orden prod." /></HeaderTemplate>
+                            <CellTemplate><span class="mono">@context.Item.NUM_ORDEN_PRODUCCION</span></CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="Ítem" Width="70px" CellStyle="text-align:right;">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="Ítem" /></HeaderTemplate>
+                            <CellTemplate><span class="mono">@context.Item.NUM_ORDEN_PRODUCCION_ITEM</span></CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="Unidad" Width="80px" CellStyle="text-align:right;">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="Unidad" /></HeaderTemplate>
+                            <CellTemplate><span class="mono">@context.Item.NUM_ORDEN_PRODUCCION_UNIDAD</span></CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="A despachar" Width="130px" CellStyle="text-align:right;">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="A despachar" /></HeaderTemplate>
+                            <CellTemplate><span class="mono">@context.Item.CAN_PRODUCTO.ToString("N3")</span></CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="A despachar sec." Width="140px" CellStyle="text-align:right;">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="A despachar sec." /></HeaderTemplate>
+                            <CellTemplate><span class="mono">@context.Item.CAN_PRODUCTO_SECUNDARIA?.ToString("N3")</span></CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="Reserva" Width="100px" CellStyle="text-align:right;">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="Reserva" /></HeaderTemplate>
+                            <CellTemplate><span class="mono">@context.Item.NUM_RESERVA_STOCK</span></CellTemplate>
+                        </TemplateColumn>
+                        <TemplateColumn Sortable="false" Title="Sec. reserva" Width="110px" CellStyle="text-align:right;">
+                            <HeaderTemplate><EncabezadoOrdenable Texto="Sec. reserva" /></HeaderTemplate>
+                            <CellTemplate><span class="mono">@context.Item.NUM_SECUENCIA_RESERVA</span></CellTemplate>
+                        </TemplateColumn>
+                    </Columns>
+                    <NoRecordsContent><MudText Class="pa-3 mono" Style="opacity:.5;font-size:.8rem;">Sin stock seleccionado para esta línea.</MudText></NoRecordsContent>
+                </MudDataGrid>
+            </MudPaper>
+        </ChildRowContent>
+        <NoRecordsContent>
+            <MudText Class="pa-6 mono" Style="opacity:.5;">Sin líneas en el requerimiento.</MudText>
+        </NoRecordsContent>
+    </MudDataGrid>
+    <div class="grid-resize-handle"></div>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter] public int NumMovimientoAlmacen  { get; set; }
+    [Parameter] public int NumRequerimientoStock { get; set; }
+    /// <summary>MAYOR | MENOR | LOTE. Define de qué stock se toma primero.</summary>
+    [Parameter] public string Criterio { get; set; } = "MAYOR";
+
+    private List<Modelo> _lineas = new();
+    private ILookup<int, CoberturaStockSeleccionado> _stockPorSecuencia =
+        Enumerable.Empty<CoberturaStockSeleccionado>().ToLookup(x => x.NUM_SECUENCIA);
+    private string _criterio = "MAYOR";
+    private bool _cargando;
+    private (int Mov, int Req)? _claveCargada;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var clave = (NumMovimientoAlmacen, NumRequerimientoStock);
+        if (_claveCargada == clave) return;
+        _claveCargada = clave;
+        _criterio = string.IsNullOrWhiteSpace(Criterio) ? "MAYOR" : Criterio;
+        await Cargar();
+    }
+
+    private async Task OnCriterioChanged(string? v)
+    {
+        _criterio = v ?? "MAYOR";
+        await AccessLog.LogEventoAsync("LOGISTICA", nameof(CoberturaRequerimiento), "CambiarCriterio",
+            new { NumMovimientoAlmacen, NumRequerimientoStock, Criterio = _criterio });
+        await Cargar();
+    }
+
+    private IEnumerable<CoberturaStockSeleccionado> DetalleDe(Modelo linea) =>
+        _stockPorSecuencia[linea.NUM_SECUENCIA].OrderBy(x => x.NUM_ORDEN_SECUENCIA);
+
+    private static Color ColorCobertura(string? cobertura) => cobertura switch
+    {
+        "COMPLETO" => Color.Success,
+        "ASIGNADA" => Color.Info,
+        "PARCIAL"  => Color.Warning,
+        _          => Color.Default   // POR REVISAR
+    };
+
+    private async Task Cargar()
+    {
+        if (NumMovimientoAlmacen <= 0 || NumRequerimientoStock <= 0)
+        {
+            _lineas = new();
+            _stockPorSecuencia = Enumerable.Empty<CoberturaStockSeleccionado>().ToLookup(x => x.NUM_SECUENCIA);
+            return;
+        }
+        _cargando = true;
+        try
+        {
+            // POST sin cuerpo: movimiento, requerimiento y criterio viajan en la ruta.
+            var resp = await Http.PostAsync(
+                ApiRoutes.Logistica.MovimientosAlmacenRequerimientosCobertura(NumMovimientoAlmacen, NumRequerimientoStock, _criterio), null);
+            var r = await resp.Content.ReadFromJsonAsync<ApiResponse<CoberturaRequerimientoResultado>>();
+            if (!resp.IsSuccessStatusCode || r is null || !r.Success || r.Data is null)
+            {
+                Snackbar.Add(r?.Message is { Length: > 0 } m ? m : "No se pudo calcular la cobertura del requerimiento.", Severity.Warning);
+                _lineas = new();
+                return;
+            }
+            _lineas = r.Data.Lineas.OrderBy(x => x.NUM_SECUENCIA).ToList();
+            _stockPorSecuencia = r.Data.Stock.ToLookup(x => x.NUM_SECUENCIA);
+        }
+        catch (Exception ex)
+        {
+            await ErrorLog.LogAsync(ex, nameof(CoberturaRequerimiento), nameof(Cargar),
+                $"mov={NumMovimientoAlmacen}, req={NumRequerimientoStock}, criterio={_criterio}");
+            Snackbar.Add("No se pudo calcular la cobertura. Ver el log de errores.", Severity.Error);
+            _lineas = new();
+        }
+        finally
+        {
+            _cargando = false;
+        }
+    }
+}
