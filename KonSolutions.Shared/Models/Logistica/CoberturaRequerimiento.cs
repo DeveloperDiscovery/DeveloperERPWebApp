@@ -1,17 +1,7 @@
 namespace KONSolutions.Shared.Models.Logistica;
 
-/// <summary>Parámetros de PROC_MOVIMIENTOS_ALMACEN_REQUERIMIENTO_STOCK_DETALLE_DISPONIBLES.
-/// El procedimiento reescribe LOGISTICA.MOVIMIENTOS_ALMACEN_REQUERIMIENTO_STOCK_DETALLE_SELECCIONADO,
-/// por eso la API lo expone por POST.</summary>
-public class CoberturaRequerimientoRequest
-{
-    public int NUM_MOVIMIENTO_ALMACEN { get; set; }
-    public int NUM_REQUERIMIENTO_STOCK { get; set; }
-    /// <summary>MAYOR | MENOR | LOTE</summary>
-    public string COD_CRITERIO { get; set; } = "MAYOR";
-}
-
-/// <summary>Los dos resultados del procedimiento en un solo objeto.</summary>
+/// <summary>Los dos resultados de PROC_MOVIMIENTOS_ALMACEN_REQUERIMIENTO_STOCK_DETALLE_DISPONIBLES
+/// en un solo objeto. Espejo de MovimientoAlmacenRequerimientoCobertura de la API.</summary>
 public class CoberturaRequerimientoResultado
 {
     public List<CoberturaRequerimientoLinea> Lineas { get; set; } = new();

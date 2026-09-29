@@ -32,7 +32,7 @@
 
 <MudPaper Elevation="0" Style="border:1px solid var(--line);">
     <div data-resizable-grid="coberturarequerimiento" style="position:relative;">
-    <MudDataGrid T="Modelo" @ref="_grid" Items="_lineas" Dense="true" Hover="true" Striped="true"
+    <MudDataGrid T="Modelo" Items="_lineas" Dense="true" Hover="true" Striped="true"
                  Loading="_cargando" FixedHeader="true" Height="100%" RowsPerPage="50">
         <Columns>
             <HierarchyColumn T="Modelo" Width="48px" />
@@ -75,7 +75,7 @@
                     <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
                                Disabled="@(!hayStock)" Class="mono"
                                EndIcon="@Icons.Material.Filled.UnfoldMore"
-                               OnClick="@(() => AlternarDetalle(item))">
+                               OnClick="@(() => context.Actions.ToggleHierarchyVisibilityForItemAsync())">
                         @item.CAN_ATENDER.ToString("N3")
                     </MudButton>
                 </CellTemplate>
@@ -166,7 +166,6 @@
     /// <summary>MAYOR | MENOR | LOTE. Define de qué stock se toma primero.</summary>
     [Parameter] public string Criterio { get; set; } = "MAYOR";
 
-    private MudDataGrid<Modelo>? _grid;
     private List<Modelo> _lineas = new();
     private ILookup<int, CoberturaStockSeleccionado> _stockPorSecuencia =
         Enumerable.Empty<CoberturaStockSeleccionado>().ToLookup(x => x.NUM_SECUENCIA);
@@ -194,9 +193,6 @@
     private IEnumerable<CoberturaStockSeleccionado> DetalleDe(Modelo linea) =>
         _stockPorSecuencia[linea.NUM_SECUENCIA].OrderBy(x => x.NUM_ORDEN_SECUENCIA);
 
-    private Task AlternarDetalle(Modelo linea) =>
-        _grid is null ? Task.CompletedTask : _grid.ToggleHierarchyVisibilityAsync(linea);
-
     private static Color ColorCobertura(string? cobertura) => cobertura switch
     {
         "COMPLETO" => Color.Success,
@@ -216,13 +212,9 @@
         _cargando = true;
         try
         {
-            var req = new CoberturaRequerimientoRequest
-            {
-                NUM_MOVIMIENTO_ALMACEN  = NumMovimientoAlmacen,
-                NUM_REQUERIMIENTO_STOCK = NumRequerimientoStock,
-                COD_CRITERIO            = _criterio
-            };
-            var resp = await Http.PostAsJsonAsync(ApiRoutes.Logistica.MovimientosAlmacenRequerimientoDisponibles, req);
+            // POST sin cuerpo: movimiento, requerimiento y criterio viajan en la ruta.
+            var resp = await Http.PostAsync(
+                ApiRoutes.Logistica.MovimientosAlmacenRequerimientosCobertura(NumMovimientoAlmacen, NumRequerimientoStock, _criterio), null);
             var r = await resp.Content.ReadFromJsonAsync<ApiResponse<CoberturaRequerimientoResultado>>();
             if (!resp.IsSuccessStatusCode || r is null || !r.Success || r.Data is null)
             {
